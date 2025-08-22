@@ -69,7 +69,8 @@ def marl_agent_wrapper():
     args.state_shape = env_info["state_shape"]
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
-    print("是否加载模型（测试必须）：", args.load_model, "是否打印中间变量：", args.havelook, "是否训练：",args.learn)
+    print("Load model (test only）：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
+
     runner = Runner(env, args)
 
     if args.learn:
@@ -95,14 +96,14 @@ def random_agent_wrapper():
         while not is_terminal:
             # print(1)
             actions = []
-            # 每次只调运非空闲的agent
+            # 每次只调运非空闲的agent    # only dispatch non-busy agents
             temp_not_idle_agents = []
             for m in range(len(env.sites)):
                 if s[m] != 9:
                     temp_not_idle_agents.append(s[m])
 
             for i in range(len(env.planes)):
-                if i in temp_not_idle_agents:  # 证明i正忙着
+                if i in temp_not_idle_agents:  # 证明i正忙着 # agent i is currently busy
                     actions.append(18)
                 else:
                     # print(i)
