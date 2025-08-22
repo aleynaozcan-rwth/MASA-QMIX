@@ -1,5 +1,5 @@
 '''
-里面的plane就是job，战位（站位）就是site
+In this code, "plane" stands for a job, and "site" stands for a station.
 '''
 from utils.site import Sites
 from utils.job import Jobs
@@ -11,12 +11,12 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import math
-# 整个环境类
+# # Whole environment class
 class ScheduleEnv(gym.Env):
     environment_name = "Boat Schedule"
 
     def __init__(self):
-        # 类变量的声明
+        #  # Declare member variables
         self.sites = []
         self.jobs = []
         self.task = []
@@ -25,23 +25,32 @@ class ScheduleEnv(gym.Env):
         self.state = [[]]
         self.done = False
         self.state_left_time = []
-        self.episode_time_slice = []  # 每个step消耗时间组成的episode的时间列表
-        self.plane_speed = 0  # 运行速度
-        self.initialize()  # 初始化参数
-        # 参与dqn决策的plane不需要等待动作，一定会选择一个合适的动作
-        # 0-17 代表下一步前往的战位， 18代表由于资源冲突需要等待，19代表处于正忙（加工）动作，20代表已经完成了动作，19、20均不参与训练
-        self.action_space = spaces.Discrete(len(self.sites)+3)  # 此时已经初始化完成了，多一维表示什么也不做
+        self.episode_time_slice = []  # 表 # list of time consumed at each step within the episode
+        self.plane_speed = 0  # 度  # movement/processing speed
+        self.initialize()  #  # initialize all environment parameters
+
+        # Planes controlled by DQN do not need an explicit "wait" action; they will choose a feasible action.
+        # Action meaning:
+        #   0 .. len(self.sites)-1 : go to that site next
+        #   len(self.sites)        : wait (due to resource conflict / no feasible assignment now)
+        #   len(self.sites)+1      : busy (currently processing)   -> not used for training
+        #   len(self.sites)+2      : finished (no jobs remaining)  -> not used for training
+
+        
+         
+        #“0–17 indicate the site to go to next; 18 means wait due to a resource conflict; 19 means currently busy (processing); 20 means finished. Actions 19 and 20 are not used for training.”
+        self.action_space = spaces.Discrete(len(self.sites)+3)  # +3 for [wait, busy, finished]
         self.id = "Boat Schedule"
-        # 下面两个参数还不知道什么意思
+        #   # Legacy/compat placeholders (not critical for training)
         self.reward_threshold = -1000
-        self.trials = 50  # 这个就类似于steps
+        self.trials = 50  # # roughly analogous to steps in older experiments
 
-        self.job_record_for_gant = []  # 用于存储调度中间过程四元组
+        self.job_record_for_gant = []  # # store (timestamp, job_id, site_id, plane_id) tuples for Gantt visualization
 
-        self.sites_state_global = None  # this para is utilized to indicate the current idle sites and their processing jobs
+        self.sites_state_global = None  # this para is utilized to indicate the current idle sites and their processing jobs # indicates idle sites (-1) or the job-id currently being processed at each site
 
-        # 一个全局状态，一个观测
-        self.state4marl = None  # 维护全局state的变量
+        #  # One global state and per-agent observations
+        self.state4marl = None  # # global state maintained for MARL
         self.obs4marl = None
 
     def initialize(self):
@@ -52,22 +61,22 @@ class ScheduleEnv(gym.Env):
         self.planes_obj = Planes()
         self.sites = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
-        # 任务，里面是任务的序列
+        #   # Task: sequence of jobs
         self.task = task_obj.simple_task_object
 
         self.planes = self.planes_obj.planes_object_list
 
         self.state = [[9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]] for i in range(len(self.sites))]
 
-        self.sites_state_global = [-1 for i in range(len(self.sites))] # -1代表没有被安排保障任务
+        self.sites_state_global = [-1 for i in range(len(self.sites))] # # -1 means no support task assigned
 
-        self.job_record_for_gant = []  # 用于存储调度中间过程四元组
+        self.job_record_for_gant = []  # # store (timestamp, job_id, site_id, plane_id) tuples during scheduling
 
 
         self.done = False
         self.state_left_time = np.array([0 for i in range(len(self.sites))])
         self.episode_time_slice = []
-        self.plane_speed = self.planes_obj.plane_speed  # 运行速度
+        self.plane_speed = self.planes_obj.plane_speed  # # running speed
         # print("the environment is initialized now !!")
         self.obs4marl = [[] for i in range(len(self.planes))]
         self.current_finishing_jobs = 0
@@ -78,7 +87,7 @@ class ScheduleEnv(gym.Env):
         return [seed]
 
     def reset(self):
-        self.initialize()  # 初始化参数
+        self.initialize()  # # re-initialize all parameters
         info = {
             "sites": [[self.sites[i].absolute_position,
                        self.state[i][0],
@@ -119,11 +128,13 @@ class ScheduleEnv(gym.Env):
                 if self.planes[i].left_job == []:
                     temp_obs.append(0)
                 else:
+                      # idle site and site can process plane's next job -> plane can go there next
                     if eve_1 == 9 and self.planes[i].left_job[0].index_id in self.sites[l].resource_ids_list:
 
                         temp_obs.append(util.count_path_on_road(self.planes[i].position, self.sites[l].absolute_position, self.plane_speed)/40)  # 代表处于空闲状态,下一步飞机可以去
                     else:
-                        temp_obs.append(0)  # 否则处于加工状态，下一步飞机不能去
+                        temp_obs.append(0)  # # otherwise the plane is busy; cannot go next step
+            # per-agent obs = distances/eligibility + [next_job_id, remaining_jobs, time_span]           
             self.obs4marl[i] = temp_obs + [eve[0], eve[2], eve[1]]
 
         current_working_plane_ids = []
@@ -136,7 +147,8 @@ class ScheduleEnv(gym.Env):
         else:
             for k in range(len(self.obs4marl)):
                 if k in current_working_plane_ids:
-                    # 正忙状态下的观测也进行处理为除了最后三位都是0
+                    #  # when busy, zero all features except the last two here; after appending busy_flag below,
+                    # effectively only the last three features remain non-zero
                     self.obs4marl[k] = [0 if kk < len(self.obs4marl[k])-2 else self.obs4marl[k][kk] for kk in range(len(self.obs4marl[k]))]
                     self.obs4marl[k].append(1)
                 else:
@@ -166,7 +178,7 @@ class ScheduleEnv(gym.Env):
                     # assert False
         return res
 
-    # 进行动作的替换
+    # Replace certain action codes (treat BUSY/FINISHED as WAIT)
     def action_replace(self, action):
         res = []
         real_conflict_num = 0
@@ -182,8 +194,8 @@ class ScheduleEnv(gym.Env):
 
     def step(self, action):
         self.step_count += 1
-        # print("开始交互了")
-        action, real_conflict_num = self.action_replace(action) # 将action中的20换成18
+        ## print("start interaction")
+        action, real_conflict_num = self.action_replace(action) #  # replace 19/20 with 18
         # if real_conflict_num != 0:
         #     print(real_conflict_num)
         count_break_rules = 0
@@ -197,9 +209,9 @@ class ScheduleEnv(gym.Env):
         for i, site_id in enumerate(action):
             if site_id == len(self.sites):
                 pass
-            else:  # 安排保障任务
-                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:  # 如果选择的战位有需要的保障资源
-                    # time_on_road为0代表其留在了原地加工
+            else:  # assign a support/scheduling task
+                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:   # if the chosen site contains the required resource for the plane's next job
+                    # # time_on_road == 0 means the plane stays and processes in place
                     time_on_road = util.count_path_on_road(self.planes[i].position,
                                                            self.sites[site_id].absolute_position.tolist(), self.plane_speed)
 
@@ -211,14 +223,14 @@ class ScheduleEnv(gym.Env):
                     temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
 
                     time_span_increase[site_id] = temp_time + time_on_road
-                    # self.state[site_id][0] = i  # 表示这个站位已经被占据了
+                    # self.state[site_id][0] = i  # mark the site as occupied
                     count_for_reward += 1
-                    # 为构造每个飞机的reward存储maxtime，方便归一化
+                    # store max travel time per plane for reward normalization
                     max_time_on_roads[i] = time_on_road
 
 
                 else:
-                    raise Exception("不合理的动作没有mask", self.sites_state_global, i, site_id,action,self.planes[i].left_job[0].index_id,
+                    raise Exception("Invalid action was not masked", self.sites_state_global, i, site_id,action,self.planes[i].left_job[0].index_id,
                                     self.sites[site_id].resource_ids_list, self.state)
 
         real_did = 0
@@ -227,10 +239,10 @@ class ScheduleEnv(gym.Env):
                 real_did += 1
 
         for i, site_id in enumerate(action):
-            if site_id == len(self.sites):  # 代表这个飞机不安排保障任务
+            if site_id == len(self.sites):  # # this plane is not scheduled this step
 
-                rewards[i] = - 30  # 只传入因为资源冲突而等待的地方
-            else:  # 安排保障任务
+                rewards[i] = - 30  #  # penalty for waiting due to resource conflict
+            else:  # scheduled
                 if rewards[i] == 0:
                     # rewards[i] = -(max_time_on_roads[i]+0.1)/(max(max_time_on_roads)+0.1)-real_conflict_num
                     rewards[i] = -(max_time_on_roads[i]+0.1)/(max(max_time_on_roads)+0.1)
@@ -238,26 +250,26 @@ class ScheduleEnv(gym.Env):
                 else:
                     pass
 
-        # 开始更新当前的状态剩余时间
+        # Update remaining processing time
         self.state_left_time = self.state_left_time + time_span_increase
 
         min_time = util.min_but_zero(self.state_left_time)
-        # print("haoshi：", min_time)
-        self.episode_time_slice.append(min_time)  # 这个step消耗的时间
-        self.state_left_time = util.advance_by_min_time(min_time, self.state_left_time)  # step推进
+        # print("time consumed:", min_time)
+        self.episode_time_slice.append(min_time)  #  # time consumed in this step
+        self.state_left_time = util.advance_by_min_time(min_time, self.state_left_time)  # # advance the step
 
-        # 更新状态,主要是检查哪些状态用完了
+        #  # Update site states; mainly check which ones have finished
         # state transition 2
         for i, eve_time in enumerate(self.state_left_time):
             if eve_time == 0:
-                self.sites_state_global[i] = -1  # 更新做完的sites
+                self.sites_state_global[i] = -1  #  # mark finished sites as idle
                 self.sites_obj.update_site_resources(self.sites_state_global)
                 self.state[i][0] = 9
                 self.state[i][1] = [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]
             else:
-                assert self.state[i][0] != 9  # 不为9的一定被占据了
+                assert self.state[i][0] != 9  # # with remaining time, the site must be occupied
 
-        # 判断当前episode是否完成了
+        #  # Check whether the episode is finished
         is_all_done = [-1 for eve in self.planes]
         for i, plane in enumerate(self.planes):
             if len(plane.left_job) == 0:
@@ -307,33 +319,33 @@ class ScheduleEnv(gym.Env):
                                    }
 
     def get_avail_agent_actions(self, agent_id):
-        # 检查飞机是否处于正忙状态
+        #  # Check whether the plane is currently busy
         for eve in self.state:
-            if agent_id == eve[0]:  # 代表此飞机还在处于加工状态
+            if agent_id == eve[0]:  # # this plane is still processing
                 # return [0 for i in range(18)] + [1]  # 1
                 return [0 for i in range(18)] + [0, 1, 0]
-        # 如果飞机准备进行下一步操作则执行下部分程序
+        # # only BUSY is available
         res = [0 for eve in self.sites_state_global]
         for i, eve in enumerate(self.sites_state_global):
             if eve == -1:
                 if len(self.planes[agent_id].left_job) != 0:
-                    # 判断该飞机下一个要完成的任务是否被包含在了资源列表中
+                    #  # Check whether the plane's next job type is supported by this site
                     if self.planes[agent_id].left_job[0].index_id in self.sites[i].resource_ids_list:
                         res[i] = 1
-                else:  # 证明此时的这个飞机已经完成了所有的调度计划
+                else:  # # this plane has finished all its scheduled jobs
                     # return [0 for i in range(18)] + [1]  # 0
-                    return [0 for i in range(18)] + [0, 0, 1]
-        return res + [1, 0, 0]
+                    return [0 for i in range(18)] + [0, 0, 1]   # only FINISHED is available
+        return res + [1, 0, 0]   # add WAIT
 
     # state transition 1
     def has_chosen_action(self, action_id, agent_id):
         assert self.planes[agent_id].left_job != []
         # print(action_id, agent_id)
-        self.sites_state_global[action_id] = self.planes[agent_id].left_job[0].index_id  # 更新战位状态信息
-        # 更新总资源列表的状态-这块不能马虎，注意这里是在选择合理的动作而不是已经做了动作
+        self.sites_state_global[action_id] = self.planes[agent_id].left_job[0].index_id  # # update site status info
+        #  # Update the global resource list state — careful: this is choosing a feasible action, not executing it yet
         self.sites_obj.update_site_resources(self.sites_state_global)
-        self.state[action_id][0] = agent_id  # 表示这个站位已经被占据了,更新状态
-        self.state[action_id][1] = [1 if j in self.sites[action_id].resource_ids_list else 0 for j in range(9)]  # 更新资源抢占状态
+        self.state[action_id][0] = agent_id  # # mark this site as occupied
+        self.state[action_id][1] = [1 if j in self.sites[action_id].resource_ids_list else 0 for j in range(9)]  # # update resource occupancy
 
 
     def save_env_info(self, job_transition):
@@ -353,9 +365,10 @@ class ScheduleEnv(gym.Env):
 
     def get_env_info(self):
         return {
-            "n_actions": len(self.sites) + 3,  # 还是得把空闲动作加上去
+            "n_actions": len(self.sites) + 3,  # include the idle/wait action
             "n_agents": len(self.planes),
             "state_shape": len(self.get_state()),
             "obs_shape": len(self.get_obs()[0]),
-            "episode_limit": 80  # 注意，如果在80的长度内无法完成调度工作的话程序会报错，但是设置太大后面全是paddings
+            "episode_limit": 80   # Note: if the schedule can’t finish within 80 steps the program will error;
+                                   # setting it too large will lead to paddings later
         }
