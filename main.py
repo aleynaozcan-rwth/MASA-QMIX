@@ -13,11 +13,14 @@ from utils.PDRs.shortestDistence import SDrules
 
 np.random.seed(2)
 
-# game_scores, rolling_scores的区别，一个是整个episode的reward
-# ，一个是一个trial的rewad，两个指标都不参与训练，trial是人为指定的一个固定长度的n个step的过程
 
+# Difference between game_scores and rolling_scores:
+# - game_scores: reward over the entire episode
+# - rolling_scores: reward over a fixed-length "trial" (n steps)
+# Neither of these is used for training; a "trial" is a user-defined window.
 
-# 强化学习决策函数，带入来自DRL的强化学习agent
+# RL decision wrapper that wires a DRL multi-agent into the environment
+
 def marl_agent_wrapper():
 
     with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "w") as f:
@@ -43,10 +46,10 @@ def marl_agent_wrapper():
     #
     # with open("my_data_and_graph/marl.time_reward.txt", "w") as f:
     #     pass
-    # for i in range(8):  # 因为一共8种marl算法
+    # for i in range(8):  #  # because there are 8 MARL algorithms in total
     args = get_common_args()
 
-    if args.alg.find('coma') > -1:  # 判断模型的参数
+    if args.alg.find('coma') > -1:  # choose algorithm-specific hyperparameters
         args = get_coma_args(args)
     elif args.alg.find('central_v') > -1:
         args = get_centralv_args(args)
@@ -59,7 +62,7 @@ def marl_agent_wrapper():
     if args.alg.find('g2anet') > -1:
         args = get_g2anet_args(args)
 
-    # 加载调度环境
+    # # Load the scheduling environment
     env = ScheduleEnv()
 
     env.reset()
@@ -69,18 +72,18 @@ def marl_agent_wrapper():
     args.state_shape = env_info["state_shape"]
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
-    print("Load model (test only）：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
+    print("Load model (test only：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
 
     runner = Runner(env, args)
 
     if args.learn:
-        runner.run(0)  # 原来跑多种算法，run传入的是算法的id
+        runner.run(0)  # # originally supported multiple algos; run() took an algorithm id
     else:
         _, reward = runner.evaluate()
         print('The ave_reward of {} is  {}'.format(args.alg, reward))
 
 
-# 随机决策函数，用于测试环境
+# # Random decision baseline for environment testing
 def random_agent_wrapper():
 
     episodes = 50
@@ -96,14 +99,14 @@ def random_agent_wrapper():
         while not is_terminal:
             # print(1)
             actions = []
-            # 每次只调运非空闲的agent    # only dispatch non-busy agents
+            # # Only dispatch agents that are not currently busy   
             temp_not_idle_agents = []
             for m in range(len(env.sites)):
                 if s[m] != 9:
                     temp_not_idle_agents.append(s[m])
 
             for i in range(len(env.planes)):
-                if i in temp_not_idle_agents:  # 证明i正忙着 # agent i is currently busy
+                if i in temp_not_idle_agents:  # # agent i is currently busy
                     actions.append(18)
                 else:
                     # print(i)
@@ -129,7 +132,7 @@ def random_agent_wrapper():
         print(env.job_record_for_gant)
         print(dict["time"], "-----------------------------------")
     print(sum(EATs)/len(EATs))
-    # 存储中间结果
+    # # Store intermediate results
     with open("./my_data_and_graph/pickles/process.pk", "wb") as f:
         pickle.dump(schedule_processes, f)
 
@@ -159,8 +162,8 @@ def SDrules_agent_wrapper():
                 actions.append(action)
                 if action < 18:
                     env.has_chosen_action(action, agent_id)
-            # print(actions)
-            # 按照action的顺序进行重新整理，因为环境需要按照顺序接受actions
+            ## Reorder the actions back into agent index order
+            # because the environment expects actions in agent-id order
             reorder_actions = [-1 for i in range(8)]
             for i in range(8):
                 reorder_actions[agents_id_sequence[i]] = actions[i]
