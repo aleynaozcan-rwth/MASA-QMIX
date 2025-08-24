@@ -1,22 +1,22 @@
 """
-这个文件书写作业类，即抽象保障资源类
+This file defines the Job class, i.e., the abstract resource assurance class
 
 """
 
 
 class Jobs:
     def __init__(self):
-        # 创建所有的job对象，并用列表index作为id的索引，相当于字典
+        # # Create all job objects, and use the list index as the id index (similar to a dictionary)
         self.jobs_object_list = []
         # id: 0 1 2 3 4 5 6 7 8
         jobs_codes = ["ZCTF", "SBTF", "JY", "TYY", "TD", "YQ", "DQ", "GDDE", "GD"]
-        jobs_names = ["座舱", "设备舱", "加油", "液压", "供电", "氧气", "氮气", "惯导", "挂弹"]
+        jobs_names = ["Cockpit", "Equipment cabin", "Refueling", "Hydraulic", "Power supply", "Oxygen", "Nitrogen", "Inertial navigation", "Weapon mounting"]
         jobs_times = [10, 10, 15, 4, 6, 2, 2, 10, 15]
         for i in range(len(jobs_names)):
             temp_object = Job(i, jobs_codes[i], jobs_times[i], jobs_times[i])
             self.jobs_object_list.append(temp_object)
 
-    # 保留的jobs有哪些，因为不同保障位置的jobs不同
+    #  # Which jobs are reserved, because jobs differ at different assurance locations
     # reserved_job_id :[0,2,3,1,...]
     def reserved_jobs(self, reserved_job_id):
         assert type(reserved_job_id[0]) == int
