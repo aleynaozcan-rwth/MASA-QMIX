@@ -125,8 +125,8 @@ class Sites:
         # -------------------------------------------------------------------------
 
 
-       """ # If you ever want to disable constraints, you can use the empty mapping below.
-        # self.restrict_dict = {i: {} for i in range(18)}"""
+# If you ever want to disable constraints, you can use the empty mapping below.
+        # self.restrict_dict = {i: {} for i in range(18)}
 
     # Before querying a site's available resources, update its instant resources
     # according to current occupancy and constraint relations (first-come-first-served).

@@ -215,21 +215,32 @@ class ScheduleEnv(gym.Env):
                     # # time_on_road == 0 means the plane stays and processes in place
                     time_on_road = util.count_path_on_road(self.planes[i].position,
                                                            self.sites[site_id].absolute_position.tolist(), self.plane_speed)
+                    start_time = sum(self.episode_time_slice)
+                    temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
+                    duration = temp_time + time_on_road
+                    end_time = start_time + duration
+
+                    # --- NOTE (Gantt extension): we added start_time, end_time, job_id
+                    # for visualization purposes. Before, only temp_time was stored.
+                    # Now we record full scheduling intervals. ---
+
+                    # --- FIX: check if left_job exists ---
+                    if len(self.planes[i].left_job) > 0:
+                        job_id = self.planes[i].left_job[0].index_id
+                    else:
+                        job_id = -1   # placeholder when no job is left
+                    # --- END FIX ---
 
                     if type(site_id) == int:
-                        self.save_env_info(
-                            (sum(self.episode_time_slice), self.planes[i].left_job[0].index_id, site_id, i))
+                        self.save_env_info((start_time, end_time, job_id, site_id, i))
                     else:
-                        self.save_env_info((sum(self.episode_time_slice), self.planes[i].left_job[0].index_id, site_id.item(), i))
-                    temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
+                        self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
-                    time_span_increase[site_id] = temp_time + time_on_road
+                    time_span_increase[site_id] = duration
                     # self.state[site_id][0] = i  # mark the site as occupied
                     count_for_reward += 1
                     # store max travel time per plane for reward normalization
                     max_time_on_roads[i] = time_on_road
-
-
                 else:
                     raise Exception("Invalid action was not masked", self.sites_state_global, i, site_id,action,self.planes[i].left_job[0].index_id,
                                     self.sites[site_id].resource_ids_list, self.state)

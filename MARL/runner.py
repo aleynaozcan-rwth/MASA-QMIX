@@ -7,6 +7,44 @@ import matplotlib.pyplot as plt
 import sys
 
 
+# --- Added: Gantt chart plotting function ---
+def plot_gantt(for_gantt_data, filename="gantt.png"):
+    """
+    Expected format: (start_time, end_time, job_id, site_id, plane_id)
+    Creates and saves a simple Gantt chart of scheduled jobs.
+    """
+    if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
+        return False
+    if len(for_gantt_data[0]) != 5:
+        print("[WARN] Gantt plot skipped: wrong tuple format")
+        return False
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    cmap = plt.cm.get_cmap("tab20")
+    color_map = {}
+    cidx = 0
+    max_end = 0
+
+    for (start, end, job, site, plane) in for_gantt_data:
+        if job not in color_map:
+            color_map[job] = cmap(cidx % 20)
+            cidx += 1
+        ax.barh(plane, end - start, left=start, color=color_map[job])
+        ax.text((start + end) / 2, plane, f"J{job}@S{site}",
+                va="center", ha="center", fontsize=7, color="white")
+        max_end = max(max_end, end)
+
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Plane")
+    ax.set_title("Schedule Gantt Chart")
+    ax.set_xlim(0, max_end + 1)
+    plt.tight_layout()
+    plt.savefig(filename)
+    plt.close()
+    return True
+# --- End of added function ---
+
+
 class Runner:
     def __init__(self, env, args):
         self.env = env
@@ -51,6 +89,13 @@ class Runner:
                 with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
                     print(for_gantt_data, file=f)
 
+                # --- Added: call Gantt plot after saving results ---
+                try:
+                    plot_gantt(for_gantt_data,
+                               filename=f"./my_data_and_graph/historydata/gantt_epoch{epoch}.png")
+                except Exception as e:
+                    print("[WARN] Gantt plot skipped:", e)
+                # --- End of added part ---
 
             episodes = []
             r_s = []
@@ -109,4 +154,3 @@ class Runner:
         plt.savefig(self.save_path + '/plt_{}.png'.format(num), format='png')
         np.save(self.save_path + '/win_rates_{}'.format(num), self.win_rates)
         np.save(self.save_path + '/episode_rewards_{}'.format(num), self.episode_rewards)
-
