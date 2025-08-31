@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+
+# ÇIKTI klasörlerini commit etmek istemiyorsan aşağıdakileri da aç
+# result/
+# MARL/model/
+# my_data_and_graph/historydata/
