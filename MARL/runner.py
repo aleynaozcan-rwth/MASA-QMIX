@@ -23,7 +23,7 @@ class Runner:
         self.win_rates = []
         self.episode_rewards = []
 
-        # 用来保存plt和pkl
+        # # Used to save plt and pkl
         self.save_path = self.args.result_dir + '/' + args.alg + '/' + args.map
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
@@ -34,7 +34,7 @@ class Runner:
         # print('Run {} start'.format(num))
         r_s = [0]
         for epoch in range(self.args.n_epoch):
-            # 显示输出
+            # # Display output
 
             text = '\rRun {}, train epoch {}, ave_rewards {}'
             sys.stdout.write(text.format(num, epoch, sum(r_s)/len(r_s)))
@@ -54,13 +54,14 @@ class Runner:
 
             episodes = []
             r_s = []
-            # 收集self.args.n_episodes个episodes
+            #  # Collect self.args.n_episodes episodes
             for episode_idx in range(self.args.n_episodes):
                 episode, _, _, for_gantt_data = self.rolloutWorker.generate_episode(episode_idx)
                 episodes.append(episode)
                 r_s.append(sum(episode['r'][0])[0])
                 # print(_)
-            # episode的每一项都是一个(1, episode_len, n_agents, 具体维度)四维数组，下面要把所有episode的obs拼在一起
+            # Each field of an episode is a 4-D array with shape (1, episode_len, n_agents, <dim>);
+            # concatenate all episodes along the first dimension
             episode_batch = episodes[0]
             episodes.pop(0)
             for episode in episodes:
@@ -70,7 +71,7 @@ class Runner:
                 self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
                 train_steps += 1
             else:
-                # 这几个类型的算法需要进行buffer的存储
+                # These algorithms need to store into the replay buffer
                 self.buffer.store_episode(episode_batch)
                 for train_step in range(self.args.train_steps):
                     mini_batch = self.buffer.sample(min(self.buffer.current_size, self.args.batch_size))
@@ -87,7 +88,7 @@ class Runner:
             episode_rewards += episode_reward
             if win_tag:
                 win_number += 1
-        # 返回的是平均获胜次数和平均奖励
+        # # Returns average win count and average reward
         print(for_gant)
         return win_number / self.args.evaluate_epoch, episode_rewards / self.args.evaluate_epoch
 
