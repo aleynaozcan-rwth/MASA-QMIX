@@ -11,7 +11,7 @@ from MARL.policy.maven import MAVEN
 from torch.distributions import Categorical
 
 
-# Agent no communication
+# Agent with no communication
 class Agents:
     def __init__(self, args):
         self.n_actions = args.n_actions
@@ -39,14 +39,15 @@ class Agents:
         self.args = args
         print('Init Agents')
 
-    # 有可能分布选出来不符合要求的动作,目前貌似用不到这个东西
+    # It’s possible that an action sampled from the distribution is invalid;
+    # currently this seems unused.
     def random_choice_with_mask(self, avail_actions):
         temp = []
         for i, eve in enumerate(avail_actions):
             if eve == 1:
                 temp.append(i)
         # assert 18 in temp
-        if temp[0] == 18:  # 如果真的没有资源了的话
+        if temp[0] == 18:  # If there is truly no resource left
             return 18
         else:
             if 18 in temp:
@@ -55,9 +56,9 @@ class Agents:
 
     def choose_action(self, obs, last_action, agent_num, avail_actions, epsilon, maven_z=None, evaluate=False):
         inputs = obs.copy()
-        avail_actions_ind = np.nonzero(avail_actions)[0]  # index of actions which can be choose
+        avail_actions_ind = np.nonzero(avail_actions)[0]  # index of actions which can be chosen
 
-        # transform agent_num to onehot vector
+        # transform agent_num to one-hot vector
         agent_id = np.zeros(self.n_agents)
         agent_id[agent_num] = 1.
 
@@ -90,30 +91,32 @@ class Agents:
             # print(avail_actions.shape, q_value.shape)
             q_value[avail_actions == 0.0] = - float("inf")
             if np.random.uniform() < epsilon:
-                # action = np.random.choice(avail_actions_ind)  # action是一个整数
+                # action = np.random.choice(avail_actions_ind)  # action is an integer
                 action = self.random_choice_with_mask(avail_actions[0])
                 if action == 18:
                     print(avail_actions[0])
             else:
-                action = torch.argmax(q_value).cpu()  # 此处应该判断一下是不是都是-inf
-                # print(66666,action,q_value)
+                action = torch.argmax(q_value).cpu()  # Here we should check whether all are -inf
+                # print(66666, action, q_value)
 
         return action
 
     def _choose_action_from_softmax(self, inputs, avail_actions, epsilon, evaluate=False):
         """
-        :param inputs: # q_value of all actions
+        :param inputs: q_value/logits of all actions
         """
         action_num = avail_actions.sum(dim=1, keepdim=True).float().repeat(1, avail_actions.shape[-1])  # num of avail_actions
-        # 先将Actor网络的输出通过softmax转换成概率分布
+        # First convert the Actor network output to a probability distribution via softmax
         prob = torch.nn.functional.softmax(inputs, dim=-1)
-        # add noise of epsilon
+        # add epsilon noise
         prob = ((1 - epsilon) * prob + torch.ones_like(prob) * epsilon / action_num)
-        prob[avail_actions == 0] = 0.0  # 不能执行的动作概率为0
+        prob[avail_actions == 0] = 0.0  # probability of invalid actions is 0
 
         """
-        不能执行的动作概率为0之后，prob中的概率和不为1，这里不需要进行正则化，因为torch.distributions.Categorical
-        会将其进行正则化。要注意在训练的过程中没有用到Categorical，所以训练时取执行的动作对应的概率需要再正则化。
+        After setting the probability of invalid actions to 0, the sum of prob may not be 1.
+        We do NOT need to renormalize here, because torch.distributions.Categorical
+        will renormalize internally. Note: during training we don't use Categorical,
+        so when taking the probability of the executed action, renormalization is needed.
         """
 
         if epsilon == 0 and evaluate:
@@ -122,12 +125,12 @@ class Agents:
             action = Categorical(prob).sample().long()
         return action
 
-    # 这个函数有问题
+    # This function has an issue
     def _get_max_episode_len(self, batch):
         terminated = batch['terminated']
         episode_num = terminated.shape[0]
         max_episode_len = 0
-        # 由于episodelimit的长度内没有terminal==1，所以导致max_episode_len == 0
+        # Because within episode_limit there may be no terminal==1, this can lead to max_episode_len == 0
         for episode_idx in range(episode_num):
             for transition_idx in range(self.args.episode_limit):
                 if terminated[episode_idx, transition_idx, 0] == 1:
@@ -138,7 +141,7 @@ class Agents:
 
     def train(self, batch, train_step, epsilon=None):  # coma needs epsilon for training
 
-        # different episode has different length, so we need to get max length of the batch
+        # different episodes have different lengths, so we need to get the max length of the batch
         max_episode_len = self._get_max_episode_len(batch)
         for key in batch.keys():
             if key != 'z':
@@ -146,11 +149,11 @@ class Agents:
         self.policy.learn(batch, max_episode_len, train_step, epsilon)
 
         if train_step > 0 and train_step % self.args.save_cycle == 0:
-            print("\n开始保存模型", train_step, self.args.save_cycle)
+            print("\nStart saving model", train_step, self.args.save_cycle)
             self.policy.save_model(train_step)
 
 
-# Agent for communication
+# Agent with communication
 class CommAgents:
     def __init__(self, args):
         self.n_actions = args.n_actions
@@ -169,24 +172,26 @@ class CommAgents:
         self.args = args
         print('Init CommAgents')
 
-    # 根据weights得到概率，然后再根据epsilon选动作
+    # Obtain probabilities from weights, then select an action with epsilon
     def choose_action(self, weights, avail_actions, epsilon, evaluate=False):
         weights = weights.unsqueeze(0)
         avail_actions = torch.tensor(avail_actions, dtype=torch.float32).unsqueeze(0)
-        action_num = avail_actions.sum(dim=1, keepdim=True).float().repeat(1, avail_actions.shape[-1])  # 可以选择的动作的个数
-        # 先将Actor网络的输出通过softmax转换成概率分布
+        action_num = avail_actions.sum(dim=1, keepdim=True).float().repeat(1, avail_actions.shape[-1])  # number of available actions
+        # First convert the Actor network output to a probability distribution via softmax
         prob = torch.nn.functional.softmax(weights, dim=-1)
-        # 在训练的时候给概率分布添加噪音
+        # During training, add noise to the probability distribution
         prob = ((1 - epsilon) * prob + torch.ones_like(prob) * epsilon / action_num)
-        prob[avail_actions == 0] = 0.0  # 不能执行的动作概率为0
+        prob[avail_actions == 0] = 0.0  # probability of invalid actions is 0
 
         """
-        不能执行的动作概率为0之后，prob中的概率和不为1，这里不需要进行正则化，因为torch.distributions.Categorical
-        会将其进行正则化。要注意在训练的过程中没有用到Categorical，所以训练时取执行的动作对应的概率需要再正则化。
+        After setting the probability of invalid actions to 0, the sum of prob may not be 1.
+        We do NOT need to renormalize here, because torch.distributions.Categorical
+        will renormalize internally. Note: during training we don't use Categorical,
+        so when taking the probability of the executed action, renormalization is needed.
         """
 
         if epsilon == 0 and evaluate:
-            # 测试时直接选最大的
+            # During evaluation, directly take the maximum
             action = torch.argmax(prob)
         else:
             action = Categorical(prob).sample().long()
@@ -197,7 +202,7 @@ class CommAgents:
         last_action = torch.tensor(last_action, dtype=torch.float32)
         inputs = list()
         inputs.append(obs)
-        # 给obs添加上一个动作、agent编号
+        # Append the last action and the agent id to obs
         if self.args.last_action:
             inputs.append(last_action)
         if self.args.reuse_network:
@@ -222,8 +227,9 @@ class CommAgents:
                     break
         return max_episode_len
 
-    def train(self, batch, train_step, epsilon=None):  # coma在训练时也需要epsilon计算动作的执行概率
-        # 每次学习时，各个episode的长度不一样，因此取其中最长的episode作为所有episode的长度
+    def train(self, batch, train_step, epsilon=None):  # During COMA training, epsilon is also needed to compute action execution probabilities
+        # When learning each time, the lengths of episodes differ, so we take
+        # the longest episode length among them as the effective length
         max_episode_len = self._get_max_episode_len(batch)
         for key in batch.keys():
             batch[key] = batch[key][:, :max_episode_len]

@@ -1,5 +1,6 @@
 '''
 In this code, "plane" stands for a job, and "site" stands for a station.
+This environment schedules planes (jobs) to sites (stations) under resource constraints.
 '''
 from utils.site import Sites
 from utils.job import Jobs

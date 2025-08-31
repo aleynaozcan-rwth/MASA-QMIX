@@ -4,9 +4,9 @@ from common.arguments import get_common_args, get_coma_args, get_mixer_args, get
 
 
 if __name__ == '__main__':
-    for i in range(8):  # 因为一共8种marl算法
+    for i in range(8):  # # because there are 8 types of MARL algorithms
         args = get_common_args()
-        if args.alg.find('coma') > -1:  # 判断模型的参数
+        if args.alg.find('coma') > -1:  # # check algorithm-specific parameters
             args = get_coma_args(args)
         elif args.alg.find('central_v') > -1:
             args = get_centralv_args(args)
@@ -19,7 +19,7 @@ if __name__ == '__main__':
         if args.alg.find('g2anet') > -1:
             args = get_g2anet_args(args)
 
-        # 加载星际争霸的环境
+        # Load the StarCraft II environment
         env = StarCraft2Env(map_name=args.map,
                             step_mul=args.step_mul,
                             difficulty=args.difficulty,

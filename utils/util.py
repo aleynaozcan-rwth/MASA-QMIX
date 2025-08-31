@@ -1,9 +1,10 @@
 """
-一些通用的工具类的封装
+Wrappers for some common utility helpers
 """
 import math
 
 def left_planes(chosen_plane, current_idle_planes):
+    """Return the list of idle planes that are NOT in the chosen set."""
     res = []
     for eve in current_idle_planes:
         if eve not in chosen_plane:
@@ -12,6 +13,10 @@ def left_planes(chosen_plane, current_idle_planes):
 
 
 def min_but_zero(state_left_time):
+    """
+    Return the minimum value among non-zero elements of state_left_time.
+    If all elements are zero (or the list is empty), return 0.
+    """
     non_zero_list = []
     for eve in state_left_time:
         if eve != 0:
@@ -22,7 +27,7 @@ def min_but_zero(state_left_time):
         return 0
 
 
-# 将state_left_time中非0的都减去min_time
+# Subtract min_time from every non-zero value in state_left_time (zeros stay zero)
 def advance_by_min_time(min_time, state_left_time):
     res = []
     for eve in state_left_time:
@@ -34,7 +39,6 @@ def advance_by_min_time(min_time, state_left_time):
     return res
 
 
-# 返回飞机在两个战位之间调运的时间
+# Return the transfer time for a plane moving between two sites (Euclidean distance / speed)
 def count_path_on_road(initial_pos, end_pos, speed):
-    return math.sqrt((end_pos[0]-initial_pos[0]) ** 2 + (end_pos[1]-initial_pos[1]) ** 2) / speed
-
+    return math.sqrt((end_pos[0] - initial_pos[0]) ** 2 + (end_pos[1] - initial_pos[1]) ** 2) / speed
