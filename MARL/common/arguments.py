@@ -1,95 +1,91 @@
 import argparse
 
 """
-Here are the param for the training
-
+Here are the params for training
 """
-
 
 def get_common_args():
     parser = argparse.ArgumentParser()
-    # the environment setting
+    # environment settings (SMAC-flavored; mostly unused by ScheduleEnv)
     parser.add_argument('--difficulty', type=str, default='7', help='the difficulty of the game')
     parser.add_argument('--game_version', type=str, default='latest', help='the version of the game')
     parser.add_argument('--map', type=str, default='boatschedule', help='the map of the game')
     parser.add_argument('--seed', type=int, default=123, help='random seed')
     parser.add_argument('--step_mul', type=int, default=8, help='how many steps to make an action')
     parser.add_argument('--replay_dir', type=str, default=r'', help='absolute path to save the replay')
-    # 一共可以测试13种算法，但是智能体实际上只有8种
-    # The alternative algorithms are vdn, coma, central_v, qmix, qtran_base,
-    # qtran_alt, reinforce, coma+commnet, central_v+commnet, reinforce+commnet，
-    # coma+g2anet, central_v+g2anet, reinforce+g2anet, maven
+
+    # In total, 13 algorithm variants can be tested, but there are effectively 8 agent types.
+    # The alternative algorithms are:
+    #   vdn, coma, central_v, qmix, qtran_base, qtran_alt, reinforce,
+    #   coma+commnet, central_v+commnet, reinforce+commnet,
+    #   coma+g2anet, central_v+g2anet, reinforce+g2anet, maven
     parser.add_argument('--alg', type=str, default='qmix', help='the algorithm to train the agent')
+
     parser.add_argument('--last_action', type=bool, default=True, help='whether to use the last action to choose action')
     parser.add_argument('--reuse_network', type=bool, default=True, help='whether to use one network for all agents')
     parser.add_argument('--gamma', type=float, default=0.99, help='discount factor')
     parser.add_argument('--optimizer', type=str, default="RMS", help='optimizer')
-    parser.add_argument('--evaluate_epoch', type=int, default=20, help='number of the epoch to evaluate the agent')
+    parser.add_argument('--evaluate_epoch', type=int, default=20, help='number of epochs between evaluations')
 
-    # 以下几个参数比较常用,注意只有指定变量名的时候，就会变成true，没法b变false，最好直接在这里改参数吧
+    # NOTE on CLI (Command-Line Interface):
+    # In terminals (e.g., WSL Ubuntu / VS Code Terminal), passing booleans like "--learn False"
+    # can be tricky because bool("False") becomes True in Python. For now we keep defaults here.
+    # (We can switch to store_true/store_false later if you want to flip them from CLI.)
     parser.add_argument('--model_dir', type=str, default='./MARL/model', help='model directory of the policy')
     parser.add_argument('--result_dir', type=str, default='./result', help='result directory of the policy')
 
     parser.add_argument('--load_model', type=bool, default=False, help='whether to load the pretrained model')
     parser.add_argument('--learn', type=bool, default=True, help='whether to train the model')
     parser.add_argument('--cuda', type=bool, default=False, help='whether to use the GPU')
-    parser.add_argument('--havelook', type=bool, default=False, help='whether to have a look of the saruo')
+    parser.add_argument('--havelook', type=bool, default=False, help='whether to print intermediate info')
 
     args = parser.parse_args()
     return args
 
 
-# arguments of vnd、 qmix、 qtran
+# arguments of vdn / qmix / qtran
 def get_mixer_args(args):
+    # ---------- QUICK-RUN CHANGES (original → new) ----------
     # network
-    args.rnn_hidden_dim = 64
-    args.qmix_hidden_dim = 32
-    args.two_hyper_layers = False
-    args.hyper_hidden_dim = 64
-    args.qtran_hidden_dim = 64
-    args.lr = 5e-4
+    args.rnn_hidden_dim   = 32     # CHANGED (64 → 32)
+    args.qmix_hidden_dim  = 16     # CHANGED (32 → 16)
+    args.two_hyper_layers = False  # (unchanged)
+    args.hyper_hidden_dim = 32     # CHANGED (64 → 32)
+    args.qtran_hidden_dim = 64     # (unchanged)
+    args.lr               = 1e-3   # CHANGED (5e-4 → 1e-3)
 
-    # epsilon greedy
-    args.epsilon = 1
-    args.min_epsilon = 0.05
-    anneal_steps = 50000
-    args.anneal_epsilon = (args.epsilon - args.min_epsilon) / anneal_steps
-    args.epsilon_anneal_scale = 'step'
+    # epsilon-greedy
+    args.epsilon          = 1.0    # (unchanged)
+    args.min_epsilon      = 0.05   # (unchanged)
+    anneal_steps          = 5000   # CHANGED (50000 → 5000)
+    args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
+    args.epsilon_anneal_scale = 'step'  # (unchanged)
 
-    # the number of the epoch to train the agent
-    args.n_epoch = 15000
+    # training schedule
+    args.n_epoch     = 200   # CHANGED (15000 → 200)
+    args.n_episodes  = 2     # CHANGED (5 → 2)
+    args.train_steps = 1     # CHANGED (2 → 1)
 
-    # the number of the episodes in one epoch
-    args.n_episodes = 5
+    # evaluation / saving cadence
+    args.evaluate_cycle = 25     # CHANGED (50 → 25)
+    args.batch_size     = 16     # CHANGED (32 → 16)
+    args.buffer_size    = 2000   # CHANGED (5000 → 2000)
 
-    # the number of the train steps in one epoch
-    args.train_steps = 2
+    args.save_cycle         = 200   # CHANGED (50 → 200)  # save less often in quick runs
+    args.target_update_cycle= 100   # CHANGED (200 → 100)
 
-    # # how often to evaluate
-    args.evaluate_cycle = 50
-
-    # experience replay
-    args.batch_size = 32
-    args.buffer_size = int(5e3)
-
-    # how often to save the model
-    args.save_cycle = 50
-
-    # how often to update the target_net
-    args.target_update_cycle = 200
-
-    # QTRAN lambda
-    args.lambda_opt = 1
-    args.lambda_nopt = 1
+    # QTRAN lambda (unused for plain QMIX, kept for compatibility)
+    args.lambda_opt  = 1     # (unchanged)
+    args.lambda_nopt = 1     # (unchanged)
 
     # prevent gradient explosion
-    args.grad_norm_clip = 10
+    args.grad_norm_clip = 10 # (unchanged)
 
-    # MAVEN
-    args.noise_dim = 16
-    args.lambda_mi = 0.001
-    args.lambda_ql = 1
-    args.entropy_coefficient = 0.001
+    # MAVEN (left as-is; only used if alg == 'maven')
+    args.noise_dim            = 16    # (unchanged)
+    args.lambda_mi            = 0.001 # (unchanged)
+    args.lambda_ql            = 1     # (unchanged)
+    args.entropy_coefficient  = 0.001 # (unchanged)
     return args
 
 
@@ -97,108 +93,76 @@ def get_mixer_args(args):
 def get_coma_args(args):
     # network
     args.rnn_hidden_dim = 64
-    args.critic_dim = 128
-    args.lr_actor = 1e-4
-    args.lr_critic = 1e-3
+    args.critic_dim     = 128
+    args.lr_actor       = 1e-4
+    args.lr_critic      = 1e-3
 
     # epsilon-greedy
-    args.epsilon = 0.5
-    args.anneal_epsilon = 0.00064
-    args.min_epsilon = 0.02
+    args.epsilon         = 0.5
+    args.anneal_epsilon  = 0.00064
+    args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
 
-    # lambda of td-lambda return
+    # td-lambda
     args.td_lambda = 0.8
 
-    # the number of the epoch to train the agent
-    args.n_epoch = 20000
-
-    # the number of the episodes in one epoch
-    args.n_episodes = 1
-
-    # how often to evaluate
-    args.evaluate_cycle = 100
-
-    # how often to save the model
-    args.save_cycle = 5000
-
-    # how often to update the target_net
+    # training/eval/saving
+    args.n_epoch         = 20000
+    args.n_episodes      = 1
+    args.evaluate_cycle  = 100
+    args.save_cycle      = 5000
     args.target_update_cycle = 200
 
-    # prevent gradient explosion
-    args.grad_norm_clip = 10
-
+    args.grad_norm_clip  = 10
     return args
-
 
 
 # arguments of central_v
 def get_centralv_args(args):
     # network
     args.rnn_hidden_dim = 64
-    args.critic_dim = 128
-    args.lr_actor = 1e-4
-    args.lr_critic = 1e-3
+    args.critic_dim     = 128
+    args.lr_actor       = 1e-4
+    args.lr_critic      = 1e-3
 
     # epsilon-greedy
-    args.epsilon = 0.5
-    args.anneal_epsilon = 0.00064
-    args.min_epsilon = 0.02
+    args.epsilon         = 0.5
+    args.anneal_epsilon  = 0.00064
+    args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
 
-    # the number of the epoch to train the agent
-    args.n_epoch = 20000
-
-    # the number of the episodes in one epoch
-    args.n_episodes = 1
-
-    # how often to evaluate
-    args.evaluate_cycle = 100
-
-    # lambda of td-lambda return
-    args.td_lambda = 0.8
-
-    # how often to save the model
-    args.save_cycle = 5000
-
-    # how often to update the target_net
+    # training/eval/saving
+    args.n_epoch         = 20000
+    args.n_episodes      = 1
+    args.evaluate_cycle  = 100
+    args.save_cycle      = 5000
     args.target_update_cycle = 200
 
-    # prevent gradient explosion
-    args.grad_norm_clip = 10
-
+    args.grad_norm_clip  = 10
     return args
 
 
-# arguments of central_v
+# arguments of reinforce
 def get_reinforce_args(args):
     # network
     args.rnn_hidden_dim = 64
-    args.critic_dim = 128
-    args.lr_actor = 1e-4
-    args.lr_critic = 1e-3
+    args.critic_dim     = 128
+    args.lr_actor       = 1e-4
+    args.lr_critic      = 1e-3
 
     # epsilon-greedy
-    args.epsilon = 0.5
-    args.anneal_epsilon = 0.00064
-    args.min_epsilon = 0.02
+    args.epsilon         = 0.5
+    args.anneal_epsilon  = 0.00064
+    args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
 
-    # the number of the epoch to train the agent
-    args.n_epoch = 20000
+    # training/eval/saving
+    args.n_epoch         = 20000
+    args.n_episodes      = 1
+    args.evaluate_cycle  = 100
+    args.save_cycle      = 5000
 
-    # the number of the episodes in one epoch
-    args.n_episodes = 1
-
-    # how often to evaluate
-    args.evaluate_cycle = 100
-
-    # how often to save the model
-    args.save_cycle = 5000
-
-    # prevent gradient explosion
-    args.grad_norm_clip = 10
-
+    args.grad_norm_clip  = 10
     return args
 
 
@@ -215,4 +179,3 @@ def get_g2anet_args(args):
     args.attention_dim = 32
     args.hard = True
     return args
-
