@@ -26,8 +26,8 @@ class ScheduleEnv(gym.Env):
         self.state = [[]]
         self.done = False
         self.state_left_time = []
-        self.episode_time_slice = []  # 表 # list of time consumed at each step within the episode
-        self.plane_speed = 0  # 度  # movement/processing speed
+        self.episode_time_slice = []  ## list of time consumed at each step within the episode
+        self.plane_speed = 0  ## movement/processing speed
         self.initialize()  #  # initialize all environment parameters
 
         # Planes controlled by DQN do not need an explicit "wait" action; they will choose a feasible action.
