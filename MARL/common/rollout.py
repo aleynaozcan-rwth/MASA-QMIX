@@ -81,7 +81,7 @@ class RolloutWorker:
                 avail_actions.append(avail_action)
                 last_action[agent_id] = action_onehot
 
-            reward, terminated, info = self.env.step(actions)
+            state, reward, terminated, info = self.env.step(actions) #I cahnged for debug from reward, terminated, info = self.env.step(actions) to this
             win_tag = True if terminated and 'battle_won' in info and info['battle_won'] else False
             o.append(obs)
             s.append(state)
@@ -228,7 +228,7 @@ class CommRolloutWorker:
                 avail_actions.append(avail_action)
                 last_action[agent_id] = action_onehot
 
-            reward, terminated, info = self.env.step(actions)
+            state, reward, terminated, info = self.env.step(actions) #I cahnged for debug from reward, terminated, info = self.env.step(actions) to this
             win_tag = True if terminated and 'battle_won' in info and info['battle_won'] else False
             o.append(obs)
             s.append(state)

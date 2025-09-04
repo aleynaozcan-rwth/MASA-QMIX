@@ -28,6 +28,7 @@ class ScheduleEnv(gym.Env):
         self.state_left_time = []
         self.episode_time_slice = []  ## list of time consumed at each step within the episode
         self.plane_speed = 0  ## movement/processing speed
+        self.debug = True     # I am adding this to debug couple of episodes-Aleyna
         self.initialize()  #  # initialize all environment parameters
 
         # Planes controlled by DQN do not need an explicit "wait" action; they will choose a feasible action.
@@ -108,6 +109,13 @@ class ScheduleEnv(gym.Env):
         state = self.conduct_state(info)
         # print(info)
         # print(len(state))
+
+        if self.debug:
+            print("\n=== NEW EPISODE STARTED ===")
+            print("Initial plane positions:", [p.position for p in self.planes])
+            print("Initial sites state:", self.state)
+            print("Initial state vector length:", len(state))
+
         return state  # 151
 
     def conduct_state(self, info):
@@ -195,55 +203,83 @@ class ScheduleEnv(gym.Env):
 
     def step(self, action):
         self.step_count += 1
-        ## print("start interaction")
-        action, real_conflict_num = self.action_replace(action) #  # replace 19/20 with 18
-        # if real_conflict_num != 0:
-        #     print(real_conflict_num)
+        action, real_conflict_num = self.action_replace(action)  # replace 19/20 with 18
+
+        if self.debug:
+            print(f"\n[STEP {self.step_count}] Actions: {action}")
+
+        if real_conflict_num != 0:
+            if self.debug:
+                print("⚠ Conflict detected! Number of conflicts:", real_conflict_num)
+
         count_break_rules = 0
-        # print(action)
         assert len(action) == len(self.planes)
-        rewards = [0 for eve in action]
-        max_time_on_roads = [0 for eve in action]
+        rewards = [0 for _ in action]
+        max_time_on_roads = [0 for _ in action]
         count_for_reward = 0
         action = self.check_inflict_action(action)
         time_span_increase = np.array([0 for eve in self.sites])
+
         for i, site_id in enumerate(action):
-            if site_id == len(self.sites):
-                pass
-            else:  # assign a support/scheduling task
-                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:   # if the chosen site contains the required resource for the plane's next job
-                    # # time_on_road == 0 means the plane stays and processes in place
-                    time_on_road = util.count_path_on_road(self.planes[i].position,
-                                                           self.sites[site_id].absolute_position.tolist(), self.plane_speed)
+            if site_id == len(self.sites):  # WAIT action
+                rewards[i] = -30
+                if self.debug:
+                    print(f"Plane {i} chose WAIT → penalty -30")
+            else:
+                # assign a support/scheduling task
+                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:
+                    time_on_road = util.count_path_on_road(
+                        self.planes[i].position,
+                        self.sites[site_id].absolute_position.tolist(),
+                        self.plane_speed
+                    )
                     start_time = sum(self.episode_time_slice)
                     temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
                     duration = temp_time + time_on_road
                     end_time = start_time + duration
 
-                    # --- NOTE (Gantt extension): we added start_time, end_time, job_id
-                    # for visualization purposes. Before, only temp_time was stored.
-                    # Now we record full scheduling intervals. ---
-
-                    # --- FIX: check if left_job exists ---
+                    # FIX: check if left_job exists
                     if len(self.planes[i].left_job) > 0:
                         job_id = self.planes[i].left_job[0].index_id
                     else:
-                        job_id = -1   # placeholder when no job is left
-                    # --- END FIX ---
+                        job_id = -1  # placeholder
 
+                    # save env info
                     if type(site_id) == int:
                         self.save_env_info((start_time, end_time, job_id, site_id, i))
                     else:
                         self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
                     time_span_increase[site_id] = duration
-                    # self.state[site_id][0] = i  # mark the site as occupied
+                    self.state[site_id][0] = i  # mark the site as occupied
                     count_for_reward += 1
-                    # store max travel time per plane for reward normalization
                     max_time_on_roads[i] = time_on_road
+
+                    if self.debug:
+                        print(f"Plane {i} → Site {site_id}, Job {job_id}, "
+                            f"Travel {time_on_road}, Duration {duration}, "
+                            f"Reward {rewards[i]}")
                 else:
-                    raise Exception("Invalid action was not masked", self.sites_state_global, i, site_id,action,self.planes[i].left_job[0].index_id,
-                                    self.sites[site_id].resource_ids_list, self.state)
+                    raise Exception("Invalid action was not masked",
+                                    self.sites_state_global, i, site_id, action,
+                                    self.planes[i].left_job[0].index_id,
+                                    self.sites[site_id].resource_ids_list,
+                                    self.state)
+
+            # update state
+            self.episode_time_slice.append(max(max_time_on_roads) if max_time_on_roads else 0)
+
+            # DEBUG: print current state vector
+            if self.debug:
+                print(f"[DEBUG] Current state vector (len={len(self.state)}): {self.state}")
+
+            # Info dictionary with debug state
+            info = {"state": self.state} if self.debug else {}
+
+            #return self.state, sum(rewards), self.done, {}
+
+
+
 
         real_did = 0
         for eve in action:
@@ -320,22 +356,25 @@ class ScheduleEnv(gym.Env):
         state = self.conduct_state(info)
         # print("min_time:", min_time)
         # print("left_time:", self.state_left_time)
-        return reward, self.done, {"time": sum(self.episode_time_slice)+max(self.state_left_time),
-                                          "left": self.state_left_time,
-                                          "original_state": self.state,
-                                          "planes_obj": self.planes,
-                                          "rewards": rewards,
-                                          "count_break_rules": count_break_rules,
-                                          "sites_state_global": self.sites_state_global,
-                                   "episodes_situation": self.job_record_for_gant
-                                   }
+        return self.get_state(), reward, self.done, {
+            "time": sum(self.episode_time_slice)+max(self.state_left_time),
+            "left": self.state_left_time,
+            "original_state": self.state,
+            "planes_obj": self.planes,
+            "rewards": rewards,
+            "count_break_rules": count_break_rules,
+            "sites_state_global": self.sites_state_global,
+            "episodes_situation": self.job_record_for_gant
+        }
+
 
     def get_avail_agent_actions(self, agent_id):
         #  # Check whether the plane is currently busy
         for eve in self.state:
             if agent_id == eve[0]:  # # this plane is still processing
                 # return [0 for i in range(18)] + [1]  # 1
-                return [0 for i in range(18)] + [0, 1, 0]
+                return [0 for i in range(18)] + [1, 0, 0]   # only BUSY is available
+
         # # only BUSY is available
         res = [0 for eve in self.sites_state_global]
         for i, eve in enumerate(self.sites_state_global):
@@ -347,7 +386,11 @@ class ScheduleEnv(gym.Env):
                 else:  # # this plane has finished all its scheduled jobs
                     # return [0 for i in range(18)] + [1]  # 0
                     return [0 for i in range(18)] + [0, 0, 1]   # only FINISHED is available
-        return res + [1, 0, 0]   # add WAIT
+
+        print(f"[DEBUG] Agent {agent_id} avail actions: {res + [0, 1, 0]}")        
+        return res + [0, 1, 0]   # add WAIT
+
+
 
     # state transition 1
     def has_chosen_action(self, action_id, agent_id):

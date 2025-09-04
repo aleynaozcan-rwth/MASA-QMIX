@@ -39,26 +39,19 @@ class Agents:
         self.args = args
         print('Init Agents')
 
-    # It’s possible that an action sampled from the distribution is invalid;
-    # currently this seems unused.
+    # Prevent choosing WAIT (18) if other actions are available
     def random_choice_with_mask(self, avail_actions):
-        temp = []
-        for i, eve in enumerate(avail_actions):
-            if eve == 1:
-                temp.append(i)
-        # assert 18 in temp
-        if temp[0] == 18:  # If there is truly no resource left
-            return 18
-        else:
-            if 18 in temp:
-                temp.remove(18)
-            return np.random.choice(temp, 1, False)[0]
+        valid = [i for i, a in enumerate(avail_actions) if a == 1]
+        if not valid:
+            return 18  # default WAIT if nothing else is available
+        if len(valid) > 1 and 18 in valid:
+            valid.remove(18)
+        return np.random.choice(valid)
 
     def choose_action(self, obs, last_action, agent_num, avail_actions, epsilon, maven_z=None, evaluate=False):
         inputs = obs.copy()
-        avail_actions_ind = np.nonzero(avail_actions)[0]  # index of actions which can be chosen
 
-        # transform agent_num to one-hot vector
+        # agent id one-hot
         agent_id = np.zeros(self.n_agents)
         agent_id[agent_num] = 1.
 
@@ -68,14 +61,14 @@ class Agents:
             inputs = np.hstack((inputs, agent_id))
         hidden_state = self.policy.eval_hidden[:, agent_num, :]
 
-        # transform the shape of inputs from (42,) to (1,42)
-        inputs = torch.tensor(inputs, dtype=torch.float32).unsqueeze(0)  # [[]]  -> []
+        # prepare tensors
+        inputs = torch.tensor(inputs, dtype=torch.float32).unsqueeze(0)
         avail_actions = torch.tensor(avail_actions, dtype=torch.float32).unsqueeze(0)
         if self.args.cuda:
             inputs = inputs.cuda()
             hidden_state = hidden_state.cuda()
 
-        # get q value
+        # get q values
         if self.args.alg == 'maven':
             maven_z = torch.tensor(maven_z, dtype=torch.float32).unsqueeze(0)
             if self.args.cuda:
@@ -84,22 +77,21 @@ class Agents:
         else:
             q_value, self.policy.eval_hidden[:, agent_num, :] = self.policy.eval_rnn(inputs, hidden_state)
 
-        # choose action from q value
-        if self.args.alg == 'coma' or self.args.alg == 'central_v' or self.args.alg == 'reinforce':
+        # action selection
+        if self.args.alg in ['coma', 'central_v', 'reinforce']:
             action = self._choose_action_from_softmax(q_value.cpu(), avail_actions, epsilon, evaluate)
         else:
-            # print(avail_actions.shape, q_value.shape)
             q_value[avail_actions == 0.0] = - float("inf")
-            if np.random.uniform() < epsilon:
-                # action = np.random.choice(avail_actions_ind)  # action is an integer
-                action = self.random_choice_with_mask(avail_actions[0])
-                if action == 18:
-                    print(avail_actions[0])
-            else:
-                action = torch.argmax(q_value).cpu()  # Here we should check whether all are -inf
-                # print(66666, action, q_value)
+            if np.random.rand() < epsilon:  # exploration
+                avail_numpy = avail_actions.cpu().numpy()[0]
+                action = self.random_choice_with_mask(avail_numpy)
+                print(f"[DEBUG] Random action selected → {action}")
+            else:  # exploitation
+                action = torch.argmax(q_value).item()
+                print(f"[DEBUG] Greedy action selected → {action}")
 
         return action
+
 
     def _choose_action_from_softmax(self, inputs, avail_actions, epsilon, evaluate=False):
         """

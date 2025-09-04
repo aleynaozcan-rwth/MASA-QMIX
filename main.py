@@ -76,17 +76,21 @@ def marl_agent_wrapper():
 
     runner = Runner(env, args)
 
+    # main.py içinde marl_agent_wrapper fonksiyonunda
     if args.learn:
-        runner.run(0)  # # originally supported multiple algos; run() took an algorithm id
+        for ep in range(5):  # debug için sadece 5 episode
+            print(f"\n=== DEBUG Episode {ep+1} ===")
+            runner.run(0)   # run() sadece alg_id alıyor
     else:
         _, reward = runner.evaluate()
         print('The ave_reward of {} is  {}'.format(args.alg, reward))
 
 
+
 # # Random decision baseline for environment testing
 def random_agent_wrapper():
 
-    episodes = 50
+    episodes = 5  #original was 50 for debug 5
 
     env = ScheduleEnv()
     temp_save = [0]
@@ -138,7 +142,7 @@ def random_agent_wrapper():
 
 
 def SDrules_agent_wrapper():
-    EPISODES = 50
+    EPISODES = 5  #original was 50 for debug 5
 
     sd_rules = SDrules()
     env = ScheduleEnv()
