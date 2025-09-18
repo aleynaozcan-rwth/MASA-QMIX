@@ -1,0 +1,6 @@
+[INFO] Module GCCcore/12.2.0 loaded.
+[INFO] Module Python/3.10.8 loaded.
+  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/main.py", line 40
+    """with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "w") as f:
+                                                                                      ^
+IndentationError: unindent does not match any outer indentation level

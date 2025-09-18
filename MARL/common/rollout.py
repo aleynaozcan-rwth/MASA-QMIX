@@ -100,12 +100,22 @@ class RolloutWorker:
             # 存储gantt的记录
             if terminated:
                 for_gantt = info["episodes_situation"]
+                with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
+                    for rec in for_gantt:
+                        start, end, job_id, site_id, plane_id = rec
+                        f.write(f"Plane {plane_id} | Job {job_id} | Site {site_id} | Start {start} | End {end}\n")
+                    f.write("---- End of episode ----\n")
 
-        # 记录奖励值和时间的变化
-        with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:
-            print(episode_reward, file=f)
-        with open("./my_data_and_graph/historydata/times.txt", "a") as f:
-            print(info["time"], file=f)
+            # 记录奖励值和时间的变化
+            with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:
+                print(episode_reward, file=f)
+            with open("./my_data_and_graph/historydata/times.txt", "a") as f:
+                print(info["time"], file=f)
+            
+            # --- Log episode stats for convergence tracking ---
+            with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
+                f.write(f"{episode_num},{episode_reward},{info['time']}\n")
+
 
         # last obs
         o.append(obs)
@@ -124,7 +134,7 @@ class RolloutWorker:
         avail_u = avail_u[:-1]
 
         if self.args.havelook:
-            with open("./my_data_and_graph/historydata/havealook.txt", "a") as f:
+            with open("./my_data_and_graph/historydata/havealook.txt", "w") as f:
                 for num in range(len(o)):
                     print("o:", o[num], file=f)
                     print("s:", s[num], file=f)

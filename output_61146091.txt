@@ -1,0 +1,12 @@
+=== Training started at Thu Sep 18 09:32:37 PM CEST 2025 ===
+=== Running analyse_rewards.py ===
+[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
+=== Training Reward Analysis ===
+Total episodes logged: 2065
+Average reward: 64.28
+Max reward: 82.50
+Min reward: 40.13
+[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png
+[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png
+=== Analyse finished at Thu Sep 18 09:32:42 PM CEST 2025 ===
+Check generated plots in: ./my_data_and_graph/historydata/
