@@ -47,32 +47,32 @@ def get_common_args():
 def get_mixer_args(args):
     # ---------- QUICK-RUN CHANGES (original → new) ----------
     # network
-    args.rnn_hidden_dim   = 32     # CHANGED (64 → 32)
-    args.qmix_hidden_dim  = 16     # CHANGED (32 → 16)
+    args.rnn_hidden_dim   = 64     # CHANGED (64 → 32)
+    args.qmix_hidden_dim  = 32    # CHANGED (32 → 16)
     args.two_hyper_layers = False  # (unchanged)
-    args.hyper_hidden_dim = 32     # CHANGED (64 → 32)
+    args.hyper_hidden_dim = 64    # CHANGED (64 → 32)
     args.qtran_hidden_dim = 64     # (unchanged)
-    args.lr               = 1e-3   # CHANGED (5e-4 → 1e-3)
+    args.lr               = 5e-4   # CHANGED (5e-4 → 1e-3)
 
     # epsilon-greedy
     args.epsilon          = 1.0    # (unchanged)
     args.min_epsilon      = 0.05   # (unchanged)
-    anneal_steps          = 5000   # CHANGED (50000 → 5000)
+    anneal_steps          = 50000   # CHANGED (50000 → 5000->2000)
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'  # (unchanged)
 
     # training schedule
-    args.n_epoch     = 200   # CHANGED (15000 → 200)
-    args.n_episodes  = 2     # CHANGED (5 → 2)
-    args.train_steps = 1     # CHANGED (2 → 1)
+    args.n_epoch     = 15000   # CHANGED (15000 → 200-> 300->150)
+    args.n_episodes  = 5    # CHANGED (5 → 2->3)
+    args.train_steps = 2     # CHANGED (2 → 1)
 
     # evaluation / saving cadence
-    args.evaluate_cycle = 25     # CHANGED (50 → 25)
-    args.batch_size     = 16     # CHANGED (32 → 16)
-    args.buffer_size    = 2000   # CHANGED (5000 → 2000)
+    args.evaluate_cycle = 50     # CHANGED (50 → 25)
+    args.batch_size     = 32    # CHANGED (32 → 16->8)
+    args.buffer_size    = 5000   # CHANGED (5000 → 2000->1000)
 
-    args.save_cycle         = 200   # CHANGED (50 → 200)  # save less often in quick runs
-    args.target_update_cycle= 100   # CHANGED (200 → 100)
+    args.save_cycle         = 50   # CHANGED (50 → 200)  # save less often in quick runs
+    args.target_update_cycle= 200   # CHANGED (200 → 100)
 
     # QTRAN lambda (unused for plain QMIX, kept for compatibility)
     args.lambda_opt  = 1     # (unchanged)
