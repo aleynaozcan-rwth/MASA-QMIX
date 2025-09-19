@@ -106,17 +106,24 @@ class RolloutWorker:
                         f.write(f"Plane {plane_id} | Job {job_id} | Site {site_id} | Start {start} | End {end}\n")
                     f.write("---- End of episode ----\n")
 
-            # 记录奖励值和时间的变化
+            # # --- Step-level logging (accumulated reward + time, for debugging) ---
             with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:
                 print(episode_reward, file=f)
             with open("./my_data_and_graph/historydata/times.txt", "a") as f:
                 print(info["time"], file=f)
             
-            # --- Log episode stats for convergence tracking ---
-            with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
-                f.write(f"{episode_num},{episode_reward},{info['time']}\n")
+            ## --- Log episode stats for convergence tracking ---
+            #with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
+            #    f.write(f"{episode_num},{episode_reward},{info['time']}\n")
 
+        # === After while loop ends (episode finished) ===
+        # --- Episode-level logging (for convergence analysis) ---
+        with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
+            print(episode_reward, file=f)
 
+        with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
+            f.write(f"{episode_num},{episode_reward},{info['time']}\n")
+            
         # last obs
         o.append(obs)
         s.append(state)

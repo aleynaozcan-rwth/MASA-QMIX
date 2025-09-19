@@ -88,6 +88,30 @@ def marl_agent_wrapper():
     args.state_shape = env_info["state_shape"]
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
+
+        # --- Training Setup Summary (printed to standart output) ---
+    print("\n=== Training Setup Summary (Args) ===")
+    print(f"Algorithm: {args.alg}")
+    print(f"Map: {args.map}")
+    print(f"Random seed: {args.seed}")
+    print(f"Total epochs: {args.n_epoch}")
+    print(f"Episodes per epoch: {args.n_episodes}")
+    print(f"Evaluation every {args.evaluate_cycle} epochs, with {args.evaluate_epoch} episodes")
+    print(f"Replay buffer size: {getattr(args, 'buffer_size', 'N/A')}")
+    print(f"Batch size: {getattr(args, 'batch_size', 'N/A')}")
+    print(f"Learning enabled: {args.learn}")
+    print(f"GPU enabled: {args.cuda}")
+    print(f"Load pretrained model: {args.load_model}")
+    print("====================================")
+
+    print("\n=== Environment Info ===")
+    print(f"Number of agents: {args.n_agents}")
+    print(f"Number of actions: {args.n_actions}")
+    print(f"State shape: {args.state_shape}")
+    print(f"Observation shape: {args.obs_shape}")
+    print(f"Episode limit (steps per episode): {args.episode_limit}")
+    print("====================================\n")
+
     print("Load model (test only：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
 
     runner = Runner(env, args)

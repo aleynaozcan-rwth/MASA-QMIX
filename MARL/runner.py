@@ -100,11 +100,28 @@ class Runner:
             episodes = []
             r_s = []
             #  # Collect self.args.n_episodes episodes
+
+
+            #for episode_idx in range(self.args.n_episodes):
+                #episode, _, _, for_gantt_data = self.rolloutWorker.generate_episode(episode_idx)
+                #episodes.append(episode)
+                #r_s.append(sum(episode['r'][0])[0])
+                # print(_)
             for episode_idx in range(self.args.n_episodes):
                 episode, _, _, for_gantt_data = self.rolloutWorker.generate_episode(episode_idx)
+
+                # --- FIX: episode reward correct calculation ---
+                # episode['r'] shape: (1, episode_len, n_agents, 1)
+                ep_r = np.sum(episode['r']) / self.args.n_agents
+                r_s.append(ep_r)
+                # ------------------------------------------
+
                 episodes.append(episode)
-                r_s.append(sum(episode['r'][0])[0])
-                # print(_)
+
+                # Logla (opsiyonel, CSV’ye)
+                with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
+                    f.write(f"{episode_idx},{ep_r}\n")
+
             # Each field of an episode is a 4-D array with shape (1, episode_len, n_agents, <dim>);
             # concatenate all episodes along the first dimension
             episode_batch = episodes[0]

@@ -11,9 +11,14 @@ def analyse_rewards(file_path, label="Training"):
         return
 
     try:
-        # accumulated_rewards.txt -> tek kolon: reward
-        rewards = pd.read_csv(file_path, header=None).squeeze("columns")
-        rewards = pd.to_numeric(rewards, errors="coerce").dropna().tolist()
+        # Try reading as CSV: (episode_idx, reward)
+        rewards_df = pd.read_csv(file_path, header=None)
+        if rewards_df.shape[1] == 2:
+            episodes = rewards_df.iloc[:, 0].astype(int).tolist()
+            rewards = rewards_df.iloc[:, 1].astype(float).tolist()
+        else:
+            rewards = pd.to_numeric(rewards_df.squeeze("columns"), errors="coerce").dropna().tolist()
+            episodes = np.arange(len(rewards))
     except Exception as e:
         print(f"[!] Error reading {file_path}: {e}")
         return
@@ -22,7 +27,6 @@ def analyse_rewards(file_path, label="Training"):
         print(f"[!] No rewards data in {file_path}")
         return
 
-    episodes = np.arange(len(rewards))
     smoothed = pd.Series(rewards).rolling(50, min_periods=1).mean()
 
     # --- Plot ---
@@ -70,8 +74,8 @@ def analyse_times(file_path):
     plt.figure(figsize=(10, 6))
     plt.plot(runs, times, color="lightblue", alpha=0.4, label="Raw Time")
     plt.plot(runs, smoothed, color="red", linewidth=2, label="Smoothed (50)")
-    plt.title("Training Duration per Run")
-    plt.xlabel("Run")
+    plt.title("Training Duration per Episode")
+    plt.xlabel("Episode")
     plt.ylabel("Time (s)")
     plt.legend()
     plt.grid(True)
@@ -132,7 +136,7 @@ def analyse_loss(file_path):
 
 
 if __name__ == "__main__":
-    rewards_file = os.path.join(HIST_DIR, "accumulated_rewards.txt")
+    rewards_file = os.path.join(HIST_DIR, "episode_rewards.txt")  # 2-column (episode,reward)
     times_file = os.path.join(HIST_DIR, "times.txt")
     loss_file = os.path.join(HIST_DIR, "loss.txt")
 
