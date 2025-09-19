@@ -1,32 +1,31 @@
 #!/bin/bash
-#SBATCH --job-name=masa_qmix         # İşin ismi
-#SBATCH --output=output_%j.txt       # Normal çıktılar (%j job ID ile değişir)
-#SBATCH --error=error_%j.txt         # Hata çıktıları
-#SBATCH --gres=gpu:1                 # 1 GPU talep et
-#SBATCH --time=04:00:00              # Maksimum süre (4 saat)
-#SBATCH --partition=c23g             # GPU partition
-#SBATCH --mem=32G                    # RAM miktarı
-#SBATCH --cpus-per-task=8            # CPU çekirdeği
+#SBATCH --job-name=masa_qmix         # Job name
+#SBATCH --output=output_%j.txt       # Standard output (%j will be replaced with job ID)
+#SBATCH --error=error_%j.txt         # Error output
+#SBATCH --gres=gpu:1                 # Request 1 GPU
+#SBATCH --time=04:00:00              # Maximum walltime (4 hours)
+#SBATCH --partition=c23g             # GPU partition/queue
+#SBATCH --mem=32G                    # Memory allocation (32 GB)
+#SBATCH --cpus-per-task=8            # Number of CPU cores
 
-# --- Ortam Ayarları ---
+# --- Environment setup ---
 module purge
 module load GCCcore/12.2.0
 module load Python/3.10.8
 
-# GPU ortamını aktive et
+# Activate GPU Python environment
 source ~/masa-qmix-env-gpu/bin/activate
 
-# Proje klasörüne gir
+# Move to project directory
 cd ~/MASA-QMIX
 
-# --- Kodunu Çalıştır ---
+# --- Run training ---
 echo "=== Training started at $(date) ==="
-python main.py | tee training_log_%j.txt
+python main.py | tee training_log_${SLURM_JOB_ID}.txt
 
-# --- Training sonrası analiz ---
+# --- Run analysis after training ---
 echo "=== Running analyse_rewards.py ==="
-python analyse_rewards.py | tee analyse_log_%j.txt
+python analyse_rewards.py | tee analyse_log_${SLURM_JOB_ID}.txt
 
 echo "=== Analyse finished at $(date) ==="
 echo "Check generated plots in: ./my_data_and_graph/historydata/"
-
