@@ -71,6 +71,11 @@ class Runner:
         for_gantt_data =[]
         # print('Run {} start'.format(num))
         r_s = [0]
+
+         # --- NEW: global episode counter ---
+        global_ep_idx = 0
+        # -----------------------------------
+
         for epoch in range(self.args.n_epoch):
             # # Display output
 
@@ -118,9 +123,15 @@ class Runner:
 
                 episodes.append(episode)
 
-                # Logla (opsiyonel, CSV’ye)
+                ## Logla (opsiyonel, CSV’ye)
+                #with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
+                #    f.write(f"{episode_idx},{ep_r}\n")
+                
+                # --- NEW: log with global episode counter instead of local index ---
                 with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
-                    f.write(f"{episode_idx},{ep_r}\n")
+                    f.write(f"{global_ep_idx},{ep_r}\n")
+                global_ep_idx += 1
+                # ------------------------------------------------------------------
 
             # Each field of an episode is a 4-D array with shape (1, episode_len, n_agents, <dim>);
             # concatenate all episodes along the first dimension

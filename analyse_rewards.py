@@ -5,20 +5,19 @@ import os
 
 HIST_DIR = "./my_data_and_graph/historydata"
 
+# SLURM Job ID'yi environment variable'dan al (batch run sırasında otomatik set edilir)
+JOB_ID = os.environ.get("SLURM_JOB_ID", "local")
+
 def analyse_rewards(file_path, label="Training"):
     if not os.path.exists(file_path):
         print(f"[!] File not found: {file_path}")
         return
 
     try:
-        # Try reading as CSV: (episode_idx, reward)
+        # Dosya hep 2 sütun: (episode_idx, reward)
         rewards_df = pd.read_csv(file_path, header=None)
-        if rewards_df.shape[1] == 2:
-            episodes = rewards_df.iloc[:, 0].astype(int).tolist()
-            rewards = rewards_df.iloc[:, 1].astype(float).tolist()
-        else:
-            rewards = pd.to_numeric(rewards_df.squeeze("columns"), errors="coerce").dropna().tolist()
-            episodes = np.arange(len(rewards))
+        episodes = rewards_df.iloc[:, 0].astype(int).tolist()
+        rewards = rewards_df.iloc[:, 1].astype(float).tolist()
     except Exception as e:
         print(f"[!] Error reading {file_path}: {e}")
         return
@@ -44,7 +43,7 @@ def analyse_rewards(file_path, label="Training"):
     plt.close()
     print(f"[+] Reward curve saved to {out_path}")
 
-    print(f"=== {label} Reward Analysis ===")
+    print(f"=== {label} Reward Analysis (JobID: {JOB_ID}) ===")
     print(f"Total episodes logged: {len(rewards)}")
     print(f"Average reward: {np.mean(rewards):.2f}")
     print(f"Max reward: {np.max(rewards):.2f}")
@@ -83,7 +82,7 @@ def analyse_times(file_path):
     out_path = os.path.join(HIST_DIR, "training_time.png")
     plt.savefig(out_path)
     plt.close()
-    print(f"[+] Training time curve saved to {out_path}")
+    print(f"[+] Training time curve saved to {out_path} (JobID: {JOB_ID})")
 
 
 def analyse_loss(file_path):
@@ -132,7 +131,7 @@ def analyse_loss(file_path):
     out_path = os.path.join(HIST_DIR, "loss_curve.png")
     plt.savefig(out_path)
     plt.close()
-    print(f"[+] Loss curve saved to {out_path}")
+    print(f"[+] Loss curve saved to {out_path} (JobID: {JOB_ID})")
 
 
 if __name__ == "__main__":

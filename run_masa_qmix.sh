@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=masa_qmix         # Job name
-#SBATCH --output=output_%j.txt       # Standard output (%j will be replaced with job ID)
-#SBATCH --error=error_%j.txt         # Error output
-#SBATCH --gres=gpu:1                 # Request 1 GPU
-#SBATCH --time=04:00:00              # Maximum walltime (4 hours)
-#SBATCH --partition=c23g             # GPU partition/queue
-#SBATCH --mem=32G                    # Memory allocation (32 GB)
-#SBATCH --cpus-per-task=8            # Number of CPU cores
+#SBATCH --job-name=masa_qmix
+#SBATCH --output=output_%j.txt
+#SBATCH --error=error_%j.txt
+#SBATCH --gres=gpu:1
+#SBATCH --time=04:00:00
+#SBATCH --partition=c23g
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
 
 # --- Environment setup ---
 module purge
@@ -19,13 +19,19 @@ source ~/masa-qmix-env-gpu/bin/activate
 # Move to project directory
 cd ~/MASA-QMIX
 
+# --- Job started ---
+echo "=== JOB $SLURM_JOB_ID STARTED at $(date) ==="
+
 # --- Run training ---
 echo "=== Training started at $(date) ==="
 python main.py | tee training_log_${SLURM_JOB_ID}.txt
+echo "=== Training finished at $(date) ==="
 
 # --- Run analysis after training ---
 echo "=== Running analyse_rewards.py ==="
 python analyse_rewards.py | tee analyse_log_${SLURM_JOB_ID}.txt
-
 echo "=== Analyse finished at $(date) ==="
+
+# --- Job finished ---
+echo "=== JOB $SLURM_JOB_ID FINISHED at $(date) ==="
 echo "Check generated plots in: ./my_data_and_graph/historydata/"

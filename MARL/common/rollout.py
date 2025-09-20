@@ -107,8 +107,9 @@ class RolloutWorker:
                     f.write("---- End of episode ----\n")
 
             # # --- Step-level logging (accumulated reward + time, for debugging) ---
-            with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:
-                print(episode_reward, file=f)
+            #with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:
+            #    f.write(f"{step},{episode_reward}\n")  # step number + cumulative reward so far
+
             with open("./my_data_and_graph/historydata/times.txt", "a") as f:
                 print(info["time"], file=f)
             
@@ -118,11 +119,15 @@ class RolloutWorker:
 
         # === After while loop ends (episode finished) ===
         # --- Episode-level logging (for convergence analysis) ---
-        with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
-            print(episode_reward, file=f)
+        #with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
+        #    print(episode_reward, file=f)
+        
+        #with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
+        #    f.write(f"{episode_num},{episode_reward}\n")
+    
 
-        with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
-            f.write(f"{episode_num},{episode_reward},{info['time']}\n")
+        #with open("./my_data_and_graph/historydata/rewards_log.csv", "a") as f:
+        #    f.write(f"{episode_num},{episode_reward},{info['time']}\n")
             
         # last obs
         o.append(obs)

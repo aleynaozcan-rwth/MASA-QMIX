@@ -67,7 +67,7 @@ def get_mixer_args(args):
     args.train_steps = 2     # CHANGED (2 → 1)
 
     # evaluation / saving cadence
-    args.evaluate_cycle = 50     # CHANGED (50 → 25)
+    args.evaluate_cycle = 500     # CHANGED (50 → 25->500)
     args.batch_size     = 32    # CHANGED (32 → 16->8)
     args.buffer_size    = 5000   # CHANGED (5000 → 2000->1000)
 

@@ -23,18 +23,19 @@ np.random.seed(2)
 
 def marl_agent_wrapper():
     reset_files = [
-        "accumulated_rewards.txt",
+        #"accumulated_rewards.txt",
         "times.txt",
         "havealook.txt",
         "loss.txt",
-        "scheduleresults.txt"
+        "scheduleresults.txt",
+        "episode_rewards.txt" 
     ]
     for fname in reset_files:
         open(f"./my_data_and_graph/historydata/{fname}", "w").close()  # tamamen boş dosya oluştur
 
     # Reset CSV with header
-    with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
-        f.write("episode,reward,time\n")
+    #with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
+    #    f.write("episode,reward,time\n")
 
    #with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "w") as f:
    #    print("----", file=f)
@@ -112,7 +113,11 @@ def marl_agent_wrapper():
     print(f"Episode limit (steps per episode): {args.episode_limit}")
     print("====================================\n")
 
-    print("Load model (test only：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
+    #print("Load model (test only：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
+    print("Load model (test only:", args.load_model,
+          "Print intermediates:", args.havelook,
+          "Train:", args.learn)
+
 
     runner = Runner(env, args)
 

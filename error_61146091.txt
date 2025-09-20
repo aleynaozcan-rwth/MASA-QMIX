@@ -1,9 +1,0 @@
-[INFO] Module GCCcore/12.2.0 loaded.
-[INFO] Module Python/3.10.8 loaded.
-Traceback (most recent call last):
-  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/main.py", line 4, in <module>
-    from environment import ScheduleEnv
-  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/environment.py", line 197
-    self.step_count += 1
-    ^
-IndentationError: expected an indented block after function definition on line 196

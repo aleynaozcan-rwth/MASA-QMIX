@@ -1,0 +1,8 @@
+[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
+=== Training Reward Analysis (JobID: 61172354) ===
+Total episodes logged: 2005
+Average reward: 8.06
+Max reward: 10.08
+Min reward: 2.06
+[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png (JobID: 61172354)
+[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png (JobID: 61172354)
