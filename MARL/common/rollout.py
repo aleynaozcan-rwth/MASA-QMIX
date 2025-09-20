@@ -105,6 +105,10 @@ class RolloutWorker:
                         start, end, job_id, site_id, plane_id = rec
                         f.write(f"Plane {plane_id} | Job {job_id} | Site {site_id} | Start {start} | End {end}\n")
                     f.write("---- End of episode ----\n")
+            else:
+                # if not terminated why?
+                with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
+                    f.write(f"[DEBUG] Episode {episode_num} reached step_limit={step}/{self.episode_limit}, terminated={terminated}\n")
 
             # # --- Step-level logging (accumulated reward + time, for debugging) ---
             #with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "a") as f:

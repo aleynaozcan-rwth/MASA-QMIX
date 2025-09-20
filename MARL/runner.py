@@ -13,10 +13,10 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     Expected format: (start_time, end_time, job_id, site_id, plane_id)
     Creates and saves a simple Gantt chart of scheduled jobs.
     """
-    if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
+    if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple, list)):
         return False
-    if len(for_gantt_data[0]) != 5:
-        print("[WARN] Gantt plot skipped: wrong tuple format")
+    if len(for_gantt_data) == 0 or len(for_gantt_data[0]) != 5:
+        print("[WARN] Gantt plot skipped: wrong or empty tuple format")
         return False
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -55,86 +55,69 @@ class Runner:
         else:  # no communication agent
             self.agents = Agents(args)
             self.rolloutWorker = RolloutWorker(env, self.agents, args)
-        if args.learn and args.alg.find('coma') == -1 and args.alg.find('central_v') == -1 and args.alg.find('reinforce') == -1:  # these 3 algorithms are on-poliy
+        if args.learn and args.alg.find('coma') == -1 and args.alg.find('central_v') == -1 and args.alg.find('reinforce') == -1:  # these 3 algorithms are on-policy
             self.buffer = ReplayBuffer(args)
         self.args = args
         self.win_rates = []
         self.episode_rewards = []
 
-        # # Used to save plt and pkl
+        # Used to save plt and pkl
         self.save_path = self.args.result_dir + '/' + args.alg + '/' + args.map
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
 
     def run(self, num):
         train_steps = 0
-        for_gantt_data =[]
-        # print('Run {} start'.format(num))
+        all_gantt_data = []   # --- NEW: store all gantt data across episodes ---
         r_s = [0]
 
-         # --- NEW: global episode counter ---
+        # --- NEW: global episode counter ---
         global_ep_idx = 0
         # -----------------------------------
 
         for epoch in range(self.args.n_epoch):
-            # # Display output
-
             text = '\rRun {}, train epoch {}, ave_rewards {}'
             sys.stdout.write(text.format(num, epoch, sum(r_s)/len(r_s)))
             sys.stdout.flush()
 
-            # print('Run {}, train epoch {}'.format(num, epoch), flush=False)
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
-                win_rate, episode_reward = self.evaluate()
-                # print('win_rate is ', win_rate)
+                win_rate, episode_reward = self.evaluate(all_gantt_data)
                 self.win_rates.append(win_rate)
                 print("\nepisode_reward:", episode_reward, "epoch:", epoch)
                 self.episode_rewards.append(episode_reward)
-                # self.plt(num)
-                with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
-                    print(for_gantt_data, file=f)
 
-                # --- Added: call Gantt plot after saving results ---
+                # --- Save gantt data to file ---
+                with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
+                    print(all_gantt_data, file=f)
+
+                # --- Plot gantt chart ---
                 try:
-                    plot_gantt(for_gantt_data,
+                    plot_gantt(all_gantt_data,
                                filename=f"./my_data_and_graph/historydata/gantt_epoch{epoch}.png")
                 except Exception as e:
                     print("[WARN] Gantt plot skipped:", e)
-                # --- End of added part ---
 
             episodes = []
             r_s = []
-            #  # Collect self.args.n_episodes episodes
 
-
-            #for episode_idx in range(self.args.n_episodes):
-                #episode, _, _, for_gantt_data = self.rolloutWorker.generate_episode(episode_idx)
-                #episodes.append(episode)
-                #r_s.append(sum(episode['r'][0])[0])
-                # print(_)
             for episode_idx in range(self.args.n_episodes):
-                episode, _, _, for_gantt_data = self.rolloutWorker.generate_episode(episode_idx)
+                episode, _, _, gantt_data = self.rolloutWorker.generate_episode(episode_idx)
+                all_gantt_data.extend(gantt_data)   # --- NEW: accumulate gantt data ---
 
                 # --- FIX: episode reward correct calculation ---
-                # episode['r'] shape: (1, episode_len, n_agents, 1)
                 ep_r = np.sum(episode['r']) / self.args.n_agents
                 r_s.append(ep_r)
-                # ------------------------------------------
+                # ---------------------------------------------
 
                 episodes.append(episode)
 
-                ## Logla (opsiyonel, CSV’ye)
-                #with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
-                #    f.write(f"{episode_idx},{ep_r}\n")
-                
-                # --- NEW: log with global episode counter instead of local index ---
+                # --- Log with global episode counter ---
                 with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
                     f.write(f"{global_ep_idx},{ep_r}\n")
                 global_ep_idx += 1
-                # ------------------------------------------------------------------
+                # ---------------------------------------
 
-            # Each field of an episode is a 4-D array with shape (1, episode_len, n_agents, <dim>);
-            # concatenate all episodes along the first dimension
+            # Merge batch episodes
             episode_batch = episodes[0]
             episodes.pop(0)
             for episode in episodes:
@@ -144,25 +127,21 @@ class Runner:
                 self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
                 train_steps += 1
             else:
-                # These algorithms need to store into the replay buffer
                 self.buffer.store_episode(episode_batch)
                 for train_step in range(self.args.train_steps):
                     mini_batch = self.buffer.sample(min(self.buffer.current_size, self.args.batch_size))
                     self.agents.train(mini_batch, train_steps)
                     train_steps += 1
 
-        # self.plt(num)
-
-    def evaluate(self):
+    def evaluate(self, all_gantt_data):
         win_number = 0
         episode_rewards = 0
         for epoch in range(self.args.evaluate_epoch):
-            _, episode_reward, win_tag, for_gant = self.rolloutWorker.generate_episode(epoch, evaluate=True)
+            _, episode_reward, win_tag, gantt_eval = self.rolloutWorker.generate_episode(epoch, evaluate=True)
+            all_gantt_data.extend(gantt_eval)   # --- NEW: add eval gantt data too ---
             episode_rewards += episode_reward
             if win_tag:
                 win_number += 1
-        # # Returns average win count and average reward
-        print(for_gant)
         return win_number / self.args.evaluate_epoch, episode_rewards / self.args.evaluate_epoch
 
     def plt(self, num):

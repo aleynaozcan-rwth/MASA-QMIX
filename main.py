@@ -22,16 +22,16 @@ np.random.seed(2)
 # RL decision wrapper that wires a DRL multi-agent into the environment
 
 def marl_agent_wrapper():
-    reset_files = [
+    #reset_files = [
         #"accumulated_rewards.txt",
-        "times.txt",
-        "havealook.txt",
-        "loss.txt",
-        "scheduleresults.txt",
-        "episode_rewards.txt" 
-    ]
-    for fname in reset_files:
-        open(f"./my_data_and_graph/historydata/{fname}", "w").close()  # tamamen boş dosya oluştur
+    #    "times.txt",
+    #    "havealook.txt",
+    #    "loss.txt",
+        #"scheduleresults.txt",
+    #    "episode_rewards.txt" 
+    #]
+    #for fname in reset_files:
+    #    open(f"./my_data_and_graph/historydata/{fname}", "w").close()  # tamamen boş dosya oluştur
 
     # Reset CSV with header
     #with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
@@ -49,8 +49,8 @@ def marl_agent_wrapper():
    #    pass
         
     # Reset rewards log CSV (for plotting)
-    with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
-        f.write("episode,reward,time\n")
+    #with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
+    #    f.write("episode,reward,time\n")
 
     # import datetime, os, time
     # from shutil import copyfile

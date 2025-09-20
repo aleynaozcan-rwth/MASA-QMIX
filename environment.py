@@ -216,25 +216,30 @@ class ScheduleEnv(gym.Env):
                     time_on_road = util.count_path_on_road(self.planes[i].position,
                                                            self.sites[site_id].absolute_position.tolist(), self.plane_speed)
                     start_time = sum(self.episode_time_slice)
+
+                    # --- FIX: take job_id BEFORE executing the taskSolution to non processed job5 ---
+                    job_id = self.planes[i].left_job[0].index_id
+                    # ----------------------------------------------------------------------------------
+
                     temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
                     duration = temp_time + time_on_road
                     end_time = start_time + duration
+
+                    if type(site_id) == int:
+                        self.save_env_info((start_time, end_time, job_id, site_id, i))
+                    else:
+                        self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
                     # --- NOTE (Gantt extension): we added start_time, end_time, job_id
                     # for visualization purposes. Before, only temp_time was stored.
                     # Now we record full scheduling intervals. ---
 
                     # --- FIX: check if left_job exists ---
-                    if len(self.planes[i].left_job) > 0:
-                        job_id = self.planes[i].left_job[0].index_id
-                    else:
-                        job_id = -1   # placeholder when no job is left
+                    #if len(self.planes[i].left_job) > 0:
+                    #    job_id = self.planes[i].left_job[0].index_id
+                    #else:
+                    #    job_id = -1   # placeholder when no job is left
                     # --- END FIX ---
-
-                    if type(site_id) == int:
-                        self.save_env_info((start_time, end_time, job_id, site_id, i))
-                    else:
-                        self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
                     time_span_increase[site_id] = duration
                     # self.state[site_id][0] = i  # mark the site as occupied

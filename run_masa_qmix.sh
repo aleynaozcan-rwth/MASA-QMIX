@@ -5,8 +5,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
 #SBATCH --partition=c23g
-#SBATCH --mem=32G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --cpus-per-task=16
 
 # --- Environment setup ---
 module purge
@@ -18,6 +18,12 @@ source ~/masa-qmix-env-gpu/bin/activate
 
 # Move to project directory
 cd ~/MASA-QMIX
+
+# --- Cleanup old outputs (start fresh for each run) ---
+rm -f ./my_data_and_graph/historydata/*.txt
+rm -f ./my_data_and_graph/historydata/*.csv
+rm -f ./my_data_and_graph/historydata/*.png
+rm -f ./my_data_and_graph/pickles/*.pk
 
 # --- Job started ---
 echo "=== JOB $SLURM_JOB_ID STARTED at $(date) ==="
