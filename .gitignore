@@ -9,3 +9,4 @@ __pycache__/
 # result/
 # MARL/model/
 # my_data_and_graph/historydata/
+my_data_and_graph/historydata/*.txt
