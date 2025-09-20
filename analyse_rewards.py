@@ -5,8 +5,9 @@ import os
 
 HIST_DIR = "./my_data_and_graph/historydata"
 
-# SLURM Job ID'yi environment variable'dan al (batch run sırasında otomatik set edilir)
+# SLURM Job ID (for logging context)
 JOB_ID = os.environ.get("SLURM_JOB_ID", "local")
+
 
 def analyse_rewards(file_path, label="Training"):
     if not os.path.exists(file_path):
@@ -14,10 +15,15 @@ def analyse_rewards(file_path, label="Training"):
         return
 
     try:
-        # Dosya hep 2 sütun: (episode_idx, reward)
         rewards_df = pd.read_csv(file_path, header=None)
-        episodes = rewards_df.iloc[:, 0].astype(int).tolist()
-        rewards = rewards_df.iloc[:, 1].astype(float).tolist()
+        if rewards_df.shape[1] == 2:
+            episodes = rewards_df.iloc[:, 0].astype(int).tolist()
+            rewards = rewards_df.iloc[:, 1].astype(float).tolist()
+        else:
+            rewards = pd.to_numeric(
+                rewards_df.squeeze("columns"), errors="coerce"
+            ).dropna().tolist()
+            episodes = np.arange(len(rewards))
     except Exception as e:
         print(f"[!] Error reading {file_path}: {e}")
         return
@@ -30,11 +36,11 @@ def analyse_rewards(file_path, label="Training"):
 
     # --- Plot ---
     plt.figure(figsize=(10, 6))
-    plt.plot(episodes, rewards, color="lightblue", alpha=0.4, label="Raw Reward")
-    plt.plot(episodes, smoothed, color="red", linewidth=2, label="Smoothed (50 ep)")
-    plt.title("QMIX Reward Convergence")
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
+    plt.plot(episodes, rewards, color="lightblue", alpha=0.4, label="Raw (global per-episode reward)")
+    plt.plot(episodes, smoothed, color="red", linewidth=2, label="Smoothed (50-episode avg)")
+    plt.title("Reward Curve (Global reward averaged per episode)")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Reward (global, already averaged over agents)")
     plt.legend()
     plt.grid(True)
 
@@ -66,16 +72,16 @@ def analyse_times(file_path):
         print(f"[!] No time data in {file_path}")
         return
 
-    runs = np.arange(len(times))
+    episodes = np.arange(len(times))
     smoothed = pd.Series(times).rolling(50, min_periods=1).mean()
 
     # --- Plot ---
     plt.figure(figsize=(10, 6))
-    plt.plot(runs, times, color="lightblue", alpha=0.4, label="Raw Time")
-    plt.plot(runs, smoothed, color="red", linewidth=2, label="Smoothed (50)")
+    plt.plot(episodes, times, color="lightblue", alpha=0.4, label="Raw episode duration")
+    plt.plot(episodes, smoothed, color="red", linewidth=2, label="Smoothed (50-episode avg)")
     plt.title("Training Duration per Episode")
-    plt.xlabel("Episode")
-    plt.ylabel("Time (s)")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Episode Duration (steps)")
     plt.legend()
     plt.grid(True)
 
@@ -85,7 +91,7 @@ def analyse_times(file_path):
     print(f"[+] Training time curve saved to {out_path} (JobID: {JOB_ID})")
 
 
-def analyse_loss(file_path):
+def analyse_loss(file_path, zoom=False):
     if not os.path.exists(file_path):
         print(f"[!] File not found: {file_path}")
         return
@@ -96,7 +102,6 @@ def analyse_loss(file_path):
             for line in f:
                 line = line.strip()
                 if line.startswith("tensor("):
-                    # "tensor(3.6622, grad_fn=<...>)" → 3.6622
                     try:
                         val = float(line.split("(")[1].split(",")[0])
                         losses.append(val)
@@ -120,25 +125,31 @@ def analyse_loss(file_path):
 
     # --- Plot ---
     plt.figure(figsize=(10, 6))
-    plt.plot(steps, losses, color="lightblue", alpha=0.4, label="Raw Loss")
-    plt.plot(steps, smoothed, color="red", linewidth=2, label="Smoothed (50)")
+    plt.plot(steps, losses, color="lightblue", alpha=0.4, label="Raw loss (per mini-batch update)")
+    plt.plot(steps, smoothed, color="red", linewidth=2, label="Smoothed (50-update avg)")
     plt.title("Loss Curve")
-    plt.xlabel("Step")
+    plt.xlabel("Training Step (mini-batch updates)")
     plt.ylabel("Loss")
+
+    if zoom:
+        plt.ylim(0, np.percentile(losses, 95))  # zoom in to 95th percentile
+
     plt.legend()
     plt.grid(True)
 
     out_path = os.path.join(HIST_DIR, "loss_curve.png")
+    if zoom:
+        out_path = out_path.replace(".png", "_zoomed.png")
     plt.savefig(out_path)
     plt.close()
     print(f"[+] Loss curve saved to {out_path} (JobID: {JOB_ID})")
 
 
 if __name__ == "__main__":
-    rewards_file = os.path.join(HIST_DIR, "episode_rewards.txt")  # 2-column (episode,reward)
+    rewards_file = os.path.join(HIST_DIR, "episode_rewards.txt")
     times_file = os.path.join(HIST_DIR, "times.txt")
     loss_file = os.path.join(HIST_DIR, "loss.txt")
 
     analyse_rewards(rewards_file, "Training")
     analyse_times(times_file)
-    analyse_loss(loss_file)
+    analyse_loss(loss_file, zoom=True)  # zoom=True enables zoomed-in version
