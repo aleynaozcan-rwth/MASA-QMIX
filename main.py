@@ -1,4 +1,3 @@
-
 import numpy as np
 import pickle
 from environment import ScheduleEnv
@@ -22,48 +21,6 @@ np.random.seed(2)
 # RL decision wrapper that wires a DRL multi-agent into the environment
 
 def marl_agent_wrapper():
-    #reset_files = [
-        #"accumulated_rewards.txt",
-    #    "times.txt",
-    #    "havealook.txt",
-    #    "loss.txt",
-        #"scheduleresults.txt",
-    #    "episode_rewards.txt" 
-    #]
-    #for fname in reset_files:
-    #    open(f"./my_data_and_graph/historydata/{fname}", "w").close()  # tamamen boş dosya oluştur
-
-    # Reset CSV with header
-    #with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
-    #    f.write("episode,reward,time\n")
-
-   #with open("./my_data_and_graph/historydata/accumulated_rewards.txt", "w") as f:
-   #    print("----", file=f)
-   #with open("my_data_and_graph/times.txt", "w") as f:
-   #    print("----", file=f)
-   #with open("./my_data_and_graph/historydata/havealook.txt", "w") as f:
-   #    pass
-   #with open("./my_data_and_graph/historydata/loss.txt", "w") as f:
-   #    pass
-   #with open("./my_data_and_graph/historydata/scheduleresults.txt", "w") as f:
-   #    pass
-        
-    # Reset rewards log CSV (for plotting)
-    #with open("./my_data_and_graph/historydata/rewards_log.csv", "w") as f:
-    #    f.write("episode,reward,time\n")
-
-    # import datetime, os, time
-    # from shutil import copyfile
-    # if os.path.exists("my_data_and_graph/marl.time_reward.txt"):
-    #     tar = "my_data_and_graph/marlhisrtorydata/" + str(datetime.date.today()) + "-" + str(time.time()).split(".")[
-    #         0] + "marl.time_reward.txt"
-    #     with open(tar, "w") as f:
-    #         pass
-    #     copyfile("my_data_and_graph/marl.time_reward.txt", tar)
-    #
-    # with open("my_data_and_graph/marl.time_reward.txt", "w") as f:
-    #     pass
-    # for i in range(8):  #  # because there are 8 MARL algorithms in total
     args = get_common_args()
 
     if args.alg.find('coma') > -1:  # choose algorithm-specific hyperparameters
@@ -90,7 +47,7 @@ def marl_agent_wrapper():
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
 
-        # --- Training Setup Summary (printed to standart output) ---
+    # --- Training Setup Summary (printed to standart output) ---
     print("\n=== Training Setup Summary (Args) ===")
     print(f"Algorithm: {args.alg}")
     print(f"Map: {args.map}")
@@ -113,24 +70,22 @@ def marl_agent_wrapper():
     print(f"Episode limit (steps per episode): {args.episode_limit}")
     print("====================================\n")
 
-    #print("Load model (test only：", args.load_model,  "Print intermediates:", args.havelook, "Train:",args.learn)
     print("Load model (test only:", args.load_model,
           "Print intermediates:", args.havelook,
           "Train:", args.learn)
 
-
     runner = Runner(env, args)
 
     if args.learn:
-        runner.run(0)  # # originally supported multiple algos; run() took an algorithm id
+        runner.run(0)  # originally supported multiple algos; run() took an algorithm id
     else:
-        _, reward = runner.evaluate()
-        print('The ave_reward of {} is  {}'.format(args.alg, reward))
+        # FIX: evaluate now returns (win_rate, reward, global_ep_idx)
+        win_rate, reward, _ = runner.evaluate([], 0)
+        print(f'The ave_reward of {args.alg} is {reward}')
 
 
 # # Random decision baseline for environment testing
 def random_agent_wrapper():
-
     episodes = 50
 
     env = ScheduleEnv()
@@ -142,19 +97,17 @@ def random_agent_wrapper():
         s = env.reset()
         is_terminal = False
         while not is_terminal:
-            # print(1)
             actions = []
-            # # Only dispatch agents that are not currently busy   
+            # Only dispatch agents that are not currently busy   
             temp_not_idle_agents = []
             for m in range(len(env.sites)):
                 if s[m] != 9:
                     temp_not_idle_agents.append(s[m])
 
             for i in range(len(env.planes)):
-                if i in temp_not_idle_agents:  # # agent i is currently busy
+                if i in temp_not_idle_agents:  # agent i is currently busy
                     actions.append(18)
                 else:
-                    # print(i)
                     avail_actions = env.get_avail_agent_actions(i)
                     tem_choose = []
                     if type(avail_actions) != str:
@@ -170,14 +123,11 @@ def random_agent_wrapper():
                     else:
                         actions.append(18)
             s, r, is_terminal, dict = env.step(actions)
-            # print(actions)
-            # print(s[:18])
         EATs.append(dict["time"])
         schedule_processes.append(env.job_record_for_gant)
         print(env.job_record_for_gant)
         print(dict["time"], "-----------------------------------")
     print(sum(EATs)/len(EATs))
-    # # Store intermediate results
     with open("./my_data_and_graph/pickles/process.pk", "wb") as f:
         pickle.dump(schedule_processes, f)
 
@@ -199,7 +149,6 @@ def SDrules_agent_wrapper():
             # agents_id_sequence = sd_rules.MLF_generate_agents_sequence(env.planes)
             # agents_id_sequence = sd_rules.LLF_generate_agents_sequence(env.planes)
 
-
             for agent_id in agents_id_sequence:
                 avail_actions = env.get_avail_agent_actions(agent_id)
                 current_plane_location = env.planes[agent_id].position
@@ -207,8 +156,7 @@ def SDrules_agent_wrapper():
                 actions.append(action)
                 if action < 18:
                     env.has_chosen_action(action, agent_id)
-            ## Reorder the actions back into agent index order
-            # because the environment expects actions in agent-id order
+
             reorder_actions = [-1 for i in range(8)]
             for i in range(8):
                 reorder_actions[agents_id_sequence[i]] = actions[i]
