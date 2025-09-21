@@ -1,0 +1,10 @@
+[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
+[+] Reward curve (zoomed) saved to ./my_data_and_graph/historydata/rewards_curve_zoomed.png
+=== Training Reward Analysis ===
+Total episodes logged: 600
+Average reward: -10.20
+Max reward: 9.46
+Min reward: -159.25
+[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png
+[+] Loss curve (zoomed) saved to ./my_data_and_graph/historydata/loss_curve_zoomed.png
+[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png
