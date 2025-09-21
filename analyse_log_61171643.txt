@@ -1,4 +1,0 @@
-[!] Error reading ./my_data_and_graph/historydata/episode_rewards.txt: Error tokenizing data. C error: Expected 1 fields in line 2, saw 2
-
-[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png (JobID: 61171643)
-[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png (JobID: 61171643)
