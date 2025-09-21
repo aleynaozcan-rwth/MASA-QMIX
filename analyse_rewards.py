@@ -18,8 +18,6 @@ def smooth(y, box_pts=50):
         return y
     box = np.ones(box_pts) / box_pts
     y_smooth = np.convolve(y, box, mode="valid")
-
-    # baş/son kenar etkisini kaldırmak için NaN ekle
     pad = (len(y) - len(y_smooth)) // 2
     y_smooth = np.concatenate([
         [np.nan] * pad,
@@ -42,7 +40,7 @@ def plot_rewards():
         episodes = data[:, 0]
         rewards = data[:, 1]
 
-    # Normal reward curve
+    # --- Normal Reward Curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
@@ -54,6 +52,7 @@ def plot_rewards():
     plt.ylabel("Global Reward (average per agent)")
     plt.legend()
     plt.grid(True)
+    # PlotFixText: normal reward curve, shows all values including outliers
     plt.figtext(
         0.5, -0.08,
         "Note: Rewards are averaged per agent.\n"
@@ -66,22 +65,27 @@ def plot_rewards():
     plt.close()
     print(f"[+] Reward curve saved to {save_path}")
 
-    # Zoomed reward curve
+    # --- Zoomed Reward Curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
         plt.plot(episodes, smooth(rewards, 50),
                  label="Smoothed", color="red")
-    plt.ylim(np.percentile(rewards, 5), np.percentile(rewards, 95))  # odaklan
+
+    # Focus on 5th–95th percentile range
+    low, high = np.percentile(rewards, 5), np.percentile(rewards, 95)
+    plt.ylim(low, high)
+
     plt.title("Reward Curve (Zoomed)")
     plt.xlabel("Episode Index")
     plt.ylabel("Global Reward (average per agent)")
     plt.legend()
     plt.grid(True)
+    # PlotFixText: zoomed reward curve, focuses on stable region by removing outliers
     plt.figtext(
         0.5, -0.08,
         "Zoomed view: rewards between 5th and 95th percentile.\n"
-        "Shows stable convergence without outliers.",
+        "Highlights main convergence trend without extreme outliers.",
         wrap=True, ha="center", fontsize=9
     )
     plt.tight_layout()
@@ -124,7 +128,7 @@ def plot_loss():
 
     steps = np.arange(len(data))
 
-    # Normal loss curve
+    # --- Normal loss curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
@@ -135,6 +139,7 @@ def plot_loss():
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
+    # PlotFixText: loss curve over all steps, raw + smoothed
     plt.figtext(
         0.5, -0.08,
         "One training step = one mini-batch update "
@@ -147,7 +152,7 @@ def plot_loss():
     plt.close()
     print(f"[+] Loss curve saved to {save_path}")
 
-    # Zoomed-in loss curve
+    # --- Zoomed-in loss curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
@@ -159,6 +164,7 @@ def plot_loss():
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
+    # PlotFixText: zoomed loss curve, hides extreme outliers
     plt.figtext(
         0.5, -0.08,
         "Zoomed view: y-limit set to 95th percentile.\n"
@@ -177,7 +183,7 @@ def plot_training_time():
     if not os.path.exists(time_file):
         print("[WARN] No times file found.")
         return
-    times = np.loadtxt(time_file, delimiter=",")[:, 1]  # ikinci kolon süre
+    times = np.loadtxt(time_file, delimiter=",")[:, 1]  # second column = duration
     episodes = np.arange(len(times))
 
     plt.figure(figsize=(12, 7))
@@ -191,11 +197,12 @@ def plot_training_time():
     plt.ylabel("Episode Duration (steps)")
     plt.legend()
     plt.grid(True)
+    # PlotFixText: training duration = makespan estimate per episode
     plt.figtext(
         0.5, -0.08,
         "Logged value = sum(episode_time_slice) + max(state_left_time)\n"
-        "= time spent so far + longest remaining job duration.\n"
-        "Means: current estimate of makespan if all jobs continue as now.",
+        "= elapsed time + longest remaining job duration.\n"
+        "Interpretation: estimated makespan if jobs continue unchanged.",
         wrap=True, ha="center", fontsize=9
     )
     plt.tight_layout()
