@@ -12,10 +12,20 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 
-# === Helper: smooth values ===
+# === Helper: smooth values (with edge fix) ===
 def smooth(y, box_pts=50):
+    if len(y) < box_pts:
+        return y
     box = np.ones(box_pts) / box_pts
-    y_smooth = np.convolve(y, box, mode="same")
+    y_smooth = np.convolve(y, box, mode="valid")
+
+    # baş/son kenar etkisini kaldırmak için NaN ekle
+    pad = (len(y) - len(y_smooth)) // 2
+    y_smooth = np.concatenate([
+        [np.nan] * pad,
+        y_smooth,
+        [np.nan] * (len(y) - len(y_smooth) - pad)
+    ])
     return y_smooth
 
 
@@ -32,7 +42,8 @@ def plot_rewards():
         episodes = data[:, 0]
         rewards = data[:, 1]
 
-    plt.figure(figsize=(10, 6))
+    # Normal reward curve
+    plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
         plt.plot(episodes, smooth(rewards, 50),
@@ -43,16 +54,46 @@ def plot_rewards():
     plt.ylabel("Global Reward (average per agent)")
     plt.legend()
     plt.grid(True)
+    plt.figtext(
+        0.5, -0.08,
+        "Note: Rewards are averaged per agent.\n"
+        "Smoothed curve uses moving average with window=50 episodes.",
+        wrap=True, ha="center", fontsize=9
+    )
     plt.tight_layout()
     save_path = os.path.join(save_dir, "rewards_curve.png")
     plt.savefig(save_path)
     plt.close()
+    print(f"[+] Reward curve saved to {save_path}")
+
+    # Zoomed reward curve
+    plt.figure(figsize=(12, 7))
+    plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
+    if len(rewards) >= 50:
+        plt.plot(episodes, smooth(rewards, 50),
+                 label="Smoothed", color="red")
+    plt.ylim(np.percentile(rewards, 5), np.percentile(rewards, 95))  # odaklan
+    plt.title("Reward Curve (Zoomed)")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Global Reward (average per agent)")
+    plt.legend()
+    plt.grid(True)
+    plt.figtext(
+        0.5, -0.08,
+        "Zoomed view: rewards between 5th and 95th percentile.\n"
+        "Shows stable convergence without outliers.",
+        wrap=True, ha="center", fontsize=9
+    )
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "rewards_curve_zoomed.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[+] Reward curve (zoomed) saved to {save_path}")
 
     # Print analysis
     avg_reward = np.mean(rewards)
     max_reward = np.max(rewards)
     min_reward = np.min(rewards)
-    print(f"[+] Reward curve saved to {save_path}")
     print("=== Training Reward Analysis ===")
     print(f"Total episodes logged: {len(rewards)}")
     print(f"Average reward: {avg_reward:.2f}")
@@ -66,11 +107,9 @@ def plot_loss():
         print("[WARN] No loss file found.")
         return
 
-    # --- FIX: clean up tensor(...) strings ---
     def clean_loss_line(line):
         line = line.strip()
         if line.startswith("tensor("):
-            # keep only the numeric value before the first comma
             line = line.replace("tensor(", "").split(",")[0]
         return line
 
@@ -82,26 +121,26 @@ def plot_loss():
     except ValueError as e:
         print("[ERROR] Could not parse loss file:", e)
         return
-    # -----------------------------------------
 
     steps = np.arange(len(data))
 
     # Normal loss curve
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
         plt.plot(steps, smooth(data, 50),
                  label="Smoothed", color="red")
-
     plt.title("Loss Curve")
     plt.xlabel("Training Step (mini-batch updates)")
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
-    plt.figtext(0.5, -0.05,
-                "One training step = one mini-batch update "
-                "(not to be confused with environment episode steps)",
-                wrap=True, ha="center", fontsize=9)
+    plt.figtext(
+        0.5, -0.08,
+        "One training step = one mini-batch update "
+        "(not to be confused with environment episode steps).",
+        wrap=True, ha="center", fontsize=9
+    )
     plt.tight_layout()
     save_path = os.path.join(save_dir, "loss_curve.png")
     plt.savefig(save_path)
@@ -109,21 +148,23 @@ def plot_loss():
     print(f"[+] Loss curve saved to {save_path}")
 
     # Zoomed-in loss curve
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
         plt.plot(steps, smooth(data, 50),
                  label="Smoothed (50-update avg)", color="red")
-    plt.ylim(0, np.percentile(data, 95))  # cut extreme outliers
+    plt.ylim(0, np.percentile(data, 95))
     plt.title("Loss Curve (Zoomed In)")
     plt.xlabel("Training Step (mini-batch updates)")
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
-    plt.figtext(0.5, -0.05,
-                "One training step = one mini-batch update "
-                "(not to be confused with environment episode steps)",
-                wrap=True, ha="center", fontsize=9)
+    plt.figtext(
+        0.5, -0.08,
+        "Zoomed view: y-limit set to 95th percentile.\n"
+        "Removes extreme outliers to highlight main trend.",
+        wrap=True, ha="center", fontsize=9
+    )
     plt.tight_layout()
     save_path = os.path.join(save_dir, "loss_curve_zoomed.png")
     plt.savefig(save_path)
@@ -131,16 +172,15 @@ def plot_loss():
     print(f"[+] Loss curve (zoomed) saved to {save_path}")
 
 
-
 # === Plot 3: Training Duration per Episode ===
 def plot_training_time():
     if not os.path.exists(time_file):
         print("[WARN] No times file found.")
         return
-    times = np.loadtxt(time_file)
+    times = np.loadtxt(time_file, delimiter=",")[:, 1]  # ikinci kolon süre
     episodes = np.arange(len(times))
 
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 7))
     plt.plot(episodes, times, label="Raw episode duration", alpha=0.5)
     if len(times) >= 50:
         plt.plot(episodes, smooth(times, 50),
@@ -152,14 +192,11 @@ def plot_training_time():
     plt.legend()
     plt.grid(True)
     plt.figtext(
-        0.5,
-        -0.08,
+        0.5, -0.08,
         "Logged value = sum(episode_time_slice) + max(state_left_time)\n"
         "= time spent so far + longest remaining job duration.\n"
         "Means: current estimate of makespan if all jobs continue as now.",
-        wrap=True,
-        ha="center",
-        fontsize=9,
+        wrap=True, ha="center", fontsize=9
     )
     plt.tight_layout()
     save_path = os.path.join(save_dir, "training_time.png")
