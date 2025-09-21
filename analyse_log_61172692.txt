@@ -1,8 +1,0 @@
-[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
-=== Training Reward Analysis (JobID: 61172692) ===
-Total episodes logged: 2020
-Average reward: 7.92
-Max reward: 9.68
-Min reward: 3.93
-[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png (JobID: 61172692)
-[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve_zoomed.png (JobID: 61172692)
