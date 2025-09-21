@@ -25,12 +25,13 @@ def get_common_args():
     parser.add_argument('--reuse_network', type=bool, default=True, help='whether to use one network for all agents')
     parser.add_argument('--gamma', type=float, default=0.99, help='discount factor')
     parser.add_argument('--optimizer', type=str, default="RMS", help='optimizer')
-    parser.add_argument('--evaluate_epoch', type=int, default=20, help='number of epochs between evaluations')
 
     # NOTE on CLI (Command-Line Interface):
     # In terminals (e.g., WSL Ubuntu / VS Code Terminal), passing booleans like "--learn False"
     # can be tricky because bool("False") becomes True in Python. For now we keep defaults here.
     # (We can switch to store_true/store_false later if you want to flip them from CLI.)
+    parser.add_argument('--evaluate_epoch', type=int, default=5, help='number of episodes in each evaluation')
+
     parser.add_argument('--model_dir', type=str, default='./MARL/model', help='model directory of the policy')
     parser.add_argument('--result_dir', type=str, default='./result', help='result directory of the policy')
 
@@ -47,45 +48,52 @@ def get_common_args():
 def get_mixer_args(args):
     # ---------- QUICK-RUN CHANGES (original → new) ----------
     # network
-    args.rnn_hidden_dim   = 64     # CHANGED (64 → 32)
-    args.qmix_hidden_dim  = 32    # CHANGED (32 → 16)
-    args.two_hyper_layers = False  # (unchanged)
-    args.hyper_hidden_dim = 64    # CHANGED (64 → 32)
-    args.qtran_hidden_dim = 64     # (unchanged)
-    args.lr               = 5e-4   # CHANGED (5e-4 → 1e-3)
+    args.rnn_hidden_dim   = 64     # keep standard
+    args.qmix_hidden_dim  = 32     # small hidden dim is enough for quick run
+    args.two_hyper_layers = False  # unchanged
+    args.hyper_hidden_dim = 64     # unchanged
+    args.qtran_hidden_dim = 64     # unchanged
+    args.lr               = 5e-4   # unchanged (stable)
 
     # epsilon-greedy
-    args.epsilon          = 1.0    # (unchanged)
-    args.min_epsilon      = 0.05   # (unchanged)
-    anneal_steps          = 50000   # CHANGED (50000 → 5000->2000)
+    args.epsilon          = 1.0    # unchanged
+    args.min_epsilon      = 0.05   # unchanged
+    anneal_steps          = 2000   # DECREASED (50000 → 2000) for faster epsilon annealing
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
-    args.epsilon_anneal_scale = 'step'  # (unchanged)
+    args.epsilon_anneal_scale = 'step'
 
     # training schedule
-    args.n_epoch     = 15000   # CHANGED (15000 → 200-> 300->150)
-    args.n_episodes  = 5    # CHANGED (5 → 2->3)
-    args.train_steps = 2     # CHANGED (2 → 1)
+    args.n_epoch     = 200    # DECREASED (15000 → 200) → quick run total training epochs #1 epoch = n_episodes tane episode.
+    args.n_episodes  = 3      # DECREASED (5 → 3) → fewer episodes per epoch
+    args.train_steps = 2      # unchanged
+    #her epoch = 3 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
+    #1 episode = 1 scheduling.
+
+    #    1 epoch = 3 scheduling.
+    #    200 epoch = 600 scheduling (600 episode).
+    #    Her epoch sonunda → 2 defa network güncellemesi yapılıyor.
+    #    Her episode’un içinde → max 80 environment step var (ama job’lar daha erken bitince episode erken de bitebilir).
 
     # evaluation / saving cadence
-    args.evaluate_cycle = 500     # CHANGED (50 → 25->500)
-    args.batch_size     = 32    # CHANGED (32 → 16->8)
-    args.buffer_size    = 5000   # CHANGED (5000 → 2000->1000)
+    args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
+    args.batch_size     = 16    # DECREASED (32 → 16)
+    args.buffer_size    = 1000  # DECREASED (5000 → 1000)
 
-    args.save_cycle         = 50   # CHANGED (50 → 200)  # save less often in quick runs
-    args.target_update_cycle= 200   # CHANGED (200 → 100)
+    args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
+    args.target_update_cycle= 50    # DECREASED (200 → 50)
 
     # QTRAN lambda (unused for plain QMIX, kept for compatibility)
-    args.lambda_opt  = 1     # (unchanged)
-    args.lambda_nopt = 1     # (unchanged)
+    args.lambda_opt  = 1
+    args.lambda_nopt = 1
 
     # prevent gradient explosion
-    args.grad_norm_clip = 10 # (unchanged)
+    args.grad_norm_clip = 10
 
     # MAVEN (left as-is; only used if alg == 'maven')
-    args.noise_dim            = 16    # (unchanged)
-    args.lambda_mi            = 0.001 # (unchanged)
-    args.lambda_ql            = 1     # (unchanged)
-    args.entropy_coefficient  = 0.001 # (unchanged)
+    args.noise_dim            = 16
+    args.lambda_mi            = 0.001
+    args.lambda_ql            = 1
+    args.entropy_coefficient  = 0.001
     return args
 
 
