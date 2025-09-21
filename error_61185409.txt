@@ -1,0 +1,16 @@
+[INFO] Module GCCcore/12.2.0 loaded.
+[INFO] Module Python/3.10.8 loaded.
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Traceback (most recent call last):
+  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/analyse_rewards.py", line 175, in <module>
+    plot_training_time()
+  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/analyse_rewards.py", line 140, in plot_training_time
+    times = np.loadtxt(time_file)
+  File "/home/cc253232/masa-qmix-env-gpu/lib/python3.10/site-packages/numpy/lib/_npyio_impl.py", line 1395, in loadtxt
+    arr = _read(fname, dtype=dtype, comment=comment, delimiter=delimiter,
+  File "/home/cc253232/masa-qmix-env-gpu/lib/python3.10/site-packages/numpy/lib/_npyio_impl.py", line 1046, in _read
+    arr = _load_from_filelike(
+ValueError: could not convert string '0,232' to float64 at row 0, column 1.
