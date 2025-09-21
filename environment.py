@@ -12,6 +12,7 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import math
+
 # # Whole environment class
 class ScheduleEnv(gym.Env):
     environment_name = "Boat Schedule"
@@ -37,22 +38,25 @@ class ScheduleEnv(gym.Env):
         #   len(self.sites)+1      : busy (currently processing)   -> not used for training
         #   len(self.sites)+2      : finished (no jobs remaining)  -> not used for training
 
-        
-         
-        #“0–17 indicate the site to go to next; 18 means wait due to a resource conflict; 19 means currently busy (processing); 20 means finished. Actions 19 and 20 are not used for training.”
+        # “0–17 indicate the site to go to next; 18 means wait due to a resource conflict; 
+        #  19 means currently busy (processing); 20 means finished. 
+        #  Actions 19 and 20 are not used for training.”
         self.action_space = spaces.Discrete(len(self.sites)+3)  # +3 for [wait, busy, finished]
         self.id = "Boat Schedule"
         #   # Legacy/compat placeholders (not critical for training)
         self.reward_threshold = -1000
         self.trials = 50  # # roughly analogous to steps in older experiments
 
-        self.job_record_for_gant = []  # # store (timestamp, job_id, site_id, plane_id) tuples for Gantt visualization
+        self.job_record_for_gant = []  
+        # # store (timestamp, job_id, site_id, plane_id) tuples for Gantt visualization
 
-        self.sites_state_global = None  # this para is utilized to indicate the current idle sites and their processing jobs # indicates idle sites (-1) or the job-id currently being processed at each site
+        self.sites_state_global = None  
+        # this para is utilized to indicate the current idle sites and their processing jobs 
+        # # indicates idle sites (-1) or the job-id currently being processed at each site
 
         #  # One global state and per-agent observations
         self.state4marl = None  # # global state maintained for MARL
-        self.obs4marl = None
+        self.obs4marl = None    # # per-agent observations for MARL
 
     def initialize(self):
         sites_obj = Sites()
@@ -67,12 +71,13 @@ class ScheduleEnv(gym.Env):
 
         self.planes = self.planes_obj.planes_object_list
 
-        self.state = [[9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]] for i in range(len(self.sites))]
+        self.state = [[9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]] 
+                      for i in range(len(self.sites))]
 
-        self.sites_state_global = [-1 for i in range(len(self.sites))] # # -1 means no support task assigned
+        self.sites_state_global = [-1 for i in range(len(self.sites))]  
+        # # -1 means no support task assigned
 
         self.job_record_for_gant = []  # # store (timestamp, job_id, site_id, plane_id) tuples during scheduling
-
 
         self.done = False
         self.state_left_time = np.array([0 for i in range(len(self.sites))])
@@ -92,17 +97,12 @@ class ScheduleEnv(gym.Env):
         info = {
             "sites": [[self.sites[i].absolute_position,
                        self.state[i][0],
-                       self.state[i][1]
-                       ] for i in range(len(self.sites))],
+                       self.state[i][1]] for i in range(len(self.sites))],
             "planes": [[self.planes[i].left_job[0].index_id,
                         self.jobs[self.planes[i].left_job[0].index_id].time_span,
-                        len(self.planes[i].left_job)
-                        ] if len(self.planes[i].left_job) != 0
-                       else [
-                9,
-                0,
-                len(self.planes[i].left_job)
-            ] for i in range(len(self.planes))],
+                        len(self.planes[i].left_job)]
+                       if len(self.planes[i].left_job) != 0 else [9, 0, len(self.planes[i].left_job)] 
+                       for i in range(len(self.planes))],
             "planes_obj": self.planes
         }
         state = self.conduct_state(info)
@@ -119,7 +119,6 @@ class ScheduleEnv(gym.Env):
             temp.append(eve[1])
 
         for eve in info["sites"]:
-
             res += eve[2]
 
         for i, eve in enumerate(info["planes"]):
@@ -129,10 +128,10 @@ class ScheduleEnv(gym.Env):
                 if self.planes[i].left_job == []:
                     temp_obs.append(0)
                 else:
-                      # idle site and site can process plane's next job -> plane can go there next
+                    # idle site and site can process plane's next job -> plane can go there next
                     if eve_1 == 9 and self.planes[i].left_job[0].index_id in self.sites[l].resource_ids_list:
-
-                        temp_obs.append(util.count_path_on_road(self.planes[i].position, self.sites[l].absolute_position, self.plane_speed)/40)  # 代表处于空闲状态,下一步飞机可以去
+                        temp_obs.append(util.count_path_on_road(
+                            self.planes[i].position, self.sites[l].absolute_position, self.plane_speed)/40)  
                     else:
                         temp_obs.append(0)  # # otherwise the plane is busy; cannot go next step
             # per-agent obs = distances/eligibility + [next_job_id, remaining_jobs, time_span]           
@@ -148,15 +147,15 @@ class ScheduleEnv(gym.Env):
         else:
             for k in range(len(self.obs4marl)):
                 if k in current_working_plane_ids:
-                    #  # when busy, zero all features except the last two here; after appending busy_flag below,
+                    #  # when busy, zero all features except the last two here; 
                     # effectively only the last three features remain non-zero
-                    self.obs4marl[k] = [0 if kk < len(self.obs4marl[k])-2 else self.obs4marl[k][kk] for kk in range(len(self.obs4marl[k]))]
+                    self.obs4marl[k] = [0 if kk < len(self.obs4marl[k])-2 else self.obs4marl[k][kk] 
+                                        for kk in range(len(self.obs4marl[k]))]
                     self.obs4marl[k].append(1)
                 else:
                     self.obs4marl[k].append(0)
         obslen = len(self.obs4marl[0])
         zero_obs = [0 for i in range(obslen)]
-
 
         for i, plane in enumerate(self.planes):
             if len(plane.left_job) == 0:
@@ -167,7 +166,6 @@ class ScheduleEnv(gym.Env):
 
     def check_inflict_action(self, action):
         res = []
-
         for eve in action:
             if eve == len(self.sites) or eve == 19 or eve == 20:
                 res.append(eve)
@@ -189,37 +187,35 @@ class ScheduleEnv(gym.Env):
             else:
                 if eve == 18:
                     real_conflict_num += 1
-
                 res.append(eve)
         return res, real_conflict_num
 
     def step(self, action):
         self.step_count += 1
         ## print("start interaction")
-        action, real_conflict_num = self.action_replace(action) #  # replace 19/20 with 18
+        action, real_conflict_num = self.action_replace(action)  #  # replace 19/20 with 18
         # if real_conflict_num != 0:
         #     print(real_conflict_num)
         count_break_rules = 0
-        # print(action)
         assert len(action) == len(self.planes)
         rewards = [0 for eve in action]
         max_time_on_roads = [0 for eve in action]
         count_for_reward = 0
         action = self.check_inflict_action(action)
         time_span_increase = np.array([0 for eve in self.sites])
+
         for i, site_id in enumerate(action):
             if site_id == len(self.sites):
                 pass
             else:  # assign a support/scheduling task
-                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:   # if the chosen site contains the required resource for the plane's next job
-                    # # time_on_road == 0 means the plane stays and processes in place
-                    time_on_road = util.count_path_on_road(self.planes[i].position,
-                                                           self.sites[site_id].absolute_position.tolist(), self.plane_speed)
+                if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:   
+                    # if the chosen site contains the required resource for the plane's next job
+                    time_on_road = util.count_path_on_road(
+                        self.planes[i].position, self.sites[site_id].absolute_position.tolist(), self.plane_speed)
                     start_time = sum(self.episode_time_slice)
 
-                    # --- FIX: take job_id BEFORE executing the taskSolution to non processed job5 ---
+                    # --- FIX: take job_id BEFORE executing the task ---
                     job_id = self.planes[i].left_job[0].index_id
-                    # ----------------------------------------------------------------------------------
 
                     temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
                     duration = temp_time + time_on_road
@@ -230,140 +226,97 @@ class ScheduleEnv(gym.Env):
                     else:
                         self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
-                    # --- NOTE (Gantt extension): we added start_time, end_time, job_id
-                    # for visualization purposes. Before, only temp_time was stored.
+                    # --- NOTE (Gantt extension): we added start_time, end_time, job_id 
+                    # for visualization purposes. Before, only temp_time was stored. 
                     # Now we record full scheduling intervals. ---
 
-                    # --- FIX: check if left_job exists ---
-                    #if len(self.planes[i].left_job) > 0:
-                    #    job_id = self.planes[i].left_job[0].index_id
-                    #else:
-                    #    job_id = -1   # placeholder when no job is left
-                    # --- END FIX ---
-
                     time_span_increase[site_id] = duration
-                    # self.state[site_id][0] = i  # mark the site as occupied
                     count_for_reward += 1
-                    # store max travel time per plane for reward normalization
                     max_time_on_roads[i] = time_on_road
                 else:
-                    raise Exception("Invalid action was not masked", self.sites_state_global, i, site_id,action,self.planes[i].left_job[0].index_id,
-                                    self.sites[site_id].resource_ids_list, self.state)
+                    raise Exception("Invalid action was not masked", ...)
 
-        real_did = 0
-        for eve in action:
-            if eve < 18:
-                real_did += 1
+        real_did = sum(1 for eve in action if eve < 18)
 
         for i, site_id in enumerate(action):
-            if site_id == len(self.sites):  # # this plane is not scheduled this step
-
-                rewards[i] = - 30  #  # penalty for waiting due to resource conflict
-            else:  # scheduled
+            if site_id == len(self.sites):  
+                rewards[i] = -30  #  # penalty for waiting due to resource conflict
+            else:  
                 if rewards[i] == 0:
-                    # rewards[i] = -(max_time_on_roads[i]+0.1)/(max(max_time_on_roads)+0.1)-real_conflict_num
                     rewards[i] = -(max_time_on_roads[i]+0.1)/(max(max_time_on_roads)+0.1)
-
-                else:
-                    pass
 
         # Update remaining processing time
         self.state_left_time = self.state_left_time + time_span_increase
-
         min_time = util.min_but_zero(self.state_left_time)
-        # print("time consumed:", min_time)
-        self.episode_time_slice.append(min_time)  #  # time consumed in this step
-        self.state_left_time = util.advance_by_min_time(min_time, self.state_left_time)  # # advance the step
+        self.episode_time_slice.append(min_time)  
+        self.state_left_time = util.advance_by_min_time(min_time, self.state_left_time)  
 
         #  # Update site states; mainly check which ones have finished
-        # state transition 2
         for i, eve_time in enumerate(self.state_left_time):
             if eve_time == 0:
-                self.sites_state_global[i] = -1  #  # mark finished sites as idle
+                self.sites_state_global[i] = -1  
                 self.sites_obj.update_site_resources(self.sites_state_global)
                 self.state[i][0] = 9
                 self.state[i][1] = [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]
             else:
-                assert self.state[i][0] != 9  # # with remaining time, the site must be occupied
+                assert self.state[i][0] != 9  
 
         #  # Check whether the episode is finished
         is_all_done = [-1 for eve in self.planes]
         for i, plane in enumerate(self.planes):
             if len(plane.left_job) == 0:
                 is_all_done[i] = 0
-        # self.current_finishing_jobs = sum(is_all_done) + len(is_all_done) - self.current_finishing_jobs
         if sum(is_all_done) == 0:
             self.done = True
         else:
             self.done = False
 
-
         left_jobs, all_jobs = self.planes_obj.count_jobs()
         if self.done:
             reward = 6000 / (sum(self.episode_time_slice) + max(self.state_left_time))
-            # print(11, reward)
-
         else:
             reward = real_did - self.step_count/60 - real_conflict_num*2
 
         info = {
+            "time": sum(self.episode_time_slice)+max(self.state_left_time),
+            "episodes_situation": self.job_record_for_gant
+        }
+        state = self.conduct_state({
             "sites": [[self.sites[i].absolute_position,
                        self.state[i][0],
-                       self.state[i][1]
-                       ] for i in range(len(self.sites))],
+                       self.state[i][1]] for i in range(len(self.sites))],
             "planes": [[self.planes[i].left_job[0].index_id,
                         len(self.planes[i].site_history),
-                        len(self.planes[i].left_job)
-                        ] if len(self.planes[i].left_job) != 0
-                       else [
-                        9,
+                        len(self.planes[i].left_job)]
+                       if len(self.planes[i].left_job) != 0 else [9,
                         len(self.planes[i].site_history),
-                        len(self.planes[i].left_job)
-                    ]for i in range(len(self.planes))],
+                        len(self.planes[i].left_job)] for i in range(len(self.planes))],
             "planes_obj": self.planes
-        }
-        state = self.conduct_state(info)
-        # print("min_time:", min_time)
-        # print("left_time:", self.state_left_time)
-        return reward, self.done, {"time": sum(self.episode_time_slice)+max(self.state_left_time),
-                                          "left": self.state_left_time,
-                                          "original_state": self.state,
-                                          "planes_obj": self.planes,
-                                          "rewards": rewards,
-                                          "count_break_rules": count_break_rules,
-                                          "sites_state_global": self.sites_state_global,
-                                   "episodes_situation": self.job_record_for_gant
-                                   }
+        })
+        return reward, self.done, info
 
     def get_avail_agent_actions(self, agent_id):
         #  # Check whether the plane is currently busy
         for eve in self.state:
-            if agent_id == eve[0]:  # # this plane is still processing
-                # return [0 for i in range(18)] + [1]  # 1
-                return [0 for i in range(18)] + [0, 1, 0]
-        # # only BUSY is available
+            if agent_id == eve[0]:  
+                return [0 for i in range(18)] + [0, 1, 0]  # # only BUSY is available
         res = [0 for eve in self.sites_state_global]
         for i, eve in enumerate(self.sites_state_global):
             if eve == -1:
                 if len(self.planes[agent_id].left_job) != 0:
-                    #  # Check whether the plane's next job type is supported by this site
                     if self.planes[agent_id].left_job[0].index_id in self.sites[i].resource_ids_list:
                         res[i] = 1
-                else:  # # this plane has finished all its scheduled jobs
-                    # return [0 for i in range(18)] + [1]  # 0
+                else:  
                     return [0 for i in range(18)] + [0, 0, 1]   # only FINISHED is available
         return res + [1, 0, 0]   # add WAIT
 
     # state transition 1
     def has_chosen_action(self, action_id, agent_id):
         assert self.planes[agent_id].left_job != []
-        # print(action_id, agent_id)
-        self.sites_state_global[action_id] = self.planes[agent_id].left_job[0].index_id  # # update site status info
-        #  # Update the global resource list state — careful: this is choosing a feasible action, not executing it yet
+        self.sites_state_global[action_id] = self.planes[agent_id].left_job[0].index_id  
         self.sites_obj.update_site_resources(self.sites_state_global)
-        self.state[action_id][0] = agent_id  # # mark this site as occupied
-        self.state[action_id][1] = [1 if j in self.sites[action_id].resource_ids_list else 0 for j in range(9)]  # # update resource occupancy
-
+        self.state[action_id][0] = agent_id  
+        self.state[action_id][1] = [1 if j in self.sites[action_id].resource_ids_list else 0 for j in range(9)]  
 
     def save_env_info(self, job_transition):
         self.job_record_for_gant.append(job_transition)
