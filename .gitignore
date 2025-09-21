@@ -1,3 +1,4 @@
+# Python cache ve IDE dosyaları
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
@@ -5,8 +6,8 @@ __pycache__/
 .idea/
 .DS_Store
 
-# ÇIKTI klasörlerini commit etmek istemiyorsan aşağıdakileri da aç
-# result/
-# MARL/model/
-# my_data_and_graph/historydata/
-my_data_and_graph/historydata/*.txt
+# Model checkpoint ve ağırlıkları commit etme
+MARL/model/**/*.pkl
+
+# Sadece gereksiz temp/ara dosyaları ignore et
+*.log
