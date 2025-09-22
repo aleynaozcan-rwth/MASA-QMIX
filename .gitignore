@@ -11,3 +11,4 @@ MARL/model/**/*.pkl
 
 # Sadece gereksiz temp/ara dosyaları ignore et
 *.log
+my_data_and_graph/historydata/scheduleresults.txt
