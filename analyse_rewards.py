@@ -6,6 +6,7 @@ import os
 reward_file = "./my_data_and_graph/historydata/episode_rewards.txt"
 loss_file = "./my_data_and_graph/historydata/loss.txt"
 time_file = "./my_data_and_graph/historydata/times.txt"
+wait_file = "./my_data_and_graph/historydata/waittimes.txt"
 
 save_dir = "./my_data_and_graph/historydata/"
 if not os.path.exists(save_dir):
@@ -46,20 +47,11 @@ def plot_rewards():
     if len(rewards) >= 50:
         plt.plot(episodes, smooth(rewards, 50),
                  label="Smoothed", color="red")
-
     plt.title("Reward Curve (Global reward per episode)")
     plt.xlabel("Episode Index")
     plt.ylabel("Global Reward (average per agent)")
     plt.legend()
     plt.grid(True)
-    # PlotFixText: normal reward curve, shows all values including outliers
-    plt.figtext(
-        0.5, -0.08,
-        "Note: Rewards are averaged per agent.\n"
-        "Smoothed curve uses moving average with window=50 episodes.",
-        wrap=True, ha="center", fontsize=9
-    )
-    plt.tight_layout()
     save_path = os.path.join(save_dir, "rewards_curve.png")
     plt.savefig(save_path)
     plt.close()
@@ -72,37 +64,18 @@ def plot_rewards():
         plt.plot(episodes, smooth(rewards, 50),
                  label="Smoothed", color="red")
 
-    # Focus on 5th–95th percentile range
-    low, high = np.percentile(rewards, 5), np.percentile(rewards, 95)
+    # Focus on 10th–90th percentile range
+    low, high = np.percentile(rewards, 10), np.percentile(rewards, 90)
     plt.ylim(low, high)
-
     plt.title("Reward Curve (Zoomed)")
     plt.xlabel("Episode Index")
     plt.ylabel("Global Reward (average per agent)")
     plt.legend()
     plt.grid(True)
-    # PlotFixText: zoomed reward curve, focuses on stable region by removing outliers
-    plt.figtext(
-        0.5, -0.08,
-        "Zoomed view: rewards between 5th and 95th percentile.\n"
-        "Highlights main convergence trend without extreme outliers.",
-        wrap=True, ha="center", fontsize=9
-    )
-    plt.tight_layout()
     save_path = os.path.join(save_dir, "rewards_curve_zoomed.png")
     plt.savefig(save_path)
     plt.close()
     print(f"[+] Reward curve (zoomed) saved to {save_path}")
-
-    # Print analysis
-    avg_reward = np.mean(rewards)
-    max_reward = np.max(rewards)
-    min_reward = np.min(rewards)
-    print("=== Training Reward Analysis ===")
-    print(f"Total episodes logged: {len(rewards)}")
-    print(f"Average reward: {avg_reward:.2f}")
-    print(f"Max reward: {max_reward:.2f}")
-    print(f"Min reward: {min_reward:.2f}")
 
 
 # === Plot 2: Loss Curve ===
@@ -139,14 +112,6 @@ def plot_loss():
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
-    # PlotFixText: loss curve over all steps, raw + smoothed
-    plt.figtext(
-        0.5, -0.08,
-        "One training step = one mini-batch update "
-        "(not to be confused with environment episode steps).",
-        wrap=True, ha="center", fontsize=9
-    )
-    plt.tight_layout()
     save_path = os.path.join(save_dir, "loss_curve.png")
     plt.savefig(save_path)
     plt.close()
@@ -164,14 +129,6 @@ def plot_loss():
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
-    # PlotFixText: zoomed loss curve, hides extreme outliers
-    plt.figtext(
-        0.5, -0.08,
-        "Zoomed view: y-limit set to 95th percentile.\n"
-        "Removes extreme outliers to highlight main trend.",
-        wrap=True, ha="center", fontsize=9
-    )
-    plt.tight_layout()
     save_path = os.path.join(save_dir, "loss_curve_zoomed.png")
     plt.savefig(save_path)
     plt.close()
@@ -191,25 +148,73 @@ def plot_training_time():
     if len(times) >= 50:
         plt.plot(episodes, smooth(times, 50),
                  label="Smoothed", color="red")
-
     plt.title("Training Duration per Episode")
     plt.xlabel("Episode Index")
     plt.ylabel("Episode Duration (steps)")
     plt.legend()
     plt.grid(True)
-    # PlotFixText: training duration = makespan estimate per episode
-    plt.figtext(
-        0.5, -0.08,
-        "Logged value = sum(episode_time_slice) + max(state_left_time)\n"
-        "= elapsed time + longest remaining job duration.\n"
-        "Interpretation: estimated makespan if jobs continue unchanged.",
-        wrap=True, ha="center", fontsize=9
-    )
-    plt.tight_layout()
     save_path = os.path.join(save_dir, "training_time.png")
     plt.savefig(save_path)
     plt.close()
     print(f"[+] Training time curve saved to {save_path}")
+
+
+# === Plot 4: Wait Times (per plane, per episode) ===
+def plot_wait_times():
+    if not os.path.exists(wait_file):
+        print("[WARN] No waittimes file found.")
+        return
+
+    # --- Parse custom text format ---
+    episodes, planes, jobs, waits = [], [], [], []
+    with open(wait_file, "r") as f:
+        for line in f:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 4:
+                continue
+            ep_str, plane_str, job_str, wait_str = parts
+            try:
+                ep = int(ep_str.replace("Episode", "").strip())
+                plane = plane_str.strip()
+                job = job_str.strip()
+                wt = float(wait_str.replace("Wait", "").strip())
+            except ValueError:
+                continue
+            episodes.append(ep)
+            planes.append(plane)
+            jobs.append(job)
+            waits.append(wt)
+
+    episodes = np.array(episodes)
+    planes = np.array(planes)
+    jobs = np.array(jobs)
+    waits = np.array(waits)
+
+    unique_planes = np.unique(planes)
+
+    plt.figure(figsize=(14, 8))
+
+    for plane in unique_planes:
+        mask = planes == plane
+        plt.barh([plane] * np.sum(mask),
+                 waits[mask],
+                 alpha=0.6)
+
+        # Annotate each bar
+        for ep, job, wt in zip(episodes[mask], jobs[mask], waits[mask]):
+            plt.text(wt + 0.5, plane,
+                     f"Ep{ep}, {job}\n{wt:.1f}",
+                     va='center', fontsize=7)
+
+    plt.title("Wait Times per Plane (per Episode & Job)")
+    plt.xlabel("Wait Time")
+    plt.ylabel("Planes")
+    plt.grid(axis='x', linestyle="--", alpha=0.7)
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "wait_times.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[+] Wait times plot saved to {save_path}")
 
 
 # === Main ===
@@ -217,3 +222,4 @@ if __name__ == "__main__":
     plot_rewards()
     plot_loss()
     plot_training_time()
+    plot_wait_times()
