@@ -4,16 +4,16 @@ import os
 
 # === File paths ===
 reward_file = "./my_data_and_graph/historydata/episode_rewards.txt"
-loss_file = "./my_data_and_graph/historydata/loss.txt"
-time_file = "./my_data_and_graph/historydata/times.txt"
-wait_file = "./my_data_and_graph/historydata/waittimes.txt"
+loss_file   = "./my_data_and_graph/historydata/loss.txt"
+time_file   = "./my_data_and_graph/historydata/times.txt"
+wait_file   = "./my_data_and_graph/historydata/waittimes.txt"
 
 save_dir = "./my_data_and_graph/historydata/"
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 
-# === Helper: smooth values (with edge fix) ===
+# === Helper: smooth values with moving average (with edge fix) ===
 def smooth(y, box_pts=50):
     if len(y) < box_pts:
         return y
@@ -36,17 +36,16 @@ def plot_rewards():
     data = np.loadtxt(reward_file, delimiter=",")
     if data.ndim == 1:
         episodes = [int(data[0])]
-        rewards = [float(data[1])]
+        rewards  = [float(data[1])]
     else:
         episodes = data[:, 0]
-        rewards = data[:, 1]
+        rewards  = data[:, 1]
 
     # --- Normal Reward Curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
-        plt.plot(episodes, smooth(rewards, 50),
-                 label="Smoothed", color="red")
+        plt.plot(episodes, smooth(rewards, 50), label="Smoothed", color="red")
     plt.title("Reward Curve (Global reward per episode)")
     plt.xlabel("Episode Index")
     plt.ylabel("Global Reward (average per agent)")
@@ -57,14 +56,12 @@ def plot_rewards():
     plt.close()
     print(f"[+] Reward curve saved to {save_path}")
 
-    # --- Zoomed Reward Curve ---
+    # --- Zoomed Reward Curve (dynamic percentile) ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
-        plt.plot(episodes, smooth(rewards, 50),
-                 label="Smoothed", color="red")
+        plt.plot(episodes, smooth(rewards, 50), label="Smoothed", color="red")
 
-    # Focus on 10th–90th percentile range
     low, high = np.percentile(rewards, 10), np.percentile(rewards, 90)
     plt.ylim(low, high)
     plt.title("Reward Curve (Zoomed)")
@@ -105,8 +102,7 @@ def plot_loss():
     plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
-        plt.plot(steps, smooth(data, 50),
-                 label="Smoothed", color="red")
+        plt.plot(steps, smooth(data, 50), label="Smoothed", color="red")
     plt.title("Loss Curve")
     plt.xlabel("Training Step (mini-batch updates)")
     plt.ylabel("Loss")
@@ -121,8 +117,7 @@ def plot_loss():
     plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
-        plt.plot(steps, smooth(data, 50),
-                 label="Smoothed (50-update avg)", color="red")
+        plt.plot(steps, smooth(data, 50), label="Smoothed (50-update avg)", color="red")
     plt.ylim(0, np.percentile(data, 95))
     plt.title("Loss Curve (Zoomed In)")
     plt.xlabel("Training Step (mini-batch updates)")
@@ -143,14 +138,14 @@ def plot_training_time():
     times = np.loadtxt(time_file, delimiter=",")[:, 1]  # second column = duration
     episodes = np.arange(len(times))
 
+    # --- Normal curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, times, label="Raw episode duration", alpha=0.5)
     if len(times) >= 50:
-        plt.plot(episodes, smooth(times, 50),
-                 label="Smoothed", color="red")
+        plt.plot(episodes, smooth(times, 50), label="Smoothed", color="red")
     plt.title("Training Duration per Episode")
     plt.xlabel("Episode Index")
-    plt.ylabel("Episode Duration (steps)")
+    plt.ylabel("Episode Duration (simulation time units)")  # corrected label
     plt.legend()
     plt.grid(True)
     save_path = os.path.join(save_dir, "training_time.png")
@@ -158,14 +153,32 @@ def plot_training_time():
     plt.close()
     print(f"[+] Training time curve saved to {save_path}")
 
+    # --- Zoomed curve (dynamic percentile) ---
+    plt.figure(figsize=(12, 7))
+    plt.plot(episodes, times, label="Raw episode duration", alpha=0.5)
+    if len(times) >= 50:
+        plt.plot(episodes, smooth(times, 50), label="Smoothed", color="red")
 
-# === Plot 4: Wait Times (per plane, per episode) ===
+    low, high = np.percentile(times, 10), np.percentile(times, 90)
+    plt.ylim(low, high)
+    plt.title("Training Duration per Episode (Zoomed)")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Episode Duration (simulation time units)")  # corrected label
+    plt.legend()
+    plt.grid(True)
+    save_path = os.path.join(save_dir, "training_time_zoomed.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[+] Training time (zoomed) saved to {save_path}")
+
+
+# === Plot 4: Wait Times (per plane, per episode & job) ===
 def plot_wait_times():
     if not os.path.exists(wait_file):
         print("[WARN] No waittimes file found.")
         return
 
-    # --- Parse custom text format ---
+    # Parse custom waittimes.txt format
     episodes, planes, jobs, waits = [], [], [], []
     with open(wait_file, "r") as f:
         for line in f:
@@ -174,10 +187,10 @@ def plot_wait_times():
                 continue
             ep_str, plane_str, job_str, wait_str = parts
             try:
-                ep = int(ep_str.replace("Episode", "").strip())
-                plane = plane_str.strip()
-                job = job_str.strip()
-                wt = float(wait_str.replace("Wait", "").strip())
+                ep   = int(ep_str.replace("Episode", "").strip())
+                plane= plane_str.strip()
+                job  = job_str.strip()
+                wt   = float(wait_str.replace("Wait", "").strip())
             except ValueError:
                 continue
             episodes.append(ep)
@@ -186,25 +199,24 @@ def plot_wait_times():
             waits.append(wt)
 
     episodes = np.array(episodes)
-    planes = np.array(planes)
-    jobs = np.array(jobs)
-    waits = np.array(waits)
+    planes   = np.array(planes)
+    jobs     = np.array(jobs)
+    waits    = np.array(waits)
 
     unique_planes = np.unique(planes)
 
     plt.figure(figsize=(14, 8))
 
     for plane in unique_planes:
-        mask = planes == plane
+        mask = (planes == plane) & (waits > 0)  # only plot if wait > 0
         plt.barh([plane] * np.sum(mask),
                  waits[mask],
                  alpha=0.6)
 
-        # Annotate each bar
         for ep, job, wt in zip(episodes[mask], jobs[mask], waits[mask]):
-            plt.text(wt + 0.5, plane,
-                     f"Ep{ep}, {job}\n{wt:.1f}",
-                     va='center', fontsize=7)
+            plt.text(wt + 0.3, plane,
+                     f"E{ep}, {job}, {wt:.1f}",
+                     va='center', ha='left', fontsize=7, color="black")
 
     plt.title("Wait Times per Plane (per Episode & Job)")
     plt.xlabel("Wait Time")
@@ -212,12 +224,12 @@ def plot_wait_times():
     plt.grid(axis='x', linestyle="--", alpha=0.7)
     plt.tight_layout()
     save_path = os.path.join(save_dir, "wait_times.png")
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=200)
     plt.close()
     print(f"[+] Wait times plot saved to {save_path}")
 
 
-# === Main ===
+# === Main entry ===
 if __name__ == "__main__":
     plot_rewards()
     plot_loss()
