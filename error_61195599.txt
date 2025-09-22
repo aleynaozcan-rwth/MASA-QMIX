@@ -1,0 +1,8 @@
+[INFO] Module GCCcore/12.2.0 loaded.
+[INFO] Module Python/3.10.8 loaded.
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/analyse_rewards.py:295: UserWarning: Attempting to set identical low and high ylims makes transformation singular; automatically expanding.
+  plt.ylim(low, high)
