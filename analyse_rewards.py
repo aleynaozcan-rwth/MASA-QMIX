@@ -56,7 +56,7 @@ def plot_rewards():
     plt.close()
     print(f"[+] Reward curve saved to {save_path}")
 
-    # --- Zoomed Reward Curve (dynamic percentile) ---
+    # --- Zoomed Reward Curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, rewards, label="Raw (global per-episode reward)", alpha=0.5)
     if len(rewards) >= 50:
@@ -113,7 +113,7 @@ def plot_loss():
     plt.close()
     print(f"[+] Loss curve saved to {save_path}")
 
-    # --- Zoomed-in loss curve ---
+    # --- Zoomed loss curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(steps, data, label="Raw loss (per mini-batch update)", alpha=0.5)
     if len(data) >= 50:
@@ -145,7 +145,7 @@ def plot_training_time():
         plt.plot(episodes, smooth(times, 50), label="Smoothed", color="red")
     plt.title("Training Duration per Episode")
     plt.xlabel("Episode Index")
-    plt.ylabel("Episode Duration (simulation time units)")  # corrected label
+    plt.ylabel("Episode Duration (simulation time units)")
     plt.legend()
     plt.grid(True)
     save_path = os.path.join(save_dir, "training_time.png")
@@ -153,7 +153,7 @@ def plot_training_time():
     plt.close()
     print(f"[+] Training time curve saved to {save_path}")
 
-    # --- Zoomed curve (dynamic percentile) ---
+    # --- Zoomed curve ---
     plt.figure(figsize=(12, 7))
     plt.plot(episodes, times, label="Raw episode duration", alpha=0.5)
     if len(times) >= 50:
@@ -163,7 +163,7 @@ def plot_training_time():
     plt.ylim(low, high)
     plt.title("Training Duration per Episode (Zoomed)")
     plt.xlabel("Episode Index")
-    plt.ylabel("Episode Duration (simulation time units)")  # corrected label
+    plt.ylabel("Episode Duration (simulation time units)")
     plt.legend()
     plt.grid(True)
     save_path = os.path.join(save_dir, "training_time_zoomed.png")
@@ -172,13 +172,12 @@ def plot_training_time():
     print(f"[+] Training time (zoomed) saved to {save_path}")
 
 
-# === Plot 4: Wait Times (per plane, per episode & job) ===
-def plot_wait_times():
+# === Plot 4: Wait Times (subset: every 250th episode) ===
+def plot_wait_times_subset(interval=250):
     if not os.path.exists(wait_file):
         print("[WARN] No waittimes file found.")
         return
 
-    # Parse custom waittimes.txt format
     episodes, planes, jobs, waits = [], [], [], []
     with open(wait_file, "r") as f:
         for line in f:
@@ -189,13 +188,13 @@ def plot_wait_times():
             try:
                 ep   = int(ep_str.replace("Episode", "").strip())
                 plane= plane_str.strip()
-                job  = job_str.strip()
+                job  = job_str.replace("Job", "").strip()
                 wt   = float(wait_str.replace("Wait", "").strip())
             except ValueError:
                 continue
             episodes.append(ep)
             planes.append(plane)
-            jobs.append(job)
+            jobs.append(int(job))
             waits.append(wt)
 
     episodes = np.array(episodes)
@@ -203,30 +202,106 @@ def plot_wait_times():
     jobs     = np.array(jobs)
     waits    = np.array(waits)
 
-    unique_planes = np.unique(planes)
+    unique_jobs = np.unique(jobs)
+    cmap = plt.colormaps["tab20"]
+    job_to_color = {job: cmap(i % cmap.N) for i, job in enumerate(unique_jobs)}
 
-    plt.figure(figsize=(14, 8))
+    for ep in np.unique(episodes):
+        if ep % interval != 0:
+            continue
+        plt.figure(figsize=(14, 8))
+        mask_ep = (episodes == ep) & (waits > 0)
+        unique_planes = np.unique(planes[mask_ep])
 
-    for plane in unique_planes:
-        mask = (planes == plane) & (waits > 0)  # only plot if wait > 0
-        plt.barh([plane] * np.sum(mask),
-                 waits[mask],
-                 alpha=0.6)
+        for plane in unique_planes:
+            mask = mask_ep & (planes == plane)
+            plt.barh([plane] * np.sum(mask),
+                     waits[mask],
+                     color=[job_to_color[j] for j in jobs[mask]],
+                     alpha=0.7)
+            for wt in waits[mask]:
+                plt.text(wt + 0.5, plane, f"{wt:.1f}",
+                         va='center', ha='left', fontsize=7, color="black")
 
-        for ep, job, wt in zip(episodes[mask], jobs[mask], waits[mask]):
-            plt.text(wt + 0.3, plane,
-                     f"E{ep}, {job}, {wt:.1f}",
-                     va='center', ha='left', fontsize=7, color="black")
+        handles = [plt.Rectangle((0,0),1,1, color=job_to_color[j]) for j in unique_jobs]
+        labels = [f"Job {j}" for j in unique_jobs]
+        plt.legend(handles, labels, title="Jobs", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-    plt.title("Wait Times per Plane (per Episode & Job)")
-    plt.xlabel("Wait Time")
-    plt.ylabel("Planes")
-    plt.grid(axis='x', linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    save_path = os.path.join(save_dir, "wait_times.png")
-    plt.savefig(save_path, dpi=200)
+        plt.title(f"Wait Times per Plane (Episode {ep})")
+        plt.xlabel("Wait Time")
+        plt.ylabel("Planes")
+        plt.grid(axis='x', linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        save_path = os.path.join(save_dir, f"wait_times_ep{ep}.png")
+        plt.savefig(save_path, dpi=200)
+        plt.close()
+        print(f"[+] Wait times plot saved to {save_path}")
+
+
+# === Plot 5: Global Wait Curve (episode-wise total/avg) ===
+def plot_wait_curve():
+    if not os.path.exists(wait_file):
+        print("[WARN] No waittimes file found.")
+        return
+
+    episodes, waits = [], []
+    with open(wait_file, "r") as f:
+        for line in f:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 4:
+                continue
+            ep_str, _, _, wait_str = parts
+            try:
+                ep   = int(ep_str.replace("Episode", "").strip())
+                wt   = float(wait_str.replace("Wait", "").strip())
+            except ValueError:
+                continue
+            episodes.append(ep)
+            waits.append(wt)
+
+    episodes = np.array(episodes)
+    waits    = np.array(waits)
+
+    unique_eps = np.unique(episodes)
+    ep_sums = [np.sum(waits[episodes == e]) for e in unique_eps]
+
+    # --- Normal curve ---
+    plt.figure(figsize=(12, 7))
+    plt.plot(unique_eps, ep_sums, label="Total wait per episode", alpha=0.5)
+    if len(ep_sums) >= 50:
+        plt.plot(unique_eps, smooth(ep_sums, 50), label="Smoothed", color="red")
+    plt.title("Global Wait Time Curve")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Total Wait Time (sum per episode)")
+    plt.legend()
+    plt.grid(True)
+    save_path = os.path.join(save_dir, "wait_curve.png")
+    plt.savefig(save_path)
     plt.close()
-    print(f"[+] Wait times plot saved to {save_path}")
+    print(f"[+] Global wait curve saved to {save_path}")
+
+    # --- Zoomed curve ---
+    plt.figure(figsize=(12, 7))
+    plt.plot(unique_eps, ep_sums, label="Total wait per episode", alpha=0.5)
+    if len(ep_sums) >= 50:
+        plt.plot(unique_eps, smooth(ep_sums, 50), label="Smoothed", color="red")
+
+    low, high = np.percentile(ep_sums, 5), np.percentile(ep_sums, 95)
+    if low == high:
+        low, high = min(ep_sums), max(ep_sums)
+        if low == high:  # tümü aynıysa margin ekle
+            low -= 1
+            high += 1
+    plt.ylim(low, high)
+    plt.title("Global Wait Time Curve (Zoomed)")
+    plt.xlabel("Episode Index")
+    plt.ylabel("Total Wait Time (sum per episode)")
+    plt.legend()
+    plt.grid(True)
+    save_path = os.path.join(save_dir, "wait_curve_zoomed.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[+] Global wait curve (zoomed) saved to {save_path}")
 
 
 # === Main entry ===
@@ -234,4 +309,5 @@ if __name__ == "__main__":
     plot_rewards()
     plot_loss()
     plot_training_time()
-    plot_wait_times()
+    plot_wait_times_subset(interval=250)   # <-- her 250 episode’da bir
+    plot_wait_curve()

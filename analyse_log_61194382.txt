@@ -1,0 +1,9 @@
+[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
+[+] Reward curve (zoomed) saved to ./my_data_and_graph/historydata/rewards_curve_zoomed.png
+[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png
+[+] Loss curve (zoomed) saved to ./my_data_and_graph/historydata/loss_curve_zoomed.png
+[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png
+[+] Training time (zoomed) saved to ./my_data_and_graph/historydata/training_time_zoomed.png
+[+] Wait times plot saved for episode 44 -> ./my_data_and_graph/historydata/wait_times_episode_44.png
+[+] Global wait curve saved to ./my_data_and_graph/historydata/wait_curve.png
+[+] Global wait curve (zoomed) saved to ./my_data_and_graph/historydata/wait_curve_zoomed.png
