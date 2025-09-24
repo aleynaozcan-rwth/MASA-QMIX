@@ -1,49 +1,0 @@
-=== JOB 61194382 STARTED at Mon Sep 22 01:37:55 PM CEST 2025 ===
-=== Training started at Mon Sep 22 01:37:55 PM CEST 2025 ===
-
-=== Training Setup Summary (Args) ===
-Algorithm: qmix
-Map: boatschedule
-Random seed: 123
-Total epochs: 200
-Episodes per epoch: 3
-Evaluation every 20 epochs, with 5 episodes
-Replay buffer size: 1000
-Batch size: 16
-Learning enabled: True
-GPU enabled: False
-Load pretrained model: False
-====================================
-
-=== Environment Info ===
-Number of agents: 8
-Number of actions: 21
-State shape: 170
-Observation shape: 22
-Episode limit (steps per episode): 80
-====================================
-
-Load model (test only: False Print intermediates: False Train: True
-Init alg QMIX
-Init Agents
-Init RolloutWorker
-Run 0, train epoch 0, ave_rewards 0.0Run 0, train epoch 1, ave_rewards 7.866046942067814Run 0, train epoch 2, ave_rewards 7.637955684666212Run 0, train epoch 3, ave_rewards 7.475007084229783Run 0, train epoch 4, ave_rewards 7.329944358599003Run 0, train epoch 5, ave_rewards 7.671396462211312Run 0, train epoch 6, ave_rewards 7.950360910281954Run 0, train epoch 7, ave_rewards 7.224563798338624Run 0, train epoch 8, ave_rewards 7.239385284408857Run 0, train epoch 9, ave_rewards 7.428628570524592Run 0, train epoch 10, ave_rewards 7.241230769349682Run 0, train epoch 11, ave_rewards 7.140707264460461Run 0, train epoch 12, ave_rewards 7.282848669609426Run 0, train epoch 13, ave_rewards 6.861260956269949Run 0, train epoch 14, ave_rewards 5.706528829169337Run 0, train epoch 15, ave_rewards -22.02271695978213Run 0, train epoch 16, ave_rewards -133.58333333333334Run 0, train epoch 17, ave_rewards -146.91666666666666Run 0, train epoch 18, ave_rewards -148.04166666666666Run 0, train epoch 19, ave_rewards -154.33333333333334Run 0, train epoch 20, ave_rewards -149.04166666666666
-episode_reward: -1333.9999999999998 epoch: 20
-Run 0, train epoch 21, ave_rewards -151.70833333333334Run 0, train epoch 22, ave_rewards -148.45833333333334Run 0, train epoch 23, ave_rewards -147.45833333333334Run 0, train epoch 24, ave_rewards -149.79166666666666Run 0, train epoch 25, ave_rewards -145.70833333333334Run 0, train epoch 26, ave_rewards -150.33333333333334Run 0, train epoch 27, ave_rewards -152.75Run 0, train epoch 28, ave_rewards -148.33333333333334Run 0, train epoch 29, ave_rewards -156.08333333333334Run 0, train epoch 30, ave_rewards -154.79166666666666Run 0, train epoch 31, ave_rewards -150.70833333333334Run 0, train epoch 32, ave_rewards -152.04166666666666Run 0, train epoch 33, ave_rewards -150.41666666666666Run 0, train epoch 34, ave_rewards -147.04166666666666Run 0, train epoch 35, ave_rewards -156.0Run 0, train epoch 36, ave_rewards -146.58333333333334Run 0, train epoch 37, ave_rewards -144.375Run 0, train epoch 38, ave_rewards -151.33333333333334Run 0, train epoch 39, ave_rewards -149.83333333333334Run 0, train epoch 40, ave_rewards -151.33333333333334
-episode_reward: -1333.9999999999998 epoch: 40
-Run 0, train epoch 41, ave_rewards -147.45833333333334Run 0, train epoch 42, ave_rewards -154.95833333333334Run 0, train epoch 43, ave_rewards -146.75Run 0, train epoch 44, ave_rewards -153.83333333333334Run 0, train epoch 45, ave_rewards -148.75Run 0, train epoch 46, ave_rewards -149.70833333333334Run 0, train epoch 47, ave_rewards -139.58333333333334Run 0, train epoch 48, ave_rewards -144.79166666666666Run 0, train epoch 49, ave_rewards -150.58333333333334Run 0, train epoch 50, ave_rewards -151.41666666666666
-Start saving model 100 100
-Run 0, train epoch 51, ave_rewards -141.16666666666666Run 0, train epoch 52, ave_rewards -148.16666666666666=== Training finished at Mon Sep 22 01:38:53 PM CEST 2025 ===
-=== Running analyse_rewards.py ===
-[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
-[+] Reward curve (zoomed) saved to ./my_data_and_graph/historydata/rewards_curve_zoomed.png
-[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png
-[+] Loss curve (zoomed) saved to ./my_data_and_graph/historydata/loss_curve_zoomed.png
-[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png
-[+] Training time (zoomed) saved to ./my_data_and_graph/historydata/training_time_zoomed.png
-[+] Wait times plot saved for episode 44 -> ./my_data_and_graph/historydata/wait_times_episode_44.png
-[+] Global wait curve saved to ./my_data_and_graph/historydata/wait_curve.png
-[+] Global wait curve (zoomed) saved to ./my_data_and_graph/historydata/wait_curve_zoomed.png
-=== Analyse finished at Mon Sep 22 01:38:56 PM CEST 2025 ===
-=== JOB 61194382 FINISHED at Mon Sep 22 01:38:56 PM CEST 2025 ===
-Check generated plots in: ./my_data_and_graph/historydata/
