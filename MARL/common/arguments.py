@@ -46,41 +46,41 @@ def get_common_args():
 
 # arguments of vdn / qmix / qtran
 def get_mixer_args(args):
-    # ---------- QUICK-RUN CHANGES (original → new) ----------
+    # ---------- STABILITY OPTIMIZED V4.4 CONFIGURATION ----------
     # network
     args.rnn_hidden_dim   = 64     # keep standard
     args.qmix_hidden_dim  = 32     # small hidden dim is enough for quick run
     args.two_hyper_layers = False  # unchanged
     args.hyper_hidden_dim = 64     # unchanged
     args.qtran_hidden_dim = 64     # unchanged
-    args.lr               = 5e-4   # unchanged (stable)
+    args.lr               = 3e-4   # STABILITY: Reduced from 5e-4 for more stable learning
 
     # epsilon-greedy
     args.epsilon          = 1.0    # unchanged
     args.min_epsilon      = 0.05   # unchanged
     anneal_steps          = 2000   # DECREASED (50000 → 2000) for faster epsilon annealing
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
-    args.epsilon_anneal_scale = 'step'
+    args.epsilon_anneal_scale = 'epoch'  # STABILITY: Changed from 'step' to 'epoch' for smoother decay
 
-    # training schedule
-    args.n_epoch     = 400    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
-    args.n_episodes  = 4     # DECREASED (5 → 3->4) → fewer episodes per epoch
+    # training schedule (V4.4 with stability improvements)
+    args.n_epoch     = 400    # V4.4: Extended training duration for better convergence
+    args.n_episodes  = 4      # V4.4: More episodes per epoch for richer experience
     args.train_steps = 2      # unchanged
-    #her epoch = 3 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
+    #her epoch = 4 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
     #1 episode = 1 scheduling.
 
-    #    1 epoch = 3 scheduling.
-    #    200 epoch = 600 scheduling (600 episode).
+    #    1 epoch = 4 scheduling.
+    #    400 epoch = 1600 scheduling (1600 episode).
     #    Her epoch sonunda → 2 defa network güncellemesi yapılıyor.
-    #    Her episode’un içinde → max 80 environment step var (ama job’lar daha erken bitince episode erken de bitebilir).
+    #    Her episode'un içinde → max 80 environment step var (ama job'lar daha erken bitince episode erken de bitebilir).
 
     # evaluation / saving cadence
     args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
-    args.batch_size     = 24 # DECREASED (32 → 16->24)
-    args.buffer_size    = 3000  # DECREASED (5000 → 1000->1000)
+    args.batch_size     = 24    # V4.4: Larger batches for more stable gradient estimates
+    args.buffer_size    = 3000  # V4.4: Larger buffer for more diverse experience replay
 
     args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
-    args.target_update_cycle= 50    # DECREASED (200 → 50)
+    args.target_update_cycle= 100   # STABILITY: Increased from 50 to 100 for more stable target updates
 
     # QTRAN lambda (unused for plain QMIX, kept for compatibility)
     args.lambda_opt  = 1

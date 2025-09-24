@@ -1,0 +1,4 @@
+Mean Reward: 7.785
+CV: 0.064
+Trend: 0.0020
+Status: CONVERGED

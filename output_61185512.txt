@@ -1,68 +1,0 @@
-=== JOB 61185512 STARTED at Mon Sep 22 12:42:45 AM CEST 2025 ===
-=== Training started at Mon Sep 22 12:42:45 AM CEST 2025 ===
-
-=== Training Setup Summary (Args) ===
-Algorithm: qmix
-Map: boatschedule
-Random seed: 123
-Total epochs: 200
-Episodes per epoch: 3
-Evaluation every 20 epochs, with 5 episodes
-Replay buffer size: 1000
-Batch size: 16
-Learning enabled: True
-GPU enabled: False
-Load pretrained model: False
-====================================
-
-=== Environment Info ===
-Number of agents: 8
-Number of actions: 21
-State shape: 170
-Observation shape: 22
-Episode limit (steps per episode): 80
-====================================
-
-Load model (test only: False Print intermediates: False Train: True
-Init alg QMIX
-Init Agents
-Init RolloutWorker
-Run 0, train epoch 0, ave_rewards 0.0Run 0, train epoch 1, ave_rewards 7.735400145636345Run 0, train epoch 2, ave_rewards 7.999405497437709Run 0, train epoch 3, ave_rewards 7.802184743681104Run 0, train epoch 4, ave_rewards 7.212086801469469Run 0, train epoch 5, ave_rewards 7.299168471360453Run 0, train epoch 6, ave_rewards 7.52170091453804Run 0, train epoch 7, ave_rewards 6.66042937466285Run 0, train epoch 8, ave_rewards 7.118865148790456Run 0, train epoch 9, ave_rewards 5.8828380012548465Run 0, train epoch 10, ave_rewards 0.7520581641307834Run 0, train epoch 11, ave_rewards -14.036929742493095Run 0, train epoch 12, ave_rewards -40.56616524403055Run 0, train epoch 13, ave_rewards -137.04166666666666Run 0, train epoch 14, ave_rewards -153.04166666666666Run 0, train epoch 15, ave_rewards -143.66666666666666Run 0, train epoch 16, ave_rewards -134.29166666666666Run 0, train epoch 17, ave_rewards -142.70833333333334Run 0, train epoch 18, ave_rewards -126.20833333333333Run 0, train epoch 19, ave_rewards -122.54166666666667Run 0, train epoch 20, ave_rewards -123.45833333333333
-episode_reward: -1333.9999999999998 epoch: 20
-Run 0, train epoch 21, ave_rewards -127.58333333333333Run 0, train epoch 22, ave_rewards -119.08333333333333Run 0, train epoch 23, ave_rewards -113.58333333333333Run 0, train epoch 24, ave_rewards -114.0Run 0, train epoch 25, ave_rewards -127.125Run 0, train epoch 26, ave_rewards -127.625Run 0, train epoch 27, ave_rewards -124.625Run 0, train epoch 28, ave_rewards -50.467152605459056Run 0, train epoch 29, ave_rewards -42.00203325184481Run 0, train epoch 30, ave_rewards -41.15841346135118Run 0, train epoch 31, ave_rewards -20.733375197046353Run 0, train epoch 32, ave_rewards -36.17595793967589Run 0, train epoch 33, ave_rewards -30.637569082963818Run 0, train epoch 34, ave_rewards -35.204245754176256Run 0, train epoch 35, ave_rewards -33.88888765698656Run 0, train epoch 36, ave_rewards -26.108884446355972Run 0, train epoch 37, ave_rewards -49.79994677089055Run 0, train epoch 38, ave_rewards -26.154497231669684Run 0, train epoch 39, ave_rewards -16.624093857544874Run 0, train epoch 40, ave_rewards -28.21104562699038
-episode_reward: -1164.9999999999998 epoch: 40
-Run 0, train epoch 41, ave_rewards -28.189451378482158Run 0, train epoch 42, ave_rewards -42.56635096661938Run 0, train epoch 43, ave_rewards -42.59072366954398Run 0, train epoch 44, ave_rewards -40.65245697967661Run 0, train epoch 45, ave_rewards -39.55440237907513Run 0, train epoch 46, ave_rewards -42.87226519768714Run 0, train epoch 47, ave_rewards -23.32625425195083Run 0, train epoch 48, ave_rewards -27.713697002569962Run 0, train epoch 49, ave_rewards -54.19058908045977Run 0, train epoch 50, ave_rewards -43.52805906320699
-Start saving model 100 100
-Run 0, train epoch 51, ave_rewards -63.125Run 0, train epoch 52, ave_rewards -45.14661417833074Run 0, train epoch 53, ave_rewards -13.75968390835905Run 0, train epoch 54, ave_rewards -23.771420175930654Run 0, train epoch 55, ave_rewards -25.25975717776666Run 0, train epoch 56, ave_rewards -8.226232652973001Run 0, train epoch 57, ave_rewards -4.142761119599355Run 0, train epoch 58, ave_rewards -10.03846524179258Run 0, train epoch 59, ave_rewards -13.493862145307595Run 0, train epoch 60, ave_rewards -4.818157072325361
-episode_reward: -827.0 epoch: 60
-Run 0, train epoch 61, ave_rewards -14.104384066226174Run 0, train epoch 62, ave_rewards -9.276258067616522Run 0, train epoch 63, ave_rewards -9.870929118773946Run 0, train epoch 64, ave_rewards -11.429335446299731Run 0, train epoch 65, ave_rewards -9.815620009400549Run 0, train epoch 66, ave_rewards -12.066573605106063Run 0, train epoch 67, ave_rewards -18.135635079446605Run 0, train epoch 68, ave_rewards -0.016686897771755287Run 0, train epoch 69, ave_rewards -1.4731476247805253Run 0, train epoch 70, ave_rewards 4.413561451593563Run 0, train epoch 71, ave_rewards -12.730952865813668Run 0, train epoch 72, ave_rewards -10.518809350436898Run 0, train epoch 73, ave_rewards 6.837918587458156Run 0, train epoch 74, ave_rewards 6.414975421348314Run 0, train epoch 75, ave_rewards 6.273941247176446Run 0, train epoch 76, ave_rewards 7.143317354835937Run 0, train epoch 77, ave_rewards 8.128331470107574Run 0, train epoch 78, ave_rewards 7.438211349080824Run 0, train epoch 79, ave_rewards 7.55800090055465Run 0, train epoch 80, ave_rewards 7.487080870413458
-episode_reward: 60.526881720430104 epoch: 80
-Run 0, train epoch 81, ave_rewards 8.119659224415093Run 0, train epoch 82, ave_rewards 7.7136357429147155Run 0, train epoch 83, ave_rewards 8.168847521685686Run 0, train epoch 84, ave_rewards 7.55086062279343Run 0, train epoch 85, ave_rewards 8.140936819391788Run 0, train epoch 86, ave_rewards 7.968564094344388Run 0, train epoch 87, ave_rewards 8.213069611845615Run 0, train epoch 88, ave_rewards 7.6351609112809085Run 0, train epoch 89, ave_rewards 7.726581201644414Run 0, train epoch 90, ave_rewards 7.7920024368859435Run 0, train epoch 91, ave_rewards 7.7567625332421315Run 0, train epoch 92, ave_rewards 8.308520135328605Run 0, train epoch 93, ave_rewards 8.141328650820354Run 0, train epoch 94, ave_rewards 7.903125347005866Run 0, train epoch 95, ave_rewards 8.099173361392811Run 0, train epoch 96, ave_rewards 8.00948037893667Run 0, train epoch 97, ave_rewards 8.179041687599122Run 0, train epoch 98, ave_rewards 7.772580164162572Run 0, train epoch 99, ave_rewards 8.010429880082832Run 0, train epoch 100, ave_rewards 8.33011887895257
-episode_reward: 65.29338842975207 epoch: 100
-
-Start saving model 200 100
-Run 0, train epoch 101, ave_rewards 7.568109424908774Run 0, train epoch 102, ave_rewards 8.07256594172731Run 0, train epoch 103, ave_rewards 8.112675045729604Run 0, train epoch 104, ave_rewards 7.562458861503159Run 0, train epoch 105, ave_rewards 7.822916210328553Run 0, train epoch 106, ave_rewards 7.495889792231256Run 0, train epoch 107, ave_rewards 7.967541619002798Run 0, train epoch 108, ave_rewards 7.992596362808924Run 0, train epoch 109, ave_rewards 8.609092464244979Run 0, train epoch 110, ave_rewards 8.48064863486878Run 0, train epoch 111, ave_rewards 7.6897153036032835Run 0, train epoch 112, ave_rewards 8.292141358769973Run 0, train epoch 113, ave_rewards 8.59111739435952Run 0, train epoch 114, ave_rewards 8.123585538993309Run 0, train epoch 115, ave_rewards 7.669797297484247Run 0, train epoch 116, ave_rewards 7.834061962308669Run 0, train epoch 117, ave_rewards 7.299193942282796Run 0, train epoch 118, ave_rewards 7.885489307778328Run 0, train epoch 119, ave_rewards 7.693689441369929Run 0, train epoch 120, ave_rewards 7.620242765959476
-episode_reward: 65.40438247011951 epoch: 120
-Run 0, train epoch 121, ave_rewards 8.236685304557374Run 0, train epoch 122, ave_rewards 7.7085627240486305Run 0, train epoch 123, ave_rewards 7.59286142100956Run 0, train epoch 124, ave_rewards 7.818004062710808Run 0, train epoch 125, ave_rewards 7.985441049553952Run 0, train epoch 126, ave_rewards 8.077850401769853Run 0, train epoch 127, ave_rewards 7.7727781967913545Run 0, train epoch 128, ave_rewards 8.111291659715292Run 0, train epoch 129, ave_rewards 8.186790456667886Run 0, train epoch 130, ave_rewards 7.765006256577308Run 0, train epoch 131, ave_rewards 7.85638906527209Run 0, train epoch 132, ave_rewards 8.487607784927112Run 0, train epoch 133, ave_rewards 8.386698110582898Run 0, train epoch 134, ave_rewards 7.866458086688172Run 0, train epoch 135, ave_rewards 7.9232363717220915Run 0, train epoch 136, ave_rewards 7.839726481458068Run 0, train epoch 137, ave_rewards 8.2654109390346Run 0, train epoch 138, ave_rewards 7.637881870339636Run 0, train epoch 139, ave_rewards 7.895874502192872Run 0, train epoch 140, ave_rewards 7.91002114681028
-episode_reward: 61.705813953488374 epoch: 140
-Run 0, train epoch 141, ave_rewards 7.5959926696190605Run 0, train epoch 142, ave_rewards 8.173665223665225Run 0, train epoch 143, ave_rewards 8.014217466936715Run 0, train epoch 144, ave_rewards 8.203879601642088Run 0, train epoch 145, ave_rewards 8.03114236624536Run 0, train epoch 146, ave_rewards 8.212802948379355Run 0, train epoch 147, ave_rewards 8.370768503082745Run 0, train epoch 148, ave_rewards 8.06598767963972Run 0, train epoch 149, ave_rewards 8.052718104785775Run 0, train epoch 150, ave_rewards 8.11968571811781
-Start saving model 300 100
-Run 0, train epoch 151, ave_rewards 7.7565203203851025Run 0, train epoch 152, ave_rewards 7.561593649064242Run 0, train epoch 153, ave_rewards 8.362439405344876Run 0, train epoch 154, ave_rewards 8.248433413703802Run 0, train epoch 155, ave_rewards 7.9347827117556475Run 0, train epoch 156, ave_rewards 8.29772923332706Run 0, train epoch 157, ave_rewards 7.9688091317071565Run 0, train epoch 158, ave_rewards 8.06508955467996Run 0, train epoch 159, ave_rewards 7.87605200474822Run 0, train epoch 160, ave_rewards 8.189223635991675
-episode_reward: 70.94867256637168 epoch: 160
-Run 0, train epoch 161, ave_rewards 7.938784627537056Run 0, train epoch 162, ave_rewards 7.889659369963941Run 0, train epoch 163, ave_rewards 7.60053022815254Run 0, train epoch 164, ave_rewards 8.023127869743337Run 0, train epoch 165, ave_rewards 8.085876454281367Run 0, train epoch 166, ave_rewards 7.4840871667977735Run 0, train epoch 167, ave_rewards 8.073914335311395Run 0, train epoch 168, ave_rewards 7.762962620671858Run 0, train epoch 169, ave_rewards 7.805037454864643Run 0, train epoch 170, ave_rewards 8.011490139949109Run 0, train epoch 171, ave_rewards 8.183226536318292Run 0, train epoch 172, ave_rewards 7.867976529160739Run 0, train epoch 173, ave_rewards 7.677674356595866Run 0, train epoch 174, ave_rewards 8.597520793089428Run 0, train epoch 175, ave_rewards 8.533754777504777Run 0, train epoch 176, ave_rewards 8.516881256778387Run 0, train epoch 177, ave_rewards 7.886371229415744Run 0, train epoch 178, ave_rewards 8.62169862001966Run 0, train epoch 179, ave_rewards 8.148710899603223Run 0, train epoch 180, ave_rewards 8.568522351655238
-episode_reward: 67.7008733624454 epoch: 180
-Run 0, train epoch 181, ave_rewards 7.8804692678320265Run 0, train epoch 182, ave_rewards 8.140125125605653Run 0, train epoch 183, ave_rewards 8.352434945134673Run 0, train epoch 184, ave_rewards 8.109584262445638Run 0, train epoch 185, ave_rewards 8.318557848632645Run 0, train epoch 186, ave_rewards 8.787280997304583Run 0, train epoch 187, ave_rewards 8.510700767734098Run 0, train epoch 188, ave_rewards 8.72018576467106Run 0, train epoch 189, ave_rewards 8.356439039320179Run 0, train epoch 190, ave_rewards 7.917200770551184Run 0, train epoch 191, ave_rewards 8.884912494435193Run 0, train epoch 192, ave_rewards 8.221937169696544Run 0, train epoch 193, ave_rewards 8.196499831835906Run 0, train epoch 194, ave_rewards 8.460177574674896Run 0, train epoch 195, ave_rewards 8.085881886234302Run 0, train epoch 196, ave_rewards 8.256726303215347Run 0, train epoch 197, ave_rewards 8.487281935203603Run 0, train epoch 198, ave_rewards 8.57885099354632Run 0, train epoch 199, ave_rewards 8.169293842034806=== Training finished at Mon Sep 22 12:46:12 AM CEST 2025 ===
-=== Running analyse_rewards.py ===
-[+] Reward curve saved to ./my_data_and_graph/historydata/rewards_curve.png
-[+] Reward curve (zoomed) saved to ./my_data_and_graph/historydata/rewards_curve_zoomed.png
-=== Training Reward Analysis ===
-Total episodes logged: 600
-Average reward: -10.20
-Max reward: 9.46
-Min reward: -159.25
-[+] Loss curve saved to ./my_data_and_graph/historydata/loss_curve.png
-[+] Loss curve (zoomed) saved to ./my_data_and_graph/historydata/loss_curve_zoomed.png
-[+] Training time curve saved to ./my_data_and_graph/historydata/training_time.png
-=== Analyse finished at Mon Sep 22 12:46:14 AM CEST 2025 ===
-=== JOB 61185512 FINISHED at Mon Sep 22 12:46:14 AM CEST 2025 ===
-Check generated plots in: ./my_data_and_graph/historydata/
