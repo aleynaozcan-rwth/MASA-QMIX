@@ -62,6 +62,13 @@ def get_mixer_args(args):
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
+    # === Added for Cluster Convergence Test 25.09.2025 Version 4.8 ===
+    # Log initial epsilon setting for monitoring exploration schedule
+    with open("./my_data_and_graph/historydata/epsilon_log.txt", "a") as f:
+        print(f"Init epsilon={args.epsilon}, min_epsilon={args.min_epsilon}, "
+              f"anneal_epsilon={args.anneal_epsilon}, scale={args.epsilon_anneal_scale}", file=f)
+    # === End of addition ===
+
     # training schedule
     args.n_epoch     = 400    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
     args.n_episodes  = 4     # DECREASED (5 → 3->4) → fewer episodes per epoch

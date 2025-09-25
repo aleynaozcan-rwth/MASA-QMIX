@@ -2,7 +2,7 @@
 #SBATCH --job-name=masa_qmix
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
-#SBATCH --gres=gpu:1
+
 #SBATCH --time=04:00:00
 #SBATCH --partition=c23g
 #SBATCH --mem=128G
