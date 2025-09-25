@@ -2,10 +2,10 @@
 #SBATCH --job-name=masa_qmix
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
-#SBATCH --time=04:00:00
-#SBATCH --partition=c23g
-#SBATCH --mem=64G
-#SBATCH --cpus-per-task=8
+#SBATCH --time=00:30:00          # shorter time limit (30 minutes)
+#SBATCH --partition=c23g         # adjust if needed (e.g., short partition if available)
+#SBATCH --mem=16G                # reduced memory request
+#SBATCH --cpus-per-task=4        # fewer CPUs, easier to schedule
 
 # --- Environment setup ---
 module purge
