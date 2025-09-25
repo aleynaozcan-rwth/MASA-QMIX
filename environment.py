@@ -271,6 +271,15 @@ class ScheduleEnv(gym.Env):
         else:
             self.done = False
 
+        # === Added for Cluster Convergence Test 25.09.2025 Version 4.8 ===
+        # Log whether the episode completed before the max step limit (80 steps).
+        if self.done:
+            steps_taken = self.step_count
+            completed = 1 if steps_taken < self.get_env_info()["episode_limit"] else 0
+            with open("./my_data_and_graph/historydata/completion_rate.txt", "a") as f:
+                print(completed, file=f)
+        # === End of addition ===
+
         left_jobs, all_jobs = self.planes_obj.count_jobs()
         if self.done:
             reward = 6000 / (sum(self.episode_time_slice) + max(self.state_left_time))

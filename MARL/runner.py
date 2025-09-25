@@ -89,7 +89,7 @@ class Runner:
         all_gantt_data = []   # store all gantt data across episodes
         r_s = [0]
 
-        # global episode counter (used for consistent logging)
+        # === NEW: global episode counter (ensures unique IDs across all epochs) ===
         global_ep_idx = 0
 
         for epoch in range(self.args.n_epoch):
@@ -135,7 +135,13 @@ class Runner:
                 with open("./my_data_and_graph/historydata/episode_rewards.txt", "a") as f:
                     f.write(f"{global_ep_idx},{ep_r}\n")
 
-                # ❌ Per-episode Gantt PNG removed (only logs kept)
+                #  Per-episode Gantt PNG removed (only logs kept)
+
+                # === Added for Cluster Convergence Test 25.09.2025 Version 4.8 ===
+                # Epsilon log per episode (helps track exploration vs exploitation)
+                with open("./my_data_and_graph/historydata/epsilon_log.txt", "a") as f:
+                    f.write(f"Episode {global_ep_idx}, epsilon={self.rolloutWorker.epsilon}\n")
+                # === End of addition ===
 
                 global_ep_idx += 1
 
