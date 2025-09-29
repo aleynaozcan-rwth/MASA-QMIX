@@ -58,7 +58,7 @@ def get_mixer_args(args):
     # epsilon-greedy
     args.epsilon          = 1.0    # unchanged
     args.min_epsilon      = 0.05   # unchanged
-    anneal_steps          = 3000   # DECREASED (50000 → 2000) for faster epsilon annealing
+    anneal_steps          = 20000   # DECREASED (50000 → 2000) for faster epsilon annealing
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
@@ -77,7 +77,7 @@ def get_mixer_args(args):
     # evaluation / saving cadence
     args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
     args.batch_size     = 24 # DECREASED (32 → 16->24)
-    args.buffer_size    = 20000  # DECREASED (5000 → 1000->1000)
+    args.buffer_size    = 3000  # DECREASED (5000 → 1000->1000)
 
     args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
     args.target_update_cycle= 50    # DECREASED (200 → 50)
