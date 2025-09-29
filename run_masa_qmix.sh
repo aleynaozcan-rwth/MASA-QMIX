@@ -2,11 +2,10 @@
 #SBATCH --job-name=masa_qmix
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
-
 #SBATCH --time=04:00:00
 #SBATCH --partition=c23g
-#SBATCH --mem=128G
-#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=8
 
 # --- Environment setup ---
 module purge

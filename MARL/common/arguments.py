@@ -58,13 +58,13 @@ def get_mixer_args(args):
     # epsilon-greedy
     args.epsilon          = 1.0    # unchanged
     args.min_epsilon      = 0.05   # unchanged
-    anneal_steps          = 4000   # DECREASED (50000 → 2000) for faster epsilon annealing
+    anneal_steps          = 2000   # DECREASED (50000 → 2000) for faster epsilon annealing
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
     # training schedule
-    args.n_epoch     = 200    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
-    args.n_episodes  = 3      # DECREASED (5 → 3->4) → fewer episodes per epoch
+    args.n_epoch     = 400    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
+    args.n_episodes  = 4     # DECREASED (5 → 3->4) → fewer episodes per epoch
     args.train_steps = 2      # unchanged
     #her epoch = 3 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
     #1 episode = 1 scheduling.
@@ -76,8 +76,8 @@ def get_mixer_args(args):
 
     # evaluation / saving cadence
     args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
-    args.batch_size     = 16   # DECREASED (32 → 16->24)
-    args.buffer_size    = 1000  # DECREASED (5000 → 1000->1000)
+    args.batch_size     = 24 # DECREASED (32 → 16->24)
+    args.buffer_size    = 3000  # DECREASED (5000 → 1000->1000)
 
     args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
     args.target_update_cycle= 50    # DECREASED (200 → 50)
