@@ -325,7 +325,7 @@ Episode 4 | Plane 3 | Job 8 | Wait 0
 Episode 4 | Plane 3 | Job 6 | Wait 0
 Episode 4 | Plane 3 | Job 7 | Wait 0
 Episode 4 | Plane 3 | Job 1 | Wait 0
-Episode 4 | Plane 3 | Job 0 | Wait 9.588103662074758
+Episode 4 | Plane 3 | Job 0 | Wait 0
 Episode 4 | Plane 4 | Job 5 | Wait 0
 Episode 4 | Plane 4 | Job 4 | Wait 0
 Episode 4 | Plane 4 | Job 2 | Wait 0
@@ -2968,7 +2968,7 @@ Episode 40 | Plane 5 | Job 4 | Wait 0
 Episode 40 | Plane 5 | Job 2 | Wait 0
 Episode 40 | Plane 5 | Job 3 | Wait 0
 Episode 40 | Plane 5 | Job 8 | Wait 0
-Episode 40 | Plane 5 | Job 6 | Wait 1.3886603839558234
+Episode 40 | Plane 5 | Job 6 | Wait 0
 Episode 40 | Plane 5 | Job 7 | Wait 0
 Episode 40 | Plane 5 | Job 1 | Wait 0
 Episode 40 | Plane 5 | Job 0 | Wait 0
@@ -2981,7 +2981,7 @@ Episode 40 | Plane 6 | Job 6 | Wait 0
 Episode 40 | Plane 6 | Job 7 | Wait 0
 Episode 40 | Plane 6 | Job 1 | Wait 0
 Episode 40 | Plane 6 | Job 0 | Wait 0
-Episode 40 | Plane 7 | Job 5 | Wait 17
+Episode 40 | Plane 7 | Job 5 | Wait 0
 Episode 40 | Plane 7 | Job 4 | Wait 0
 Episode 40 | Plane 7 | Job 2 | Wait 0
 Episode 40 | Plane 7 | Job 3 | Wait 0
@@ -3200,7 +3200,7 @@ Episode 43 | Plane 6 | Job 6 | Wait 0
 Episode 43 | Plane 6 | Job 7 | Wait 0
 Episode 43 | Plane 6 | Job 1 | Wait 0
 Episode 43 | Plane 6 | Job 0 | Wait 0
-Episode 43 | Plane 7 | Job 5 | Wait 22
+Episode 43 | Plane 7 | Job 5 | Wait 0
 Episode 43 | Plane 7 | Job 4 | Wait 0
 Episode 43 | Plane 7 | Job 2 | Wait 0
 Episode 43 | Plane 7 | Job 3 | Wait 0
@@ -5244,7 +5244,7 @@ Episode 71 | Plane 6 | Job 6 | Wait 0
 Episode 71 | Plane 6 | Job 7 | Wait 0
 Episode 71 | Plane 6 | Job 1 | Wait 0
 Episode 71 | Plane 6 | Job 0 | Wait 0
-Episode 71 | Plane 7 | Job 5 | Wait 12
+Episode 71 | Plane 7 | Job 5 | Wait 0
 Episode 71 | Plane 7 | Job 4 | Wait 0
 Episode 71 | Plane 7 | Job 2 | Wait 0
 Episode 71 | Plane 7 | Job 3 | Wait 0
