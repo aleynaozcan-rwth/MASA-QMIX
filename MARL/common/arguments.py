@@ -77,7 +77,7 @@ def get_mixer_args(args):
     # evaluation / saving cadence
     args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
     args.batch_size     = 24 # DECREASED (32 → 16->24)
-    args.buffer_size    = 3000  # DECREASED (5000 → 1000->1000)
+    args.buffer_size    = 20000  # DECREASED (5000 → 1000->1000)
 
     args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
     args.target_update_cycle= 50    # DECREASED (200 → 50)

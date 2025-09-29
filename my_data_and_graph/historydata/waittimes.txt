@@ -172,7 +172,7 @@ Episode 2 | Plane 2 | Job 7 | Wait 0
 Episode 2 | Plane 2 | Job 1 | Wait 0
 Episode 2 | Plane 2 | Job 0 | Wait 0
 Episode 2 | Plane 3 | Job 5 | Wait 0
-Episode 2 | Plane 3 | Job 4 | Wait 2.786224286509693
+Episode 2 | Plane 3 | Job 4 | Wait 0
 Episode 2 | Plane 3 | Job 2 | Wait 0
 Episode 2 | Plane 3 | Job 3 | Wait 0
 Episode 2 | Plane 3 | Job 8 | Wait 0
@@ -708,7 +708,7 @@ Episode 9 | Plane 5 | Job 8 | Wait 0
 Episode 9 | Plane 5 | Job 6 | Wait 0
 Episode 9 | Plane 5 | Job 7 | Wait 0
 Episode 9 | Plane 5 | Job 1 | Wait 0
-Episode 9 | Plane 5 | Job 0 | Wait 3.794051831037393
+Episode 9 | Plane 5 | Job 0 | Wait 0
 Episode 9 | Plane 6 | Job 5 | Wait 0
 Episode 9 | Plane 6 | Job 4 | Wait 0
 Episode 9 | Plane 6 | Job 2 | Wait 0
@@ -1002,7 +1002,7 @@ Episode 13 | Plane 5 | Job 7 | Wait 0
 Episode 13 | Plane 5 | Job 1 | Wait 0
 Episode 13 | Plane 5 | Job 0 | Wait 0
 Episode 13 | Plane 6 | Job 5 | Wait 0
-Episode 13 | Plane 6 | Job 4 | Wait 0.6811181177418604
+Episode 13 | Plane 6 | Job 4 | Wait 0
 Episode 13 | Plane 6 | Job 2 | Wait 0
 Episode 13 | Plane 6 | Job 3 | Wait 0
 Episode 13 | Plane 6 | Job 8 | Wait 0
@@ -1203,7 +1203,7 @@ Episode 16 | Plane 3 | Job 7 | Wait 0
 Episode 16 | Plane 3 | Job 1 | Wait 0
 Episode 16 | Plane 3 | Job 0 | Wait 0
 Episode 16 | Plane 4 | Job 5 | Wait 0
-Episode 16 | Plane 4 | Job 4 | Wait 0.8432181650496062
+Episode 16 | Plane 4 | Job 4 | Wait 0
 Episode 16 | Plane 4 | Job 2 | Wait 0
 Episode 16 | Plane 4 | Job 3 | Wait 0
 Episode 16 | Plane 4 | Job 8 | Wait 0
@@ -1726,7 +1726,7 @@ Episode 23 | Plane 5 | Job 5 | Wait 0
 Episode 23 | Plane 5 | Job 4 | Wait 0
 Episode 23 | Plane 5 | Job 2 | Wait 0
 Episode 23 | Plane 5 | Job 3 | Wait 0
-Episode 23 | Plane 5 | Job 8 | Wait 6.132276734544675
+Episode 23 | Plane 5 | Job 8 | Wait 0
 Episode 23 | Plane 5 | Job 6 | Wait 0
 Episode 23 | Plane 5 | Job 7 | Wait 0
 Episode 23 | Plane 5 | Job 1 | Wait 0
@@ -2387,7 +2387,7 @@ Episode 32 | Plane 5 | Job 8 | Wait 0
 Episode 32 | Plane 5 | Job 6 | Wait 0
 Episode 32 | Plane 5 | Job 7 | Wait 0
 Episode 32 | Plane 5 | Job 1 | Wait 0
-Episode 32 | Plane 5 | Job 0 | Wait 7.751190503186621
+Episode 32 | Plane 5 | Job 0 | Wait 0
 Episode 32 | Plane 6 | Job 5 | Wait 0
 Episode 32 | Plane 6 | Job 4 | Wait 0
 Episode 32 | Plane 6 | Job 2 | Wait 0
@@ -31585,7 +31585,7 @@ Episode 432 | Plane 5 | Job 2 | Wait 0
 Episode 432 | Plane 5 | Job 3 | Wait 0
 Episode 432 | Plane 5 | Job 8 | Wait 0
 Episode 432 | Plane 5 | Job 6 | Wait 0
-Episode 432 | Plane 5 | Job 7 | Wait 0
+Episode 432 | Plane 5 | Job 7 | Wait 3.4765030650559936
 Episode 432 | Plane 5 | Job 1 | Wait 0
 Episode 432 | Plane 5 | Job 0 | Wait 0
 Episode 432 | Plane 6 | Job 5 | Wait 0
