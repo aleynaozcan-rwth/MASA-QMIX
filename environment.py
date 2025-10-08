@@ -2,6 +2,11 @@
 In this code, "plane" stands for a job, and "site" stands for a station.
 This environment schedules planes (jobs) to sites (stations) under resource constraints.
 '''
+
+# === Added for Step 2A ===
+import simpy
+# =========================
+
 from utils.site import Sites
 from utils.job import Jobs
 from utils.task import Task
@@ -13,7 +18,7 @@ from gym import spaces
 from gym.utils import seeding
 import math
 
-# # Whole environment class
+
 class ScheduleEnv(gym.Env):
     environment_name = "Boat Schedule"
 
@@ -57,6 +62,29 @@ class ScheduleEnv(gym.Env):
         #  # One global state and per-agent observations
         self.state4marl = None  # # global state maintained for MARL
         self.obs4marl = None    # # per-agent observations for MARL
+
+        # === Added for Step 2A: create SimPy environment ===
+        self.sim_env = simpy.Environment()
+        # ====================================================
+
+
+    # === Added for Step 2A ===
+    def clock(self, until_time):
+        """A simple SimPy clock process that runs until the specified time."""
+        while True:
+            yield self.sim_env.timeout(1)
+            # For now, just log time steps
+            # Later we’ll link this to job arrivals, machine releases, etc.
+            if self.sim_env.now >= until_time:
+                break
+
+    def run_simpy(self, until_time=10):
+        """Run the SimPy environment to test event scheduling."""
+        self.sim_env.process(self.clock(until_time))
+        self.sim_env.run()
+        print(f"✅ SimPy environment ran successfully until t={until_time}")
+    # =========================
+
 
     def initialize(self):
         sites_obj = Sites()
@@ -108,6 +136,7 @@ class ScheduleEnv(gym.Env):
         }
         state = self.conduct_state(info)
         return state  # 151
+
 
     def conduct_state(self, info):
         res = []
