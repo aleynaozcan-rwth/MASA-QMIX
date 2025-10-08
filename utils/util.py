@@ -40,5 +40,9 @@ def advance_by_min_time(min_time, state_left_time):
 
 
 # Return the transfer time for a plane moving between two sites (Euclidean distance / speed)
+#def count_path_on_road(initial_pos, end_pos, speed):
+#    return math.sqrt((end_pos[0] - initial_pos[0]) ** 2 + (end_pos[1] - initial_pos[1]) ** 2) / speed
+
+# Neutralized: travel time effect removed (always returns 0)
 def count_path_on_road(initial_pos, end_pos, speed):
-    return math.sqrt((end_pos[0] - initial_pos[0]) ** 2 + (end_pos[1] - initial_pos[1]) ** 2) / speed
+    return 0
