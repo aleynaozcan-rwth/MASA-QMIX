@@ -63,7 +63,7 @@ def get_mixer_args(args):
     args.epsilon_anneal_scale = 'step'
 
     # training schedule
-    args.n_epoch     = 1500    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
+    args.n_epoch     = 15000    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
     args.n_episodes  = 5     # DECREASED (5 → 3->4) → fewer episodes per epoch
     args.train_steps = 2      # unchanged
     #her epoch = 3 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
