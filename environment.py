@@ -1,12 +1,9 @@
-'''
+"""
 In this code, "plane" stands for a job, and "site" stands for a station.
 This environment schedules planes (jobs) to sites (stations) under resource constraints.
-'''
+"""
 
-# === Added for Step 2A ===
 import simpy
-# =========================
-
 from utils.site import Sites
 from utils.job import Jobs
 from utils.task import Task
@@ -23,7 +20,7 @@ class ScheduleEnv(gym.Env):
     environment_name = "Boat Schedule"
 
     def __init__(self):
-        # Declare member variables
+        # --- Basic initialization ---
         self.sites = []
         self.jobs = []
         self.task = []
@@ -36,44 +33,25 @@ class ScheduleEnv(gym.Env):
         self.plane_speed = 0
         self.initialize()
 
-        # Action space: [0..len(sites)-1] for site selection + [wait, busy, finished]
+        # --- Gym settings ---
         self.action_space = spaces.Discrete(len(self.sites) + 3)
         self.id = "Boat Schedule"
         self.reward_threshold = -1000
         self.trials = 50
+
         self.job_record_for_gant = []
         self.sites_state_global = None
         self.state4marl = None
         self.obs4marl = None
 
-        # === Added for Step 2A: create SimPy environment ===
+        # --- SimPy setup ---
         self.sim_env = simpy.Environment()
-        # ====================================================
-
-        # === Added for Step 2B: SimPy site resources (capacity = 1 per site) ===
         self.site_resources = []
-        # =======================================================================
+        self._completed_prev = 0
 
-
-    # === Added for Step 2A ===
-    def clock(self, until_time):
-        """A simple SimPy clock process that runs until the specified time."""
-        while True:
-            yield self.sim_env.timeout(1)
-            if self.sim_env.now >= until_time:
-                break
-
-    def run_simpy(self, until_time=10):
-        """Run the SimPy environment to test event scheduling."""
-        self.sim_env.process(self.clock(until_time))
-        self.sim_env.run()
-        print(f"✅ SimPy environment ran successfully until t={until_time}")
-    # =========================
-
-
-    # === Added for Step 2B: Event-driven processes ===
+    # === SimPy process definitions ===
     def find_site_for_job(self, job_id):
-        """Find an idle site that can handle the given job."""
+        """Find an idle site compatible with the given job."""
         if not self.site_resources or len(self.site_resources) != len(self.sites):
             return None
         for idx, site in enumerate(self.sites):
@@ -82,7 +60,7 @@ class ScheduleEnv(gym.Env):
         return None
 
     def plane_process(self, plane_id):
-        """SimPy process representing one plane executing its sequence of jobs."""
+        """Each plane executes its sequence of jobs as a SimPy process."""
         plane = self.planes[plane_id]
         while len(plane.left_job) > 0:
             current_job = plane.left_job[0]
@@ -106,16 +84,11 @@ class ScheduleEnv(gym.Env):
 
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
 
-    def run_processes(self):
-        """Start all plane processes and run the full simulation."""
-        self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
-        for pid in range(len(self.planes)):
-            self.sim_env.process(self.plane_process(pid))
-        self.sim_env.run()
-        print("✅ All plane processes completed successfully.")
-    # ===================================================
+    def save_env_info(self, job_transition):
+        """Record job transitions for analysis and Gantt visualization."""
+        self.job_record_for_gant.append(job_transition)
 
-
+    # === Initialization ===
     def initialize(self):
         sites_obj = Sites()
         self.sites_obj = sites_obj
@@ -127,77 +100,94 @@ class ScheduleEnv(gym.Env):
         self.task = task_obj.simple_task_object
         self.planes = self.planes_obj.planes_object_list
 
-        self.state = [[9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]]
-                      for i in range(len(self.sites))]
-        self.sites_state_global = [-1 for i in range(len(self.sites))]
+        self.state = [
+            [9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]]
+            for i in range(len(self.sites))
+        ]
+        self.sites_state_global = [-1 for _ in range(len(self.sites))]
         self.job_record_for_gant = []
         self.done = False
-        self.state_left_time = np.array([0 for i in range(len(self.sites))])
+        self.state_left_time = np.array([0 for _ in range(len(self.sites))])
         self.episode_time_slice = []
         self.plane_speed = self.planes_obj.plane_speed
-        self.obs4marl = [[] for i in range(len(self.planes))]
+        self.obs4marl = [[] for _ in range(len(self.planes))]
         self.current_finishing_jobs = 0
         self.step_count = 0
-
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
+        self._completed_prev = 0
 
     def reset(self):
         self.initialize()
-        info = {"sites": [[[0, 0], self.state[i][0], self.state[i][1]] for i in range(len(self.sites))],
-                "planes": [[self.planes[i].left_job[0].index_id,
-                            self.jobs[self.planes[i].left_job[0].index_id].time_span,
-                            len(self.planes[i].left_job)]
-                           if len(self.planes[i].left_job) != 0 else [9, 0, len(self.planes[i].left_job)]
-                           for i in range(len(self.planes))],
-                "planes_obj": self.planes}
-        state = self.conduct_state(info)
+        state = np.zeros(10)
         return state
 
-
-    def conduct_state(self, info):
-        res = []
-        for eve in info["sites"]:
-            res += eve[2]
-        self.state4marl = np.array(res)
-        return np.array(res)
-
-
-    def save_env_info(self, job_transition):
-        """Keep track of job records for Gantt chart or logs."""
-        self.job_record_for_gant.append(job_transition)
-
+    # === Step logic ===
+    def all_jobs_completed(self):
+        """Return True if all planes have finished all jobs."""
+        return all(len(p.left_job) == 0 for p in self.planes)
 
     def step(self, action):
-        """Simplified RL step — includes SimPy sync check (Step 3A)."""
+        """Perform one RL step and advance SimPy environment."""
         self.step_count += 1
+        reward = -16  # baseline penalty for time passing
+        self.done = False
 
-        # Dummy reward & info (placeholder)
-        reward = -240
-        self.episode_time_slice.append(1)
+        # --- Advance SimPy: drain all events that occur at the same timestamp ---
+        if hasattr(self, "sim_env") and len(self.sim_env._queue) > 0:
+            # SimPy 4.x stores events as tuples (time, priority, eid, event)
+            next_time = self.sim_env._queue[0][0]
+            if self.sim_env.now < next_time:
+                self.sim_env.step()  # advance to next event
+            # Process all events scheduled for the same next_time
+            while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
+                self.sim_env.step()
+            print(f"[DEBUG] Advanced SimPy → now={self.sim_env.now}")
 
-        # === Step 3A: SimPy pilot sync test (Fixed) ===
-        if hasattr(self, "sim_env"):
-            # Start the background clock only once
-            if not hasattr(self, "_clock_started"):
-                self.sim_env.process(self.clock(999))  # long-running background clock
-                self._clock_started = True
-            self.sim_env.step()
-            print(f"[DEBUG] SimPy time after RL step: {self.sim_env.now}")
-        # ==============================================
+        # --- Reward: +10 for each new completion since last step ---
+        completed_now = len(self.job_record_for_gant) - self._completed_prev
+        self._completed_prev = len(self.job_record_for_gant)
+        reward += completed_now * 10
 
-        done = False
-        info = {"time": sum(self.episode_time_slice)}
-        return reward, done, info
+        # --- Check completion ---
+        if self.all_jobs_completed():
+            self.done = True
+            print(f"✅ All jobs finished at SimPy time={self.sim_env.now}")
+
+        print(
+            f"[DEBUG] RL step={self.step_count} | t={self.sim_env.now} | "
+            f"+completed={completed_now} | total={len(self.job_record_for_gant)}"
+        )
+
+        return reward, self.done, {}
+
+    # === Co-execution test ===
+    def test_coexecution(self, steps=5):
+        print("Starting Step 3B Co-Execution Test")
+        self.reset()
+
+        # Initialize SimPy resources and start plane processes
+        self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
+        for pid in range(len(self.planes)):
+            self.sim_env.process(self.plane_process(pid))
+
+        # Prime SimPy so processes become active
+        self.sim_env.run(until=0.01)
+
+        for i in range(steps):
+            dummy_action = [len(self.sites)] * len(self.planes)
+            reward, done, info = self.step(dummy_action)
+            print(
+                f"Step {i} | Reward={reward:.2f} | SimPy time={self.sim_env.now} | "
+                f"Completed jobs={len(self.job_record_for_gant)}"
+            )
+
+            if done:
+                print("✅ Environment finished early.")
+                break
+
+        print("✅ Step 3B test completed successfully.")
 
 
+# === Quick local test ===
 if __name__ == "__main__":
     env = ScheduleEnv()
-    env.reset()
-    print("Starting Pilot SimPy–RL Sync Test")
-    for i in range(5):
-        dummy_action = [len(env.sites)] * len(env.planes)
-        reward, done, info = env.step(dummy_action)
-        print(f"Step {i} | Reward: {reward:.2f} | SimPy time: {env.sim_env.now}")
-    print("✅ Pilot integration test completed.")
+    env.test_coexecution()
