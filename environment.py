@@ -28,7 +28,7 @@ class ScheduleEnv(gym.Env):
         self.done = False
         self.state_left_time = []
         self.episode_time_slice = []  ## list of time consumed at each step within the episode
-        self.plane_speed = 0  ## movement/processing speed
+        self.plane_speed = 0  ## movement/processing speed (kept for compat; travel removed)
         self.initialize()  #  # initialize all environment parameters
 
         # Planes controlled by DQN do not need an explicit "wait" action; they will choose a feasible action.
@@ -82,7 +82,7 @@ class ScheduleEnv(gym.Env):
         self.done = False
         self.state_left_time = np.array([0 for i in range(len(self.sites))])
         self.episode_time_slice = []
-        self.plane_speed = self.planes_obj.plane_speed  # # running speed
+        self.plane_speed = self.planes_obj.plane_speed  # # kept for compat
         # print("the environment is initialized now !!")
         self.obs4marl = [[] for i in range(len(self.planes))]
         self.current_finishing_jobs = 0
@@ -95,7 +95,8 @@ class ScheduleEnv(gym.Env):
     def reset(self):
         self.initialize()  # # re-initialize all parameters
         info = {
-            "sites": [[self.sites[i].absolute_position,
+            # After Step 1B we no longer use positions; keep placeholder to preserve shape
+            "sites": [[[0, 0],  # placeholder for absolute_position
                        self.state[i][0],
                        self.state[i][1]] for i in range(len(self.sites))],
             "planes": [[self.planes[i].left_job[0].index_id,
@@ -106,8 +107,6 @@ class ScheduleEnv(gym.Env):
             "planes_obj": self.planes
         }
         state = self.conduct_state(info)
-        # print(info)
-        # print(len(state))
         return state  # 151
 
     def conduct_state(self, info):
@@ -115,11 +114,10 @@ class ScheduleEnv(gym.Env):
         temp = []
 
         for eve in info["sites"]:
-            # res.append(eve[1])
-            temp.append(eve[1])
+            temp.append(eve[1])  # site occupancy
 
         for eve in info["sites"]:
-            res += eve[2]
+            res += eve[2]        # site resource bitmap
 
         for i, eve in enumerate(info["planes"]):
             res += [eve[2]]
@@ -130,11 +128,11 @@ class ScheduleEnv(gym.Env):
                 else:
                     # idle site and site can process plane's next job -> plane can go there next
                     if eve_1 == 9 and self.planes[i].left_job[0].index_id in self.sites[l].resource_ids_list:
-                        temp_obs.append(util.count_path_on_road(
-                            self.planes[i].position, self.sites[l].absolute_position, self.plane_speed)/40)  
+                        # After Step 1B: no distance feature; neutral zero
+                        temp_obs.append(0)
                     else:
-                        temp_obs.append(0)  # # otherwise the plane is busy; cannot go next step
-            # per-agent obs = distances/eligibility + [next_job_id, remaining_jobs, time_span]           
+                        temp_obs.append(0)  # otherwise the plane is busy; cannot go next step
+            # per-agent obs = eligibility + [next_job_id, remaining_jobs, time_span]           
             self.obs4marl[i] = temp_obs + [eve[0], eve[2], eve[1]]
 
         current_working_plane_ids = []
@@ -174,7 +172,6 @@ class ScheduleEnv(gym.Env):
                     res.append(eve)
                 else:
                     raise Exception("sloppy error in actions", action)
-                    # assert False
         return res
 
     # Replace certain action codes (treat BUSY/FINISHED as WAIT)
@@ -192,14 +189,10 @@ class ScheduleEnv(gym.Env):
 
     def step(self, action):
         self.step_count += 1
-        ## print("start interaction")
         action, real_conflict_num = self.action_replace(action)  #  # replace 19/20 with 18
-        # if real_conflict_num != 0:
-        #     print(real_conflict_num)
         count_break_rules = 0
         assert len(action) == len(self.planes)
         rewards = [0 for eve in action]
-        max_time_on_roads = [0 for eve in action]
         count_for_reward = 0
         action = self.check_inflict_action(action)
         time_span_increase = np.array([0 for eve in self.sites])
@@ -209,16 +202,15 @@ class ScheduleEnv(gym.Env):
                 pass
             else:  # assign a support/scheduling task
                 if self.planes[i].left_job[0].index_id in self.sites[site_id].resource_ids_list:   
-                    # if the chosen site contains the required resource for the plane's next job
-                    time_on_road = util.count_path_on_road(
-                        self.planes[i].position, self.sites[site_id].absolute_position.tolist(), self.plane_speed)
+                    # --- NOTE: travel time removed in Step 1B ---
                     start_time = sum(self.episode_time_slice)
 
-                    # --- FIX: take job_id BEFORE executing the task ---
+                    # Take job_id BEFORE executing the task
                     job_id = self.planes[i].left_job[0].index_id
 
                     temp_time = self.planes[i].execute_task(self.planes[i].left_job[0], self.sites[site_id])
-                    duration = temp_time + time_on_road
+                    duration = temp_time  # no travel time
+
                     end_time = start_time + duration
 
                     if type(site_id) == int:
@@ -226,24 +218,20 @@ class ScheduleEnv(gym.Env):
                     else:
                         self.save_env_info((start_time, end_time, job_id, site_id.item(), i))
 
-                    # --- NOTE (Gantt extension): we added start_time, end_time, job_id 
-                    # for visualization purposes. Before, only temp_time was stored. 
-                    # Now we record full scheduling intervals. ---
-
                     time_span_increase[site_id] = duration
                     count_for_reward += 1
-                    max_time_on_roads[i] = time_on_road
                 else:
                     raise Exception("Invalid action was not masked", ...)
 
         real_did = sum(1 for eve in action if eve < 18)
 
+        # Rewards: keep wait penalty; remove travel-based shaping
         for i, site_id in enumerate(action):
             if site_id == len(self.sites):  
-                rewards[i] = -30  #  # penalty for waiting due to resource conflict
+                rewards[i] = -30  # penalty for waiting due to resource conflict
             else:  
                 if rewards[i] == 0:
-                    rewards[i] = -(max_time_on_roads[i]+0.1)/(max(max_time_on_roads)+0.1)
+                    rewards[i] = 0  # no extra penalty now that travel time is gone
 
         # Update remaining processing time
         self.state_left_time = self.state_left_time + time_span_increase
@@ -291,7 +279,8 @@ class ScheduleEnv(gym.Env):
             "episodes_situation": self.job_record_for_gant
         }
         state = self.conduct_state({
-            "sites": [[self.sites[i].absolute_position,
+            # No positions after Step 1B; placeholder kept to preserve shape
+            "sites": [[[0, 0],
                        self.state[i][0],
                        self.state[i][1]] for i in range(len(self.sites))],
             "planes": [[self.planes[i].left_job[0].index_id,

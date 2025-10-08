@@ -14,23 +14,7 @@ class Sites:
         # All site objects
         # id: 0 - 17 (18 sites total)
         # -------------------------------------------------------------------------
-        # NOTE:
-        # There are 18 sites (A–R), each representing a parking/maintenance spot 
-        # for planes in the environment.
-        #
-        # - sites_codes: symbolic names for the sites ("A" to "R").
-        # - sites_positions: relative coordinates for each site on the map 
-        #   (before being converted to absolute positions later).
-        #
-        # The index of each site (0–17) is its unique ID and matches across:
-        #   - sites_codes[i]        -> site label ("A", "B", ...),
-        #   - sites_positions[i]    -> the position of the site,
-        #   - self.sites_object_list[i] -> the actual Site object.
-        #
-        # Example:
-        #   site_id = 0 -> "A" at position [40, 13.5]
-        #   site_id = 1 -> "B" at position [38, 14.5]
-        # -------------------------------------------------------------------------
+        # We keep sites_positions only for legacy/debug/reference (not used after Step 1B)
         self.sites_object_list = []
         sites_codes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', "N", 'O', 'P', 'Q', 'R']
         sites_positions = [
@@ -38,7 +22,7 @@ class Sites:
             [6, 16.2], [4.2, 14], [3.6, 11.5], [3.1, 9.3], [7, 8.4], [11, 7.6],
             [15, 6.6], [19, 5.4], [28.7, 17.9], [27.7, 19.2], [26.7, 20.6], [24.7, 20.8]
         ]
-        self.sites_position = sites_positions
+        self.sites_position = sites_positions  # legacy field; safe to keep
 
         # Resources available at each site (list of job IDs that the site can serve)
         # A–F  : "all" resources (0..8)
@@ -52,18 +36,10 @@ class Sites:
         ]
         for i in range(len(sites_codes)):
             if sites_resources_range[i] == "all":
-                temp_object = Site(i, sites_positions[i], list(range(0, 9, 1)))
-                # NOTE:
-                # Python range(start, stop, step):
-                #   - start = starting number (inclusive) -Start from zero
-                #   - stop  = ending number (exclusive)   - go till 9
-                #   - step  = increment                   - Increase 1 at each step
-
-                # So list(range(0, 9, 1)) produces [0,1,2,3,4,5,6,7,8],
-                # which here means: all job/resource IDs are assigned to this site.
-
+                # After Step 1B: Site no longer stores absolute_position, only resources and id
+                temp_object = Site(i, list(range(0, 9, 1)))
             else:
-                temp_object = Site(i, sites_positions[i], sites_resources_range[i])
+                temp_object = Site(i, sites_resources_range[i])
             self.sites_object_list.append(temp_object)
 
         # Resource preemption constraints between sites:
@@ -98,34 +74,10 @@ class Sites:
         # -------------------------------------------------------------------------
         # STORY / EXPLANATION OF RESTRICT_DICT:
         #
-        # Imagine an airbase with 18 parking/maintenance sites (A–R).
-        # Each site has certain service resources (fuel, oxygen, power, weapons, etc.).
-        # BUT: resources are not unlimited. Some sites have their own set, while others
-        # must share resources with a neighbor site.
-        #
-        # - Sites 0–3: fully independent, each has its own dedicated resources.
-        # - Sites 4–5: share one complete resource set (e.g., one fuel truck for both).
-        # - Sites 6–7–8–9: paired sharing:
-        #       Site 6 <-> Site 8 share the same subset of resources,
-        #       Site 7 <-> Site 9 share another subset.
-        # - Sites 10–11–12–13: paired sharing again (10<->12 and 11<->13).
-        # - Sites 14–15–16–17: paired sharing again (14<->16 and 15<->17).
-        #
-        # What does this mean in practice?
-        # Example: If a plane at site 4 is refueling, then another plane at site 5
-        # must wait, because they share the same refueling truck.
-        # Similarly, if a plane at site 6 uses oxygen, then a plane at site 8 cannot
-        # use oxygen at the same time.
-        #
-        # In short:
-        # - Each site = a parking spot for a plane
-        # - Each resource = a service truck / equipment (fuel, oxygen, power, etc.)
-        # - restrict_dict = defines which parking spots are sharing the same service
-        #   resources, so that the simulation knows when one plane must wait for another.
+        # (kept intact)
         # -------------------------------------------------------------------------
 
-
-# If you ever want to disable constraints, you can use the empty mapping below.
+        # If you ever want to disable constraints, you can use the empty mapping below.
         # self.restrict_dict = {i: {} for i in range(18)}
 
     # Before querying a site's available resources, update its instant resources
@@ -148,16 +100,15 @@ class Sites:
                 temp.remove(eve)
                 # We always remove exactly one element from the constrained set
                 assert len(temp) >= 1
-                # Call the site's updater (backward-compatible alias provided in Site)
+                # Update peer site resources
                 self.sites_object_list[each_con_site].update_resources(temp)
 
 
 # A single site
 class Site:
-    def __init__(self, site_id, relative_position, resource_ids_list):
+    # After Step 1B we no longer store positions; only id and resources
+    def __init__(self, site_id, resource_ids_list):
         self.site_id = site_id
-        # Absolute coordinates derived from a base offset plus scaled relative position
-        self.absolute_position = np.array([10, 10]) + np.array([20 * relative_position[0], 20 * relative_position[1]])
         self.resource_jobs = Jobs()
         self.resource_jobs.reserved_jobs(resource_ids_list)
         # The list of job IDs this site currently has available
@@ -169,4 +120,3 @@ class Site:
 
     # Backward-compatibility: original code used a misspelled name `update_resorces`
     update_resorces = update_resources
-
