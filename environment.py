@@ -67,6 +67,10 @@ class ScheduleEnv(gym.Env):
         self.sim_env = simpy.Environment()
         # ====================================================
 
+        # === Added for Step 2B: SimPy site resources (capacity = 1 per site) ===
+        self.site_resources = []
+        # =======================================================================
+
 
     # === Added for Step 2A ===
     def clock(self, until_time):
@@ -84,6 +88,65 @@ class ScheduleEnv(gym.Env):
         self.sim_env.run()
         print(f"✅ SimPy environment ran successfully until t={until_time}")
     # =========================
+
+    # === Added for Step 2B: Event-driven processes ===
+    def find_site_for_job(self, job_id):
+        """Find an idle site that can handle the given job (greedy pick of an idle compatible site)."""
+        # Ensure resources are initialized
+        if not self.site_resources or len(self.site_resources) != len(self.sites):
+            return None
+        for idx, site in enumerate(self.sites):
+            if job_id in site.resource_ids_list and len(self.site_resources[idx].users) == 0:
+                return idx
+        return None
+
+    def plane_process(self, plane_id):
+        """SimPy process representing one plane executing its sequence of jobs."""
+        plane = self.planes[plane_id]
+        while len(plane.left_job) > 0:
+            current_job = plane.left_job[0]
+            site_id = self.find_site_for_job(current_job.index_id)
+
+            if site_id is None:
+                # No suitable site free now → wait and retry
+                yield self.sim_env.timeout(1)
+                continue
+
+            site_resource = self.site_resources[site_id]
+            with site_resource.request() as req:
+                # Wait until the site becomes available
+                yield req
+
+                # Execute the job (processing only; travel removed in Step 1B)
+                start_time = self.sim_env.now
+                process_time = plane.execute_task(current_job, self.sites[site_id])
+                yield self.sim_env.timeout(process_time)
+                end_time = self.sim_env.now  # <-- add this line
+
+                
+                # Record (timestamp, job_id, site_id, plane_id)
+                self.save_env_info((start_time, end_time, current_job.index_id, site_id, plane_id))
+
+                # No need to pop here – execute_task already removed it
+
+
+                print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job.index_id} at site {site_id}")
+
+        print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
+
+    def run_processes(self):
+        """Start all plane processes and run the full simulation (event-driven)."""
+        # Initialize resources (capacity 1 per site)
+        self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
+
+        # Start one process per plane
+        for pid in range(len(self.planes)):
+            self.sim_env.process(self.plane_process(pid))
+
+        # Run full event-based simulation
+        self.sim_env.run()
+        print("✅ All plane processes completed successfully.")
+    # ===================================================
 
 
     def initialize(self):
