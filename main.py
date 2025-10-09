@@ -1,29 +1,47 @@
-import numpy as np
-import pickle
-from environment import ScheduleEnv
+# main.py — cumulative entrypoint for MASA-QMIX
+# Modes:
+#   4c  : Run one plane's full SimPy workflow (Step 4C)
+#   4b  : Co-execution smoke test (Step 4B)
+#   rl  : Full RL pipeline (Step 5+, requires PyTorch & MARL stack)
+
+import argparse
+import importlib
 import sys
-from os.path import dirname, abspath
-sys.path.append(dirname(dirname(abspath(__file__))))
-from MARL.runner import Runner
-from MARL.common.arguments import get_common_args, get_coma_args, get_mixer_args, get_centralv_args, \
-    get_reinforce_args, \
-    get_commnet_args, get_g2anet_args
-from utils.PDRs.shortestDistence import SDrules
-
-np.random.seed(2)
+from environment import ScheduleEnv
 
 
-# Difference between game_scores and rolling_scores:
-# - game_scores: reward over the entire episode
-# - rolling_scores: reward over a fixed-length "trial" (n steps)
-# Neither of these is used for training; a "trial" is a user-defined window.
+def run_mode_4c(plane_id: int):
+    env = ScheduleEnv()
+    env.test_single_job_run(plane_id=plane_id)
 
-# RL decision wrapper that wires a DRL multi-agent into the environment
 
-def marl_agent_wrapper():
+def run_mode_4b(steps: int):
+    env = ScheduleEnv()
+    env.test_coexecution(steps=steps)
+
+
+def run_mode_rl():
+    if importlib.util.find_spec("torch") is None:
+        print(
+            "[ERROR] PyTorch ('torch') is not installed.\n"
+            "To enable RL mode: pip install torch torchvision torchaudio\n"
+            "Or load your cluster's PyTorch module, then re-run with --mode rl."
+        )
+        sys.exit(1)
+
+    try:
+        from MARL.runner import Runner
+        from MARL.common.arguments import (
+            get_common_args, get_coma_args, get_mixer_args,
+            get_centralv_args, get_reinforce_args,
+            get_commnet_args, get_g2anet_args
+        )
+    except Exception as e:
+        print("[ERROR] Could not import MARL modules:", e)
+        sys.exit(1)
+
     args = get_common_args()
-
-    if args.alg.find('coma') > -1:  # choose algorithm-specific hyperparameters
+    if args.alg.find('coma') > -1:
         args = get_coma_args(args)
     elif args.alg.find('central_v') > -1:
         args = get_centralv_args(args)
@@ -36,10 +54,13 @@ def marl_agent_wrapper():
     if args.alg.find('g2anet') > -1:
         args = get_g2anet_args(args)
 
-    # # Load the scheduling environment
     env = ScheduleEnv()
-
     env.reset()
+
+    if not hasattr(env, "get_env_info"):
+        print("[ERROR] get_env_info missing in environment.py")
+        sys.exit(1)
+
     env_info = env.get_env_info()
     args.n_actions = env_info["n_actions"]
     args.n_agents = env_info["n_agents"]
@@ -47,123 +68,34 @@ def marl_agent_wrapper():
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
 
-    # --- Training Setup Summary (printed to standart output) ---
-    print("\n=== Training Setup Summary (Args) ===")
-    print(f"Algorithm: {args.alg}")
-    print(f"Map: {args.map}")
-    print(f"Random seed: {args.seed}")
-    print(f"Total epochs: {args.n_epoch}")
-    print(f"Episodes per epoch: {args.n_episodes}")
-    print(f"Evaluation every {args.evaluate_cycle} epochs, with {args.evaluate_epoch} episodes")
-    print(f"Replay buffer size: {getattr(args, 'buffer_size', 'N/A')}")
-    print(f"Batch size: {getattr(args, 'batch_size', 'N/A')}")
-    print(f"Learning enabled: {args.learn}")
-    print(f"GPU enabled: {args.cuda}")
-    print(f"Load pretrained model: {args.load_model}")
-    print("====================================")
-
     print("\n=== Environment Info ===")
-    print(f"Number of agents: {args.n_agents}")
-    print(f"Number of actions: {args.n_actions}")
-    print(f"State shape: {args.state_shape}")
-    print(f"Observation shape: {args.obs_shape}")
-    print(f"Episode limit (steps per episode): {args.episode_limit}")
+    for k, v in env_info.items():
+        print(f"{k}: {v}")
     print("====================================\n")
 
-    print("Load model (test only:", args.load_model,
-          "Print intermediates:", args.havelook,
-          "Train:", args.learn)
-
     runner = Runner(env, args)
-
     if args.learn:
-        runner.run(0)  # originally supported multiple algos; run() took an algorithm id
+        runner.run(0)
     else:
-        # FIX: evaluate now returns (win_rate, reward, global_ep_idx)
         win_rate, reward, _ = runner.evaluate([], 0)
-        print(f'The ave_reward of {args.alg} is {reward}')
+        print(f"The ave_reward of {args.alg} is {reward}")
 
 
-# # Random decision baseline for environment testing
-def random_agent_wrapper():
-    episodes = 50
-
-    env = ScheduleEnv()
-    temp_save = [0]
-    EATs = []
-    schedule_processes = []
-    for episode in range(episodes):
-
-        s = env.reset()
-        is_terminal = False
-        while not is_terminal:
-            actions = []
-            # Only dispatch agents that are not currently busy   
-            temp_not_idle_agents = []
-            for m in range(len(env.sites)):
-                if s[m] != 9:
-                    temp_not_idle_agents.append(s[m])
-
-            for i in range(len(env.planes)):
-                if i in temp_not_idle_agents:  # agent i is currently busy
-                    actions.append(18)
-                else:
-                    avail_actions = env.get_avail_agent_actions(i)
-                    tem_choose = []
-                    if type(avail_actions) != str:
-                        for k, eve in enumerate(avail_actions):
-                            if eve == 1:
-                                tem_choose.append(k)
-                        if tem_choose == []:
-                            action = 18
-                        else:
-                            action = np.random.choice(tem_choose, 1, False)[0]
-                            env.has_chosen_action(action, i)
-                        actions.append(action)
-                    else:
-                        actions.append(18)
-            s, r, is_terminal, dict = env.step(actions)
-        EATs.append(dict["time"])
-        schedule_processes.append(env.job_record_for_gant)
-        print(env.job_record_for_gant)
-        print(dict["time"], "-----------------------------------")
-    print(sum(EATs)/len(EATs))
-    with open("./my_data_and_graph/pickles/process.pk", "wb") as f:
-        pickle.dump(schedule_processes, f)
-
-
-def SDrules_agent_wrapper():
-    EPISODES = 50
-
-    sd_rules = SDrules()
-    env = ScheduleEnv()
-    sites_locations = env.sites_obj.sites_position
-
-    actions = []
-    for episode in range(EPISODES):
-        done = False
-        env.reset()
-        while not done:
-            actions = []
-            agents_id_sequence = sd_rules.FIFO_generate_agents_sequence(8)
-            # agents_id_sequence = sd_rules.MLF_generate_agents_sequence(env.planes)
-            # agents_id_sequence = sd_rules.LLF_generate_agents_sequence(env.planes)
-
-            for agent_id in agents_id_sequence:
-                avail_actions = env.get_avail_agent_actions(agent_id)
-                current_plane_location = env.planes[agent_id].position
-                action = sd_rules.choose_action(agent_id, avail_actions, current_plane_location, sites_locations)
-                actions.append(action)
-                if action < 18:
-                    env.has_chosen_action(action, agent_id)
-
-            reorder_actions = [-1 for i in range(8)]
-            for i in range(8):
-                reorder_actions[agents_id_sequence[i]] = actions[i]
-            _, done, info = env.step(reorder_actions)
-        print(info["time"])
-    print(info['episodes_situation'])
+def parse_args():
+    p = argparse.ArgumentParser(description="MASA-QMIX cumulative entrypoint")
+    p.add_argument("--mode", choices=["4c", "4b", "rl"], default="4c",
+                   help="4c: single-plane SimPy run; 4b: co-exec smoke test; rl: full MARL pipeline")
+    p.add_argument("--plane-id", type=int, default=0, help="Plane ID for 4c mode")
+    p.add_argument("--steps", type=int, default=5, help="Number of steps to tick in 4b mode")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
-    marl_agent_wrapper()
+    args = parse_args()
+    if args.mode == "4c":
+        run_mode_4c(args.plane_id)
+    elif args.mode == "4b":
+        run_mode_4b(args.steps)
+    elif args.mode == "rl":
+        run_mode_rl()
+# --- End of file main.py ---

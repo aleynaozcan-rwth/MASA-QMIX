@@ -6,14 +6,12 @@ This environment schedules planes (jobs) to sites (stations) under resource cons
 import simpy
 from utils.site import Sites
 from utils.job import Jobs
-from utils.task import Task          # ← Updated import for Step 4B
+from utils.task import Task
 from utils.plane import Planes, Plane
 from utils import util
 import numpy as np
 import gym
 from gym import spaces
-from gym.utils import seeding
-import math
 
 
 class ScheduleEnv(gym.Env):
@@ -75,7 +73,6 @@ class ScheduleEnv(gym.Env):
                 yield req
 
                 start_time = self.sim_env.now
-                # Retrieve job object via index_id
                 job_obj = self.jobs[current_job]
                 process_time = job_obj.time_span
                 yield self.sim_env.timeout(process_time)
@@ -83,7 +80,6 @@ class ScheduleEnv(gym.Env):
 
                 self.save_env_info((start_time, end_time, current_job, site_id, plane_id))
                 plane.left_job.pop(0)
-
                 print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job} at site {site_id}")
 
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
@@ -94,29 +90,22 @@ class ScheduleEnv(gym.Env):
 
     # === Initialization ===
     def initialize(self):
-        """
-        Initialize environment entities and assign each plane its own job sequence.
-        """
-        # --- Create core objects ---
+        """Initialize environment entities and assign each plane its own job sequence."""
         sites_obj = Sites()
         self.sites_obj = sites_obj
         jobs_obj = Jobs()
-        task_obj = Task()          # ← uses new randomized generator
+        task_obj = Task()
         self.planes_obj = Planes()
 
         self.sites = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
         self.task = task_obj.simple_task_object
-
-        # --- Assign each plane its unique job list ---
         self.planes = [Plane(pid, self.task[pid]) for pid in range(len(self.task))]
 
-        # --- Initialize environment states ---
         self.state = [
             [9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]]
             for i in range(len(self.sites))
         ]
-
         self.sites_state_global = [-1 for _ in range(len(self.sites))]
         self.job_record_for_gant = []
         self.done = False
@@ -135,6 +124,21 @@ class ScheduleEnv(gym.Env):
         state = np.zeros(10)
         return state
 
+    # === RL information interface (for Step 5 integration) ===
+    def get_env_info(self):
+        """
+        Return environment information required by MARL algorithms.
+        Enables RL modules (QMIX, COMA, etc.) to auto-configure.
+        """
+        env_info = dict(
+            n_agents=len(self.planes),
+            n_actions=self.action_space.n,
+            state_shape=10,     # placeholder — will refine later
+            obs_shape=10,
+            episode_limit=200
+        )
+        return env_info
+
     # === Step logic ===
     def all_jobs_completed(self):
         """Return True if all planes have finished all jobs."""
@@ -143,65 +147,67 @@ class ScheduleEnv(gym.Env):
     def step(self, action):
         """Perform one RL step and advance SimPy environment."""
         self.step_count += 1
-        reward = -16  # baseline penalty for time passing
+        reward = -16
         self.done = False
 
-        # --- Advance SimPy: drain all events that occur at the same timestamp ---
         if hasattr(self, "sim_env") and len(self.sim_env._queue) > 0:
-            # SimPy 4.x stores events as tuples (time, priority, eid, event)
             next_time = self.sim_env._queue[0][0]
             if self.sim_env.now < next_time:
-                self.sim_env.step()  # advance to next event
+                self.sim_env.step()
             while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
                 self.sim_env.step()
             print(f"[DEBUG] Advanced SimPy → now={self.sim_env.now}")
 
-        # --- Reward: +10 for each new completion since last step ---
         completed_now = len(self.job_record_for_gant) - self._completed_prev
         self._completed_prev = len(self.job_record_for_gant)
         reward += completed_now * 10
 
-        # --- Check completion ---
         if self.all_jobs_completed():
             self.done = True
             print(f"✅ All jobs finished at SimPy time={self.sim_env.now}")
 
-        print(
-            f"[DEBUG] RL step={self.step_count} | t={self.sim_env.now} | "
-            f"+completed={completed_now} | total={len(self.job_record_for_gant)}"
-        )
-
+        print(f"[DEBUG] RL step={self.step_count} | t={self.sim_env.now} | "
+              f"+completed={completed_now} | total={len(self.job_record_for_gant)}")
         return reward, self.done, {}
 
-    # === Co-execution test ===
+    # === Step 4B test ===
     def test_coexecution(self, steps=5):
         print("Starting Step 4B Co-Execution Test")
         self.reset()
-
-        # Initialize SimPy resources and start plane processes
         self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
         for pid in range(len(self.planes)):
             self.sim_env.process(self.plane_process(pid))
-
-        # Run SimPy slightly to activate events
         self.sim_env.run(until=0.01)
 
         for i in range(steps):
             dummy_action = [len(self.sites)] * len(self.planes)
             reward, done, info = self.step(dummy_action)
-            print(
-                f"Step {i} | Reward={reward:.2f} | SimPy time={self.sim_env.now} | "
-                f"Completed jobs={len(self.job_record_for_gant)}"
-            )
-
+            print(f"Step {i} | Reward={reward:.2f} | SimPy time={self.sim_env.now} | "
+                  f"Completed jobs={len(self.job_record_for_gant)}")
             if done:
                 print("✅ Environment finished early.")
                 break
-
         print("✅ Step 4B test completed successfully.")
 
+    # === Step 4C test ===
+    def test_single_job_run(self, plane_id=0):
+        """Run one plane’s full sequence of jobs to completion."""
+        print("=== Step 4C: Run One Job Fully in SimPy ===")
+        self.reset()
+        self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
+        assert 0 <= plane_id < len(self.planes)
+        self.sim_env.process(self.plane_process(plane_id))
+        self.sim_env.run()
 
-# === Quick local test ===
+        print("\n--- Completed job record ---")
+        for (start, end, job_id, site_id, pid) in self.job_record_for_gant:
+            if pid != plane_id:
+                continue
+            job_name = self.jobs[job_id].name
+            print(f"Plane {pid} | {job_name} (job {job_id}) | Site {site_id} | {start} → {end}")
+        print("✅ Step 4C test completed successfully.\n")
+
+
 if __name__ == "__main__":
     env = ScheduleEnv()
-    env.test_coexecution()
+    env.test_single_job_run(plane_id=0)
