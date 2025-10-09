@@ -6,7 +6,7 @@ This environment schedules planes (jobs) to sites (stations) under resource cons
 import simpy
 from utils.site import Sites
 from utils.job import Jobs
-from utils.task import Task
+from utils.task_generator import TaskGenerator        # ← NEW import
 from utils.plane import Planes
 from utils import util
 import numpy as np
@@ -93,12 +93,14 @@ class ScheduleEnv(gym.Env):
         sites_obj = Sites()
         self.sites_obj = sites_obj
         jobs_obj = Jobs()
-        task_obj = Task()
+        task_gen = TaskGenerator()                             # ← use TaskGenerator
         self.planes_obj = Planes()
         self.sites = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
-        self.task = task_obj.simple_task_object
+        self.task = task_gen.generate_tasks()                  # ← dynamic but identical task list
         self.planes = self.planes_obj.planes_object_list
+
+        print(f"[INIT] Loaded {len(self.task)} tasks from TaskGenerator.")
 
         self.state = [
             [9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]]
@@ -137,7 +139,6 @@ class ScheduleEnv(gym.Env):
             next_time = self.sim_env._queue[0][0]
             if self.sim_env.now < next_time:
                 self.sim_env.step()  # advance to next event
-            # Process all events scheduled for the same next_time
             while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
                 self.sim_env.step()
             print(f"[DEBUG] Advanced SimPy → now={self.sim_env.now}")
@@ -169,7 +170,6 @@ class ScheduleEnv(gym.Env):
         for pid in range(len(self.planes)):
             self.sim_env.process(self.plane_process(pid))
 
-        # Prime SimPy so processes become active
         self.sim_env.run(until=0.01)
 
         for i in range(steps):
