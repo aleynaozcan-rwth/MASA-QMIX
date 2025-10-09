@@ -6,8 +6,8 @@ This environment schedules planes (jobs) to sites (stations) under resource cons
 import simpy
 from utils.site import Sites
 from utils.job import Jobs
-from utils.task_generator import TaskGenerator        # ← NEW import
-from utils.plane import Planes
+from utils.task import Task          # ← Updated import for Step 4B
+from utils.plane import Planes, Plane
 from utils import util
 import numpy as np
 import gym
@@ -64,7 +64,7 @@ class ScheduleEnv(gym.Env):
         plane = self.planes[plane_id]
         while len(plane.left_job) > 0:
             current_job = plane.left_job[0]
-            site_id = self.find_site_for_job(current_job.index_id)
+            site_id = self.find_site_for_job(current_job)
 
             if site_id is None:
                 yield self.sim_env.timeout(1)
@@ -75,12 +75,16 @@ class ScheduleEnv(gym.Env):
                 yield req
 
                 start_time = self.sim_env.now
-                process_time = plane.execute_task(current_job, self.sites[site_id])
+                # Retrieve job object via index_id
+                job_obj = self.jobs[current_job]
+                process_time = job_obj.time_span
                 yield self.sim_env.timeout(process_time)
                 end_time = self.sim_env.now
 
-                self.save_env_info((start_time, end_time, current_job.index_id, site_id, plane_id))
-                print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job.index_id} at site {site_id}")
+                self.save_env_info((start_time, end_time, current_job, site_id, plane_id))
+                plane.left_job.pop(0)
+
+                print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job} at site {site_id}")
 
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
 
@@ -90,22 +94,29 @@ class ScheduleEnv(gym.Env):
 
     # === Initialization ===
     def initialize(self):
+        """
+        Initialize environment entities and assign each plane its own job sequence.
+        """
+        # --- Create core objects ---
         sites_obj = Sites()
         self.sites_obj = sites_obj
         jobs_obj = Jobs()
-        task_gen = TaskGenerator()                             # ← use TaskGenerator
+        task_obj = Task()          # ← uses new randomized generator
         self.planes_obj = Planes()
+
         self.sites = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
-        self.task = task_gen.generate_tasks()                  # ← dynamic but identical task list
-        self.planes = self.planes_obj.planes_object_list
+        self.task = task_obj.simple_task_object
 
-        print(f"[INIT] Loaded {len(self.task)} tasks from TaskGenerator.")
+        # --- Assign each plane its unique job list ---
+        self.planes = [Plane(pid, self.task[pid]) for pid in range(len(self.task))]
 
+        # --- Initialize environment states ---
         self.state = [
             [9, [1 if j in self.sites[i].resource_ids_list else 0 for j in range(9)]]
             for i in range(len(self.sites))
         ]
+
         self.sites_state_global = [-1 for _ in range(len(self.sites))]
         self.job_record_for_gant = []
         self.done = False
@@ -116,6 +127,8 @@ class ScheduleEnv(gym.Env):
         self.current_finishing_jobs = 0
         self.step_count = 0
         self._completed_prev = 0
+
+        print(f"[INIT] Environment initialized with {len(self.planes)} planes and per-plane task sequences.")
 
     def reset(self):
         self.initialize()
@@ -162,7 +175,7 @@ class ScheduleEnv(gym.Env):
 
     # === Co-execution test ===
     def test_coexecution(self, steps=5):
-        print("Starting Step 3B Co-Execution Test")
+        print("Starting Step 4B Co-Execution Test")
         self.reset()
 
         # Initialize SimPy resources and start plane processes
@@ -170,6 +183,7 @@ class ScheduleEnv(gym.Env):
         for pid in range(len(self.planes)):
             self.sim_env.process(self.plane_process(pid))
 
+        # Run SimPy slightly to activate events
         self.sim_env.run(until=0.01)
 
         for i in range(steps):
@@ -184,7 +198,7 @@ class ScheduleEnv(gym.Env):
                 print("✅ Environment finished early.")
                 break
 
-        print("✅ Step 3B test completed successfully.")
+        print("✅ Step 4B test completed successfully.")
 
 
 # === Quick local test ===
