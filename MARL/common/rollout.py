@@ -19,20 +19,16 @@ class RolloutWorker:
         self.min_epsilon = args.min_epsilon
         print('Init RolloutWorker')
 
-    # NOTE (English): 
-    # We now accept "global_ep_idx" explicitly, instead of using "episode_num" 
-    # for logging. This ensures consistent episode indexing across all files.
     def generate_episode(self, global_ep_idx=None, evaluate=False):
-        if self.args.replay_dir != '' and evaluate and global_ep_idx == 0:  # prepare for save replay of evaluation
+        if self.args.replay_dir != '' and evaluate and global_ep_idx == 0:
             self.env.close()
 
-        # start collecting interactions with environment
         o, u, r, s, avail_u, u_onehot, terminate, padded = [], [], [], [], [], [], [], []
         self.env.reset()
         terminated = False
         win_tag = False
         step = 0
-        episode_reward = 0  # cumulative rewards
+        episode_reward = 0
         last_action = np.zeros((self.args.n_agents, self.args.n_actions))
         self.agents.policy.init_hidden(1)
 
@@ -46,18 +42,22 @@ class RolloutWorker:
 
         # sample z for maven
         if self.args.alg == 'maven':
-            state = self.env.get_state()
-            state = torch.tensor(state, dtype=torch.float32)
+            state0 = self.env.get_state()
+            state0 = torch.tensor(state0, dtype=torch.float32)
             if self.args.cuda:
-                state = state.cuda()
-            z_prob = self.agents.policy.z_policy(state)
+                state0 = state0.cuda()
+            z_prob = self.agents.policy.z_policy(state0)
             maven_z = one_hot_categorical.OneHotCategorical(z_prob).sample()
             maven_z = list(maven_z.cpu())
 
         for_gantt = []
         while not terminated and step < self.episode_limit:
-            obs = self.env.get_obs()
-            state = self.env.get_state()
+            obs_list = self.env.get_obs()                             # list of (1,) arrays
+            state_vec = self.env.get_state()                          # (state_shape,)
+            # enforce consistent shapes
+            obs = np.asarray(obs_list, dtype=np.float32).reshape(self.n_agents, self.obs_shape)
+            state = np.asarray(state_vec, dtype=np.float32).reshape(self.state_shape,)
+
             actions, avail_actions, actions_onehot = [], [], []
 
             for agent_id in range(self.n_agents):
@@ -67,10 +67,9 @@ class RolloutWorker:
                     avail_action, epsilon, evaluate
                 )
 
-                if action not in [18, 19, 20]:  # update environment state
+                if action not in [18, 19, 20]:
                     self.env.has_chosen_action(action, agent_id)
 
-                # generate onehot vector of the action
                 action_onehot = np.zeros(self.args.n_actions)
                 action_onehot[action] = 1
                 actions.append(action)
@@ -80,8 +79,9 @@ class RolloutWorker:
 
             reward, terminated, info = self.env.step(actions)
             win_tag = True if terminated and 'battle_won' in info and info['battle_won'] else False
-            o.append(obs)
-            s.append(state)
+
+            o.append(obs)                                             # (n_agents, obs_shape)
+            s.append(state)                                           # (state_shape,)
             u.append(np.reshape(actions, [self.n_agents, 1]))
             u_onehot.append(actions_onehot)
             avail_u.append(avail_actions)
@@ -94,12 +94,10 @@ class RolloutWorker:
             if self.args.epsilon_anneal_scale == 'step':
                 epsilon = epsilon - self.anneal_epsilon if epsilon > self.min_epsilon else epsilon
 
-            # collect gantt data if finished
             if terminated:
-                for_gantt = info["episodes_situation"]
+                for_gantt = info.get("episodes_situation", [])
 
-        # === After while loop ends (episode finished) ===
-        # Episode-level logging for gantt and time
+        # --- episode-level logs ---
         with open("./my_data_and_graph/historydata/scheduleresults.txt", "a") as f:
             if for_gantt:
                 for rec in for_gantt:
@@ -110,7 +108,6 @@ class RolloutWorker:
             else:
                 f.write(f"[DEBUG] Episode {global_ep_idx} ended without gantt records.\n")
 
-        # --- NEW (English): Compute and log wait times per plane/job ---
         if for_gantt:
             wait_times = {}
             plane_last_end = {}
@@ -123,13 +120,16 @@ class RolloutWorker:
                 for (plane, job), w in wait_times.items():
                     f.write(f"Episode {global_ep_idx} | Plane {plane} | Job {job} | Wait {w}\n")
                 f.write("---- End of episode ----\n")
-        # --- END NEW ---
 
-        # log total episode makespan once
         with open("./my_data_and_graph/historydata/times.txt", "a") as f:
             f.write(f"{global_ep_idx},{info.get('time',0)}\n")
 
-        # last obs
+        # last obs/state for *_next
+        obs_list = self.env.get_obs()
+        state_vec = self.env.get_state()
+        obs = np.asarray(obs_list, dtype=np.float32).reshape(self.n_agents, self.obs_shape)
+        state = np.asarray(state_vec, dtype=np.float32).reshape(self.state_shape,)
+
         o.append(obs)
         s.append(state)
         o_next = o[1:]
@@ -148,30 +148,30 @@ class RolloutWorker:
 
         # padding if episode ended early
         for i in range(step, self.episode_limit):
-            o.append(np.zeros((self.n_agents, self.obs_shape)))
-            u.append(np.zeros([self.n_agents, 1]))
-            s.append(np.zeros(self.state_shape))
+            o.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
+            u.append(np.zeros([self.n_agents, 1], dtype=np.float32))
+            s.append(np.zeros(self.state_shape, dtype=np.float32))
             r.append([0.])
-            o_next.append(np.zeros((self.n_agents, self.obs_shape)))
-            s_next.append(np.zeros(self.state_shape))
-            u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u_next.append(np.zeros((self.n_agents, self.n_actions)))
+            o_next.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
+            s_next.append(np.zeros(self.state_shape, dtype=np.float32))
+            u_onehot.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
+            avail_u.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
+            avail_u_next.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
             padded.append([1.])
             terminate.append([1.])
 
         episode = dict(
-            o=np.array([o]),
-            s=np.array([s]),
-            u=np.array([u]),
-            r=np.array([r]),
-            avail_u=np.array([avail_u]),
-            o_next=np.array([o_next]),
-            s_next=np.array([s_next]),
-            avail_u_next=np.array([avail_u_next]),
-            u_onehot=np.array([u_onehot]),
-            padded=np.array([padded]),
-            terminated=np.array([terminate])
+            o=np.array([o], dtype=np.float32),                  # (1, T, n_agents, obs_shape)
+            s=np.array([s], dtype=np.float32),                  # (1, T, state_shape)
+            u=np.array([u], dtype=np.float32),                  # (1, T, n_agents, 1)
+            r=np.array([r], dtype=np.float32),                  # (1, T, 1)
+            avail_u=np.array([avail_u], dtype=np.float32),      # (1, T, n_agents, n_actions)
+            o_next=np.array([o_next], dtype=np.float32),
+            s_next=np.array([s_next], dtype=np.float32),
+            avail_u_next=np.array([avail_u_next], dtype=np.float32),
+            u_onehot=np.array([u_onehot], dtype=np.float32),
+            padded=np.array([padded], dtype=np.float32),
+            terminated=np.array([terminate], dtype=np.float32)
         )
 
         if not evaluate:
@@ -224,12 +224,14 @@ class CommRolloutWorker:
 
         for_gantt = []
         while not terminated and step < self.episode_limit:
-            obs = self.env.get_obs()
-            state = self.env.get_state()
-            actions, avail_actions, actions_onehot = [], [], []
+            obs_list = self.env.get_obs()
+            state_vec = self.env.get_state()
+            obs = np.asarray(obs_list, dtype=np.float32).reshape(self.n_agents, self.obs_shape)
+            state = np.asarray(state_vec, dtype=np.float32).reshape(self.state_shape,)
 
             weights = self.agents.get_action_weights(np.array(obs), last_action)
 
+            actions, avail_actions, actions_onehot = [], [], []
             for agent_id in range(self.n_agents):
                 avail_action = self.env.get_avail_agent_actions(agent_id)
                 action = self.agents.choose_action(weights[agent_id], avail_action, epsilon, evaluate)
@@ -243,6 +245,7 @@ class CommRolloutWorker:
 
             reward, terminated, info = self.env.step(actions)
             win_tag = True if terminated and 'battle_won' in info and info['battle_won'] else False
+
             o.append(obs)
             s.append(state)
             u.append(np.reshape(actions, [self.n_agents, 1]))
@@ -260,11 +263,9 @@ class CommRolloutWorker:
             if terminated:
                 for_gantt = info.get("episodes_situation", [])
 
-        # log total episode makespan once
         with open("./my_data_and_graph/historydata/times.txt", "a") as f:
             f.write(f"{global_ep_idx},{info.get('time',0)}\n")
 
-        # --- NEW (English): Compute and log wait times for CommRolloutWorker too ---
         if for_gantt:
             wait_times = {}
             plane_last_end = {}
@@ -277,9 +278,13 @@ class CommRolloutWorker:
                 for (plane, job), w in wait_times.items():
                     f.write(f"Episode {global_ep_idx} | Plane {plane} | Job {job} | Wait {w}\n")
                 f.write("---- End of episode ----\n")
-        # --- END NEW ---
 
-        # last obs
+        # last obs/state
+        obs_list = self.env.get_obs()
+        state_vec = self.env.get_state()
+        obs = np.asarray(obs_list, dtype=np.float32).reshape(self.n_agents, self.obs_shape)
+        state = np.asarray(state_vec, dtype=np.float32).reshape(self.state_shape,)
+
         o.append(obs)
         s.append(state)
         o_next = o[1:]
@@ -295,32 +300,31 @@ class CommRolloutWorker:
         avail_u_next = avail_u[1:]
         avail_u = avail_u[:-1]
 
-        # padding if episode ended early
         for i in range(step, self.episode_limit):
-            o.append(np.zeros((self.n_agents, self.obs_shape)))
-            u.append(np.zeros([self.n_agents, 1]))
-            s.append(np.zeros(self.state_shape))
+            o.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
+            u.append(np.zeros([self.n_agents, 1], dtype=np.float32))
+            s.append(np.zeros(self.state_shape, dtype=np.float32))
             r.append([0.])
-            o_next.append(np.zeros((self.n_agents, self.obs_shape)))
-            s_next.append(np.zeros(self.state_shape))
-            u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u_next.append(np.zeros((self.n_agents, self.n_actions)))
+            o_next.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
+            s_next.append(np.zeros(self.state_shape, dtype=np.float32))
+            u_onehot.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
+            avail_u.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
+            avail_u_next.append(np.zeros((self.n_agents, self.n_actions), dtype=np.float32))
             padded.append([1.])
             terminate.append([1.])
 
         episode = dict(
-            o=np.array([o]),
-            s=np.array([s]),
-            u=np.array([u]),
-            r=np.array([r]),
-            avail_u=np.array([avail_u]),
-            o_next=np.array([o_next]),
-            s_next=np.array([s_next]),
-            avail_u_next=np.array([avail_u_next]),
-            u_onehot=np.array([u_onehot]),
-            padded=np.array([padded]),
-            terminated=np.array([terminate])
+            o=np.array([o], dtype=np.float32),
+            s=np.array([s], dtype=np.float32),
+            u=np.array([u], dtype=np.float32),
+            r=np.array([r], dtype=np.float32),
+            avail_u=np.array([avail_u], dtype=np.float32),
+            o_next=np.array([o_next], dtype=np.float32),
+            s_next=np.array([s_next], dtype=np.float32),
+            avail_u_next=np.array([avail_u_next], dtype=np.float32),
+            u_onehot=np.array([u_onehot], dtype=np.float32),
+            padded=np.array([padded], dtype=np.float32),
+            terminated=np.array([terminate], dtype=np.float32)
         )
 
         if not evaluate:
@@ -330,4 +334,3 @@ class CommRolloutWorker:
             self.env.close()
 
         return episode, episode_reward, win_tag, for_gantt
-

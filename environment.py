@@ -1,6 +1,6 @@
 """
 ScheduleEnv — Step 5A
-Extend SimPy to all jobs and make environment RL-compatible.
+Extend SimPy to all jobs and make environment RL-compatible (final rollout-stable version).
 """
 
 import simpy
@@ -17,27 +17,28 @@ class ScheduleEnv(gym.Env):
     environment_name = "Boat Schedule"
 
     def __init__(self):
-        # --- Basic initialization ---
+        # === Core state ===
         self.sites = []
         self.jobs = []
         self.task = []
         self.planes_obj = Planes()
         self.planes = []
         self.done = False
-        self.state_left_time = []
         self.step_count = 0
         self._completed_prev = 0
-        self.initialize()
-
-        # --- Gym settings ---
-        self.action_space = spaces.Discrete(len(self.sites) + 3)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(10,), dtype=np.float32)
-
-        # --- SimPy setup ---
+        self.job_record_for_gant = []
         self.sim_env = simpy.Environment()
         self.site_resources = []
 
-    # === SimPy process definitions ===
+        self.initialize()
+
+        # === Gym settings ===
+        self.action_space = spaces.Discrete(len(self.sites) + 3)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
+
+    # --------------------------------------------------------------------------
+    #   SimPy logic
+    # --------------------------------------------------------------------------
     def find_site_for_job(self, job_id):
         """Find an idle site compatible with the given job."""
         if not self.site_resources or len(self.site_resources) != len(self.sites):
@@ -48,7 +49,7 @@ class ScheduleEnv(gym.Env):
         return None
 
     def plane_process(self, plane_id):
-        """Each plane executes its sequence of jobs as a SimPy process."""
+        """Each plane executes its job list as a SimPy process."""
         plane = self.planes[plane_id]
         while len(plane.left_job) > 0:
             current_job = plane.left_job[0]
@@ -73,13 +74,14 @@ class ScheduleEnv(gym.Env):
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
 
     def save_env_info(self, job_transition):
-        """Record job transitions for Gantt analysis."""
+        """Record job transitions for Gantt visualization."""
         self.job_record_for_gant.append(job_transition)
 
-    # === Initialization ===
+    # --------------------------------------------------------------------------
+    #   Initialization
+    # --------------------------------------------------------------------------
     def initialize(self):
         sites_obj = Sites()
-        self.sites_obj = sites_obj
         jobs_obj = Jobs()
         task_obj = Task()
         self.planes_obj = Planes()
@@ -93,48 +95,71 @@ class ScheduleEnv(gym.Env):
         self.done = False
         self.step_count = 0
         self._completed_prev = 0
+
         print(f"[INIT] Environment initialized with {len(self.planes)} planes and per-plane task sequences.")
 
     def reset(self):
         self.initialize()
         return self.get_obs()
 
-    # === RL information interface (for MARL integration) ===
+    # --------------------------------------------------------------------------
+    #   MARL interface
+    # --------------------------------------------------------------------------
     def get_env_info(self):
+        """Provide environment info to MARL trainer."""
         return dict(
             n_agents=len(self.planes),
             n_actions=self.action_space.n,
-            state_shape=10,
-            obs_shape=10,
+            state_shape=len(self.planes),   # 🔧 fix: match get_state() length
+            obs_shape=1,
             episode_limit=200
         )
 
-    # === Observation helpers ===
     def get_obs(self):
-        """Per-agent observation: number of remaining jobs."""
-        return [len(p.left_job) / 9.0 for p in self.planes]  # normalized 0-1
+        """Per-agent observation: each agent observes its remaining job ratio."""
+        obs_n = []
+        for plane in self.planes:
+            remaining_ratio = len(plane.left_job) / 9.0
+            obs = np.asarray([remaining_ratio], dtype=np.float32).reshape(-1)
+            obs_n.append(obs)
+        return obs_n  # list of (1,) arrays → rollout stacks to (n_agents, 1)
 
     def get_state(self):
-        """Global state: remaining jobs per plane."""
-        return np.array([len(p.left_job) for p in self.planes])
+        """Global state: flattened 1D float32 vector (for rollout compatibility)."""
+        state = np.array([len(p.left_job) / 9.0 for p in self.planes], dtype=np.float32)
+        return np.asarray(state, dtype=np.float32).reshape(-1)
 
-    # === Step logic (Step 5A RL-compatible) ===
+    def get_avail_agent_actions(self, agent_id):
+        """Return available actions for the given agent (placeholder)."""
+        return [1 for _ in range(self.action_space.n)]
+
+    def has_chosen_action(self, action, agent_id):
+        """
+        Step 5B placeholder.
+        Called by rollout to inform the environment which action each agent chose.
+        """
+        # print(f"[DEBUG] Agent {agent_id} chose action {action}")
+        pass
+
+    # --------------------------------------------------------------------------
+    #   Step logic
+    # --------------------------------------------------------------------------
     def step(self, actions):
         """
         Perform one RL step and advance SimPy environment for all planes.
-        Returns: obs, reward, done, info
+        Returns: reward, done, info
         """
         self.step_count += 1
         self.done = False
 
-        # --- Start all planes on first step ---
+        # Start all plane processes on first step
         if self.step_count == 1:
             self.site_resources = [simpy.Resource(self.sim_env, capacity=1)
                                    for _ in range(len(self.sites))]
             for pid in range(len(self.planes)):
                 self.sim_env.process(self.plane_process(pid))
 
-        # --- Advance SimPy time ---
+        # Advance SimPy time
         if len(self.sim_env._queue) > 0:
             next_time = self.sim_env._queue[0][0]
             if self.sim_env.now < next_time:
@@ -142,24 +167,26 @@ class ScheduleEnv(gym.Env):
             while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
                 self.sim_env.step()
 
-        # --- Compute reward ---
+        # Reward: +10 per completed job, -1 time penalty
         completed_now = len(self.job_record_for_gant) - self._completed_prev
         self._completed_prev = len(self.job_record_for_gant)
-        reward = completed_now * 10 - 1  # baseline penalty
+        reward = completed_now * 10 - 1
 
-        # --- Observation + state ---
-        obs = self.get_obs()
-
-        # --- Check termination ---
+        # Check termination
         done = self.all_jobs_completed()
         if done:
             self.done = True
             print(f"✅ All planes finished at SimPy time={self.sim_env.now}")
 
-        info = dict(time=self.sim_env.now,
-                    step=self.step_count,
-                    completed=len(self.job_record_for_gant))
-        return obs, reward, done, info
+        info = dict(
+            time=self.sim_env.now,
+            step=self.step_count,
+            completed=len(self.job_record_for_gant),
+            episodes_situation=self.job_record_for_gant,  # needed by rollout for gantt
+        )
+
+        return reward, done, info
 
     def all_jobs_completed(self):
+        """Check if all jobs finished."""
         return all(len(p.left_job) == 0 for p in self.planes)
