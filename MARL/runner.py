@@ -10,11 +10,12 @@ import sys
 
 def plot_gantt(for_gantt_data, filename="gantt.png"):
     """
-    Plot one episode's Gantt chart for visualization.
+    Step 6B – Plot one episode's Gantt chart.
+    Supports both 5-element (old) and 6-element (with operator) tuples.
     """
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
         return False
-    if len(for_gantt_data) == 0 or len(for_gantt_data[0]) != 5:
+    if len(for_gantt_data) == 0 or len(for_gantt_data[0]) not in [5, 6]:
         print("[WARN] Gantt plot skipped: wrong or empty tuple format")
         return False
 
@@ -24,17 +25,23 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     color_map = {jt: colors[i % len(colors)] for i, jt in enumerate(job_types)}
 
     max_end = 0
-    for (start, end, job, site, plane) in for_gantt_data:
+    for rec in for_gantt_data:
+        # Support old (5-tuple) or new (6-tuple) format
+        if len(rec) == 6:
+            start, end, job, site, plane, operator = rec
+        else:
+            start, end, job, site, plane = rec
+            operator = "?"
         ax.barh(plane, end - start, left=start,
                 color=color_map[job], edgecolor="black")
         ax.text((start + end) / 2, plane,
-                f"J{job}|S{site}",
+                f"J{job}|S{site}|O{operator}",
                 va="center", ha="center", fontsize=6, color="black")
         max_end = max(max_end, end)
 
     ax.set_xlabel("Simulation Time (SimPy clock)")
     ax.set_ylabel("Plane (Agent)")
-    ax.set_title("Step 5B – SimPy Synchronized Schedule")
+    ax.set_title("Step 6B – SimPy Schedule with Operators")
     ax.set_xlim(0, max_end + 1)
     handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[jt]) for jt in job_types]
     labels = [f"Job {jt}" for jt in job_types]
@@ -85,13 +92,16 @@ class Runner:
 
             # --- Evaluation phase ---
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
-                win_rate, ep_reward, global_ep_idx, gantt_eval = self.evaluate(all_gantt_data, global_ep_idx)
+                win_rate, ep_reward, global_ep_idx, gantt_eval = \
+                    self.evaluate(all_gantt_data, global_ep_idx)
                 self.win_rates.append(win_rate)
                 self.episode_rewards.append(ep_reward)
                 print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
 
                 try:
-                    plot_gantt(gantt_eval, filename=f"./my_data_and_graph/historydata/gantt_epoch{epoch}.png")
+                    plot_gantt(gantt_eval,
+                               filename=f"./my_data_and_graph/historydata/"
+                                        f"gantt_epoch{epoch}.png")
                 except Exception as e:
                     print("[WARN] Gantt plot failed:", e)
 
@@ -100,7 +110,8 @@ class Runner:
             r_s = []
 
             for episode_idx in range(self.args.n_episodes):
-                episode, _, _, gantt_data = self.rolloutWorker.generate_episode(global_ep_idx)
+                episode, _, _, gantt_data = \
+                    self.rolloutWorker.generate_episode(global_ep_idx)
                 all_gantt_data.extend(gantt_data)
                 ep_r = np.sum(episode['r'])
                 r_s.append(ep_r)
@@ -112,15 +123,21 @@ class Runner:
             episodes.pop(0)
             for ep in episodes:
                 for key in episode_batch.keys():
-                    episode_batch[key] = np.concatenate((episode_batch[key], ep[key]), axis=0)
+                    episode_batch[key] = np.concatenate(
+                        (episode_batch[key], ep[key]), axis=0
+                    )
 
             # --- Training step ---
             if self.args.alg in ['coma', 'central_v', 'reinforce']:
-                self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
+                self.agents.train(
+                    episode_batch, train_steps, self.rolloutWorker.epsilon
+                )
             else:
                 self.buffer.store_episode(episode_batch)
                 for _ in range(self.args.train_steps):
-                    mini_batch = self.buffer.sample(min(self.buffer.current_size, self.args.batch_size))
+                    mini_batch = self.buffer.sample(
+                        min(self.buffer.current_size, self.args.batch_size)
+                    )
                     self.agents.train(mini_batch, train_steps)
                     train_steps += 1
 
@@ -133,13 +150,16 @@ class Runner:
         episode_rewards = 0
         gantt_eval = []
         for _ in range(self.args.evaluate_epoch):
-            _, ep_reward, win_tag, gantt_eval = self.rolloutWorker.generate_episode(global_ep_idx, evaluate=True)
+            _, ep_reward, win_tag, gantt_eval = \
+                self.rolloutWorker.generate_episode(global_ep_idx, evaluate=True)
             all_gantt_data.extend(gantt_eval)
             episode_rewards += ep_reward
             if win_tag:
                 win_number += 1
             global_ep_idx += 1
-        return win_number / self.args.evaluate_epoch, episode_rewards / self.args.evaluate_epoch, global_ep_idx, gantt_eval
+        return (win_number / self.args.evaluate_epoch,
+                episode_rewards / self.args.evaluate_epoch,
+                global_ep_idx, gantt_eval)
 
     # ============================================================
     # === Plot Results ===========================================
@@ -149,15 +169,18 @@ class Runner:
         plt.figure(figsize=(10, 6))
         plt.subplot(2, 1, 1)
         plt.plot(range(len(self.win_rates)), self.win_rates)
-        plt.xlabel('epoch × {}'.format(self.args.evaluate_cycle))
+        plt.xlabel(f'epoch × {self.args.evaluate_cycle}')
         plt.ylabel('win_rate')
 
         plt.subplot(2, 1, 2)
         plt.plot(range(len(self.episode_rewards)), self.episode_rewards)
-        plt.xlabel('epoch × {}'.format(self.args.evaluate_cycle))
+        plt.xlabel(f'epoch × {self.args.evaluate_cycle}')
         plt.ylabel('episode_rewards')
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_path, f'plt_{num}.png'), format='png')
-        np.save(os.path.join(self.save_path, f'win_rates_{num}.npy'), self.win_rates)
-        np.save(os.path.join(self.save_path, f'episode_rewards_{num}.npy'), self.episode_rewards)
+        plt.savefig(os.path.join(self.save_path, f'plt_{num}.png'),
+                    format='png')
+        np.save(os.path.join(self.save_path, f'win_rates_{num}.npy'),
+                self.win_rates)
+        np.save(os.path.join(self.save_path, f'episode_rewards_{num}.npy'),
+                self.episode_rewards)

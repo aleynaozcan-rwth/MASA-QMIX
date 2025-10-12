@@ -1,17 +1,12 @@
 import numpy as np
 import torch
-from torch.distributions import one_hot_categorical
 
-
-# ============================================================
-# === Standard RolloutWorker (QMIX / VDN / IQL etc.) =========
-# ============================================================
 
 class RolloutWorker:
     """
-    Step 5B – SimPy-Synchronized RolloutWorker.
-    Advances SimPy clock at each RL step and logs environment transitions
-    in the format expected by the MARL replay buffer.
+    Step 6B – SimPy-synchronized RolloutWorker.
+    Works with (site, operator) action pairs and collects availability masks
+    from the environment at every step.
     """
     def __init__(self, env, agents, args):
         self.env = env
@@ -26,7 +21,7 @@ class RolloutWorker:
         self.epsilon = args.epsilon
         self.anneal_epsilon = args.anneal_epsilon
         self.min_epsilon = args.min_epsilon
-        print("Init RolloutWorker (Step 5B)")
+        print("Init RolloutWorker (Step 6B)")
 
     # ------------------------------------------------------------
 
@@ -38,29 +33,31 @@ class RolloutWorker:
         episode_reward = 0
         self.agents.policy.init_hidden(1)
 
-        # Containers for episode data
+        # containers
         o, o_next, s, s_next, u, r, avail_u, avail_u_next, u_onehot, terminate, padded = \
             [], [], [], [], [], [], [], [], [], [], []
 
         epsilon = 0 if evaluate else self.epsilon
         for_gantt = []
 
-        # === Main loop: SimPy advances internally ===
         while not terminated and step < self.episode_limit:
-            # Dummy placeholders (no RL control yet)
             obs = np.zeros((self.n_agents, self.obs_shape))
             state = np.zeros(self.state_shape)
 
+            # --- step environment ---
             reward, terminated, info = self.env.step(None)
             episode_reward += reward
 
-            # Store step
+            # --- availability mask from environment (Step 6B) ---
+            avail_mask = info.get("avail_actions", np.ones(self.n_actions))
+
+            # --- store transition ---
             r.append([reward])
             terminate.append([terminated])
             padded.append([0.])
             u.append(np.zeros((self.n_agents, 1)))
             u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.ones((self.n_agents, self.n_actions)))
+            avail_u.append(avail_mask)
             o.append(obs)
             s.append(state)
 
@@ -69,23 +66,22 @@ class RolloutWorker:
                 for_gantt = info.get("episodes_situation", [])
                 break
 
-        # === Padding for shorter episodes ===
+        # pad if episode ended early
         for i in range(step, self.episode_limit):
             o.append(np.zeros((self.n_agents, self.obs_shape)))
             s.append(np.zeros(self.state_shape))
             u.append(np.zeros((self.n_agents, 1)))
             r.append([0.])
             u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.zeros((self.n_agents, self.n_actions)))
+            avail_u.append(np.zeros(self.n_actions))
             terminate.append([1.])
             padded.append([1.])
 
-        # === Next-state placeholders ===
+        # next-state placeholders
         o_next = o[1:] + [np.zeros_like(o[0])]
         s_next = s[1:] + [np.zeros_like(s[0])]
         avail_u_next = avail_u[1:] + [np.zeros_like(avail_u[0])]
 
-        # === Package episode ===
         episode = dict(
             o=np.array([o]),
             s=np.array([s]),
@@ -99,19 +95,15 @@ class RolloutWorker:
             padded=np.array([padded]),
             terminated=np.array([terminate]),
         )
-
         return episode, episode_reward, True, for_gantt
 
 
 # ============================================================
-# === CommRolloutWorker Placeholder (CommNet / G2ANet etc.) ==
+# === CommRolloutWorker (CommNet / G2ANet) ===================
 # ============================================================
 
 class CommRolloutWorker:
-    """
-    Placeholder version for communication-based algorithms.
-    Currently mirrors RolloutWorker behaviour (no communication logic yet).
-    """
+    """Placeholder identical to RolloutWorker for Step 6B."""
     def __init__(self, env, agents, args):
         self.env = env
         self.agents = agents
@@ -125,22 +117,16 @@ class CommRolloutWorker:
         self.epsilon = args.epsilon
         self.anneal_epsilon = args.anneal_epsilon
         self.min_epsilon = args.min_epsilon
-        print("[INFO] CommRolloutWorker (Step 5B placeholder) initialized")
-
-    # ------------------------------------------------------------
+        print("[INFO] CommRolloutWorker (Step 6B placeholder) initialized")
 
     def generate_episode(self, global_ep_idx=None, evaluate=False):
-        """Temporary identical logic to RolloutWorker for compatibility."""
         self.env.reset()
         terminated = False
         step = 0
         episode_reward = 0
         self.agents.policy.init_hidden(1)
 
-        epsilon = 0 if evaluate else self.epsilon
         for_gantt = []
-
-        # Containers
         o, o_next, s, s_next, u, r, avail_u, avail_u_next, u_onehot, terminate, padded = \
             [], [], [], [], [], [], [], [], [], [], []
 
@@ -151,12 +137,14 @@ class CommRolloutWorker:
             reward, terminated, info = self.env.step(None)
             episode_reward += reward
 
+            avail_mask = info.get("avail_actions", np.ones(self.n_actions))
+
             r.append([reward])
             terminate.append([terminated])
             padded.append([0.])
             u.append(np.zeros((self.n_agents, 1)))
             u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.ones((self.n_agents, self.n_actions)))
+            avail_u.append(avail_mask)
             o.append(obs)
             s.append(state)
 
@@ -171,7 +159,7 @@ class CommRolloutWorker:
             u.append(np.zeros((self.n_agents, 1)))
             r.append([0.])
             u_onehot.append(np.zeros((self.n_agents, self.n_actions)))
-            avail_u.append(np.zeros((self.n_agents, self.n_actions)))
+            avail_u.append(np.zeros(self.n_actions))
             terminate.append([1.])
             padded.append([1.])
 
@@ -192,5 +180,4 @@ class CommRolloutWorker:
             padded=np.array([padded]),
             terminated=np.array([terminate]),
         )
-
         return episode, episode_reward, True, for_gantt

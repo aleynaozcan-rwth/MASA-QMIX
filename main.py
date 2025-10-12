@@ -2,7 +2,8 @@
 # Modes:
 #   4c  : Run one plane's full SimPy workflow (Step 4C)
 #   4b  : Co-execution smoke test (Step 4B)
-#   rl  : Full RL pipeline (Step 5+, requires PyTorch & MARL stack)
+#   rl  : Full RL pipeline (Step 5+)
+#   6b  : Test machine + operator pair action space (Step 6B)
 
 import argparse
 import importlib
@@ -81,12 +82,25 @@ def run_mode_rl():
         print(f"The ave_reward of {args.alg} is {reward}")
 
 
+def run_mode_6b():
+    """Standalone test for Step 6B (machine + operator action space)."""
+    env = ScheduleEnv()
+    env.test_coexecution()
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="MASA-QMIX cumulative entrypoint")
-    p.add_argument("--mode", choices=["4c", "4b", "rl"], default="4c",
-                   help="4c: single-plane SimPy run; 4b: co-exec smoke test; rl: full MARL pipeline")
-    p.add_argument("--plane-id", type=int, default=0, help="Plane ID for 4c mode")
-    p.add_argument("--steps", type=int, default=5, help="Number of steps to tick in 4b mode")
+    p.add_argument("--mode",
+                   choices=["4c", "4b", "rl", "6b"],
+                   default="4c",
+                   help=("4c: single-plane SimPy run; "
+                         "4b: co-exec smoke test; "
+                         "rl: full MARL pipeline; "
+                         "6b: test machine+operator pairs"))
+    p.add_argument("--plane-id", type=int, default=0,
+                   help="Plane ID for 4c mode")
+    p.add_argument("--steps", type=int, default=5,
+                   help="Number of steps to tick in 4b mode")
     return p.parse_args()
 
 
@@ -98,4 +112,6 @@ if __name__ == "__main__":
         run_mode_4b(args.steps)
     elif args.mode == "rl":
         run_mode_rl()
+    elif args.mode == "6b":
+        run_mode_6b()
 # --- End of file main.py ---
