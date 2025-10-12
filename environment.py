@@ -1,9 +1,14 @@
 """
+environment.py
+------------------------------------------------------------
 Environment for MASA-QMIX Project
-Step 5B — Advance SimPy Clock in Sync with RL Loop
---------------------------------------------------
-Each plane (agent) executes a sequence of jobs at available sites (stations).
-SimPy models the process timing; RL controls the progression and learns scheduling.
+Step 6A — Add Operator Entity
+------------------------------------------------------------
+Each plane (agent) executes a sequence of jobs at available sites.
+SimPy models the process timing; RL controls scheduling decisions.
+Now, each job also requires an available human Operator qualified
+for that job type.
+------------------------------------------------------------
 """
 
 import simpy
@@ -11,6 +16,7 @@ from utils.site import Sites
 from utils.job import Jobs
 from utils.task import Task
 from utils.plane import Planes, Plane
+from utils.operator import Operators
 import numpy as np
 import gym
 from gym import spaces
@@ -20,7 +26,7 @@ class ScheduleEnv(gym.Env):
     environment_name = "MASA-SimPy-Scheduler"
 
     def __init__(self):
-        # --- Basic structures ---
+        # --- Core data containers ---
         self.sites = []
         self.jobs = []
         self.task = []
@@ -35,10 +41,14 @@ class ScheduleEnv(gym.Env):
         self.sim_env = simpy.Environment()
         self.site_resources = []
 
+        # --- NEW: Operators (Step 6A) ---
+        self.operators_obj = Operators()
+        self.operators = self.operators_obj.operators_object_list
+
         # --- Gym interface ---
         self.action_space = spaces.Discrete(21)
 
-        # --- Initialize ---
+        # --- Initialize environment ---
         self.initialize()
 
     # ============================================================
@@ -52,17 +62,35 @@ class ScheduleEnv(gym.Env):
                 return idx
         return None
 
+    def find_operator_for_job(self, job_id):
+        """Return a free operator qualified for the given job, or None."""
+        for op in self.operators:
+            if (job_id in op.qualified_jobs) and not op.is_busy:
+                return op
+        return None
+
     def plane_process(self, plane_id):
         """Each plane sequentially processes its job list."""
         plane = self.planes[plane_id]
+
         while plane.left_job:
             current_job = plane.left_job[0]
-            site_id = self.find_site_for_job(current_job)
 
+            # --- find available site ---
+            site_id = self.find_site_for_job(current_job)
             if site_id is None:
                 yield self.sim_env.timeout(1)
                 continue
 
+            # --- find available operator (Step 6A) ---
+            operator = self.find_operator_for_job(current_job)
+            if operator is None:
+                yield self.sim_env.timeout(1)
+                continue
+
+            operator.assign_job(current_job)
+
+            # --- process execution ---
             site_resource = self.site_resources[site_id]
             with site_resource.request() as req:
                 yield req
@@ -71,14 +99,20 @@ class ScheduleEnv(gym.Env):
                 process_time = job_obj.time_span
                 yield self.sim_env.timeout(process_time)
                 end_time = self.sim_env.now
-                self.save_env_info((start_time, end_time, current_job, site_id, plane_id))
+
+                # save record including operator id
+                self.save_env_info((start_time, end_time, current_job, site_id, plane_id, operator.operator_id))
+
                 plane.left_job.pop(0)
-                print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job} at site {site_id}")
+                operator.release()
+
+                print(f"[t={self.sim_env.now}] Plane {plane_id} finished job {current_job} "
+                      f"at site {site_id} (Operator {operator.operator_id})")
 
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
 
     def save_env_info(self, record):
-        """Save a (start, end, job, site, plane) tuple."""
+        """Save a (start, end, job, site, plane, operator) tuple."""
         self.job_record_for_gant.append(record)
 
     # ============================================================
@@ -86,7 +120,7 @@ class ScheduleEnv(gym.Env):
     # ============================================================
 
     def initialize(self):
-        """Create sites, jobs, tasks, planes, and SimPy resources."""
+        """Create sites, jobs, tasks, planes, operators, and SimPy resources."""
         sites_obj = Sites()
         jobs_obj = Jobs()
         task_obj = Task()
@@ -96,9 +130,15 @@ class ScheduleEnv(gym.Env):
         self.task = task_obj.simple_task_object
         self.planes = [Plane(pid, self.task[pid]) for pid in range(len(self.task))]
 
+        # recreate SimPy environment
         self.sim_env = simpy.Environment()
         self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
 
+        # re-initialize operators
+        self.operators_obj = Operators()
+        self.operators = self.operators_obj.operators_object_list
+
+        # launch plane processes
         for pid in range(len(self.planes)):
             self.sim_env.process(self.plane_process(pid))
 
@@ -106,10 +146,11 @@ class ScheduleEnv(gym.Env):
         self.done = False
         self._completed_prev = 0
         self.step_count = 0
-        print(f"[INIT] Environment initialized with {len(self.planes)} planes and their job sequences.")
+        print(f"[INIT] Environment initialized with {len(self.planes)} planes, "
+              f"{len(self.sites)} sites, and {len(self.operators)} operators.")
 
     # ============================================================
-    # === Clock Control (NEW in Step 5B) ==========================
+    # === Clock Control (Step 5B) ================================
     # ============================================================
 
     def advance_clock(self, max_time=None):
@@ -150,7 +191,8 @@ class ScheduleEnv(gym.Env):
             "episodes_situation": list(self.job_record_for_gant),
         }
 
-        print(f"[DEBUG] RL step={self.step_count} | SimPy time={self.sim_env.now} | completed={len(self.job_record_for_gant)}")
+        print(f"[DEBUG] RL step={self.step_count} | SimPy time={self.sim_env.now} | "
+              f"completed={len(self.job_record_for_gant)}")
         return reward, self.done, info
 
     def reset(self):
@@ -176,13 +218,13 @@ class ScheduleEnv(gym.Env):
     # ============================================================
 
     def test_coexecution(self):
-        print("=== Step 5B Test: SimPy–RL Synchronized Clock ===")
+        print("=== Step 6A Test: SimPy–RL with Operators ===")
         self.reset()
         while not self.done:
             _, done, _ = self.step(None)
             if done:
                 break
-        print("✅ Step 5B simulation completed successfully.")
+        print("✅ Step 6A simulation completed successfully.")
 
 
 if __name__ == "__main__":
