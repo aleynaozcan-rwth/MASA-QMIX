@@ -1,15 +1,20 @@
-# main.py — cumulative entrypoint for MASA-QMIX
+# main.py — unified entrypoint for MASA-QMIX (Step 7A)
 # Modes:
-#   4c  : Run one plane's full SimPy workflow (Step 4C)
+#   4c  : Run one plane’s full SimPy workflow (Step 4C)
 #   4b  : Co-execution smoke test (Step 4B)
-#   rl  : Full RL pipeline (Step 5+)
-#   6b  : Test machine + operator pair action space (Step 6B)
+#   rl  : Full RL pipeline (Step 5 +)
+#   6b  : Test machine + operator pairs (Step 6B)
+#   7a  : Dynamic-arrival + operator-constraint test (Step 7A)
 
 import argparse
 import importlib
 import sys
 from environment import ScheduleEnv
 
+
+# ============================================================
+# === Simple SimPy test modes ================================
+# ============================================================
 
 def run_mode_4c(plane_id: int):
     env = ScheduleEnv()
@@ -21,15 +26,34 @@ def run_mode_4b(steps: int):
     env.test_coexecution(steps=steps)
 
 
+def run_mode_6b():
+    env = ScheduleEnv()
+    env.test_coexecution()
+
+
+def run_mode_7a():
+    """Standalone Step 7A dynamic-arrival test."""
+    print("\n=== Step 7A: Dynamic Arrivals + Operator Constraints Test ===")
+    env = ScheduleEnv()
+    env.test_dynamic_arrivals(max_steps=150)
+    print("✅ Step 7A environment behavior verified.\n")
+
+
+# ============================================================
+# === Full MARL pipeline =====================================
+# ============================================================
+
 def run_mode_rl():
+    # --- Torch check ---
     if importlib.util.find_spec("torch") is None:
         print(
             "[ERROR] PyTorch ('torch') is not installed.\n"
-            "To enable RL mode: pip install torch torchvision torchaudio\n"
-            "Or load your cluster's PyTorch module, then re-run with --mode rl."
+            "Run  : pip install torch torchvision torchaudio\n"
+            "or load your cluster’s PyTorch module, then re-run with --mode rl."
         )
         sys.exit(1)
 
+    # --- Imports ---
     try:
         from MARL.runner import Runner
         from MARL.common.arguments import (
@@ -41,6 +65,7 @@ def run_mode_rl():
         print("[ERROR] Could not import MARL modules:", e)
         sys.exit(1)
 
+    # --- Argument setup ---
     args = get_common_args()
     if args.alg.find('coma') > -1:
         args = get_coma_args(args)
@@ -55,7 +80,14 @@ def run_mode_rl():
     if args.alg.find('g2anet') > -1:
         args = get_g2anet_args(args)
 
-    env = ScheduleEnv()
+    # --- Environment ---
+    env = ScheduleEnv(
+        start_planes=args.start_planes,
+        max_planes=args.max_planes,
+        arrival_prob=args.arrival_prob,
+        variable_ops=args.variable_ops,
+        seed=args.seed,
+    )
     env.reset()
 
     if not hasattr(env, "get_env_info"):
@@ -69,7 +101,7 @@ def run_mode_rl():
     args.obs_shape = env_info["obs_shape"]
     args.episode_limit = env_info["episode_limit"]
 
-    print("\n=== Environment Info ===")
+    print("\n=== Environment Info (Step 7A) ===")
     for k, v in env_info.items():
         print(f"{k}: {v}")
     print("====================================\n")
@@ -79,24 +111,25 @@ def run_mode_rl():
         runner.run(0)
     else:
         win_rate, reward, _ = runner.evaluate([], 0)
-        print(f"The ave_reward of {args.alg} is {reward}")
+        print(f"The average reward of {args.alg} is {reward:.2f}")
 
 
-def run_mode_6b():
-    """Standalone test for Step 6B (machine + operator action space)."""
-    env = ScheduleEnv()
-    env.test_coexecution()
-
+# ============================================================
+# === CLI argument parsing ===================================
+# ============================================================
 
 def parse_args():
     p = argparse.ArgumentParser(description="MASA-QMIX cumulative entrypoint")
-    p.add_argument("--mode",
-                   choices=["4c", "4b", "rl", "6b"],
-                   default="4c",
-                   help=("4c: single-plane SimPy run; "
-                         "4b: co-exec smoke test; "
-                         "rl: full MARL pipeline; "
-                         "6b: test machine+operator pairs"))
+    p.add_argument(
+        "--mode",
+        choices=["4c", "4b", "rl", "6b", "7a"],
+        default="4c",
+        help=("4c: single-plane SimPy run; "
+              "4b: co-exec smoke test; "
+              "rl: full MARL pipeline; "
+              "6b: test machine+operator pairs; "
+              "7a: dynamic-arrival + operator test"),
+    )
     p.add_argument("--plane-id", type=int, default=0,
                    help="Plane ID for 4c mode")
     p.add_argument("--steps", type=int, default=5,
@@ -104,14 +137,20 @@ def parse_args():
     return p.parse_args()
 
 
+# ============================================================
+# === Entrypoint =============================================
+# ============================================================
+
 if __name__ == "__main__":
     args = parse_args()
     if args.mode == "4c":
         run_mode_4c(args.plane_id)
     elif args.mode == "4b":
         run_mode_4b(args.steps)
-    elif args.mode == "rl":
-        run_mode_rl()
     elif args.mode == "6b":
         run_mode_6b()
+    elif args.mode == "7a":
+        run_mode_7a()
+    elif args.mode == "rl":
+        run_mode_rl()
 # --- End of file main.py ---

@@ -2,6 +2,9 @@ import argparse
 
 """
 Here are the params for training
+Step 7A Update:
+- Added parameters for dynamic job arrivals (start_planes, max_planes, arrival_prob, variable_ops).
+- Compatible with ScheduleEnv dynamic simulation.
 """
 
 def get_common_args():
@@ -28,8 +31,7 @@ def get_common_args():
 
     # NOTE on CLI (Command-Line Interface):
     # In terminals (e.g., WSL Ubuntu / VS Code Terminal), passing booleans like "--learn False"
-    # can be tricky because bool("False") becomes True in Python. For now we keep defaults here.
-    # (We can switch to store_true/store_false later if you want to flip them from CLI.)
+    # can be tricky because bool("False") becomes True in Python. We keep defaults here.
     parser.add_argument('--evaluate_epoch', type=int, default=5, help='number of episodes in each evaluation')
 
     parser.add_argument('--model_dir', type=str, default='./MARL/model', help='model directory of the policy')
@@ -40,56 +42,65 @@ def get_common_args():
     parser.add_argument('--cuda', type=bool, default=False, help='whether to use the GPU')
     parser.add_argument('--havelook', type=bool, default=False, help='whether to print intermediate info')
 
+    # ============================================================
+    # Step 7A — Dynamic Job Arrival Parameters
+    # ============================================================
+    parser.add_argument('--start_planes', type=int, default=4,
+                        help='initial number of planes (jobs) at t=0')
+    parser.add_argument('--max_planes', type=int, default=12,
+                        help='maximum number of planes (jobs) allowed per episode')
+    parser.add_argument('--arrival_prob', type=float, default=0.2,
+                        help='probability of spawning a new job per environment step')
+    parser.add_argument('--variable_ops', type=bool, default=True,
+                        help='whether newly generated jobs have variable operation counts')
+    parser.add_argument('--num_operators', type=int, default=4,
+                        help='number of operators in the environment')
+    parser.add_argument('--machine_speed_range', type=float, nargs=2, default=[0.7, 1.4],
+                        help='min and max relative machine speed factors across sites')
+    # ============================================================
+
     args = parser.parse_args()
     return args
 
 
-# arguments of vdn / qmix / qtran
+# ===============================================================
+# Arguments for VDN / QMIX / QTRAN
+# ===============================================================
 def get_mixer_args(args):
     # ---------- QUICK-RUN CHANGES (original → new) ----------
     # network
-    args.rnn_hidden_dim   = 64     # keep standard
-    args.qmix_hidden_dim  = 32     # small hidden dim is enough for quick run
-    args.two_hyper_layers = False  # unchanged
-    args.hyper_hidden_dim = 64     # unchanged
-    args.qtran_hidden_dim = 64     # unchanged
-    args.lr               = 5e-4   # unchanged (stable)
+    args.rnn_hidden_dim   = 64
+    args.qmix_hidden_dim  = 32
+    args.two_hyper_layers = False
+    args.hyper_hidden_dim = 64
+    args.qtran_hidden_dim = 64
+    args.lr               = 5e-4
 
     # epsilon-greedy
-    args.epsilon          = 1.0    # unchanged
-    args.min_epsilon      = 0.05   # unchanged
-    anneal_steps          = 10000   # DECREASED (50000 → 2000) for faster epsilon annealing
+    args.epsilon          = 1.0
+    args.min_epsilon      = 0.05
+    anneal_steps          = 10000
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
     # training schedule
-    args.n_epoch     = 400    # DECREASED (15000 → 200->500) → quick run total training epochs #1 epoch = n_episodes tane episode.
-    args.n_episodes  = 4     # DECREASED (5 → 3->4) → fewer episodes per epoch
-    args.train_steps = 2      # unchanged
-    #her epoch = 3 episode toplandıktan sonra 2 defa ağırlık güncellemesi yapılıyor.
-    #1 episode = 1 scheduling.
-
-    #    1 epoch = 3 scheduling.
-    #    200 epoch = 600 scheduling (600 episode).
-    #    Her epoch sonunda → 2 defa network güncellemesi yapılıyor.
-    #    Her episode’un içinde → max 80 environment step var (ama job’lar daha erken bitince episode erken de bitebilir).
+    args.n_epoch     = 400
+    args.n_episodes  = 4
+    args.train_steps = 2
 
     # evaluation / saving cadence
-    args.evaluate_cycle = 20    # DECREASED (100 → 20) → evaluate more frequently in short runs
-    args.batch_size     = 24 # DECREASED (32 → 16->24)
-    args.buffer_size    = 3000  # DECREASED (5000 → 1000->1000)
+    args.evaluate_cycle = 20
+    args.batch_size     = 24
+    args.buffer_size    = 3000
+    args.save_cycle         = 100
+    args.target_update_cycle= 50
 
-    args.save_cycle         = 100   # DECREASED (500 → 100) → save more often since training is shorter
-    args.target_update_cycle= 50    # DECREASED (200 → 50)
-
-    # QTRAN lambda (unused for plain QMIX, kept for compatibility)
+    # QTRAN lambda (unused for plain QMIX)
     args.lambda_opt  = 1
     args.lambda_nopt = 1
-
-    # prevent gradient explosion
     args.grad_norm_clip = 10
 
-    # MAVEN (left as-is; only used if alg == 'maven')
+    # MAVEN (kept for compatibility)
     args.noise_dim            = 16
     args.lambda_mi            = 0.001
     args.lambda_ql            = 1
@@ -97,84 +108,72 @@ def get_mixer_args(args):
     return args
 
 
-# arguments of coma
+# ===============================================================
+# Arguments of COMA
+# ===============================================================
 def get_coma_args(args):
-    # network
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-
-    # epsilon-greedy
     args.epsilon         = 0.5
     args.anneal_epsilon  = 0.00064
     args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
-
-    # td-lambda
     args.td_lambda = 0.8
-
-    # training/eval/saving
     args.n_epoch         = 20000
     args.n_episodes      = 1
     args.evaluate_cycle  = 100
     args.save_cycle      = 5000
     args.target_update_cycle = 200
-
     args.grad_norm_clip  = 10
     return args
 
 
-# arguments of central_v
+# ===============================================================
+# Arguments of Central-V
+# ===============================================================
 def get_centralv_args(args):
-    # network
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-
-    # epsilon-greedy
     args.epsilon         = 0.5
     args.anneal_epsilon  = 0.00064
     args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
-
-    # training/eval/saving
     args.n_epoch         = 20000
     args.n_episodes      = 1
     args.evaluate_cycle  = 100
     args.save_cycle      = 5000
     args.target_update_cycle = 200
-
     args.grad_norm_clip  = 10
     return args
 
 
-# arguments of reinforce
+# ===============================================================
+# Arguments of Reinforce
+# ===============================================================
 def get_reinforce_args(args):
-    # network
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-
-    # epsilon-greedy
     args.epsilon         = 0.5
     args.anneal_epsilon  = 0.00064
     args.min_epsilon     = 0.02
     args.epsilon_anneal_scale = 'epoch'
-
-    # training/eval/saving
     args.n_epoch         = 20000
     args.n_episodes      = 1
     args.evaluate_cycle  = 100
     args.save_cycle      = 5000
-
     args.grad_norm_clip  = 10
     return args
 
 
-# arguments of coma+commnet
+# ===============================================================
+# Arguments for CommNet / G2ANet
+# ===============================================================
 def get_commnet_args(args):
     if args.map == '3m':
         args.k = 2

@@ -1,0 +1,1706 @@
+
+=== Step 7A: Dynamic Arrivals + Operator Constraints Test ===
+
+[Init] Operators created:
+   - Operator 0 → sites [0, 1, 2, 3, 4, 5]
+   - Operator 1 → sites [6, 7, 8, 9]
+   - Operator 2 → sites [10, 11, 12, 13]
+   - Operator 3 → sites [14, 15, 16, 17]
+
+[TaskGen] New plane 0 generated → 4 operations:
+   • Nitrogen     (JobID=6, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Power supply (JobID=4, duration=6.8) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Cockpit      (JobID=0, duration=12.3) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Equipment cabin (JobID=1, duration=9.9) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+
+[TaskGen] New plane 1 generated → 7 operations:
+   • Nitrogen     (JobID=6, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Hydraulic    (JobID=3, duration=5.6) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Nitrogen     (JobID=6, duration=1.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Equipment cabin (JobID=1, duration=13.5) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Weapon mounting (JobID=8, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Hydraulic    (JobID=3, duration=3.5) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Inertial navigation (JobID=7, duration=13.5) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+
+[TaskGen] New plane 2 generated → 5 operations:
+   • Inertial navigation (JobID=7, duration=9.9) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Oxygen       (JobID=5, duration=1.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Equipment cabin (JobID=1, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Power supply (JobID=4, duration=5.8) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Nitrogen     (JobID=6, duration=1.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+
+[TaskGen] New plane 3 generated → 5 operations:
+   • Refueling    (JobID=2, duration=20.0) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Refueling    (JobID=2, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Nitrogen     (JobID=6, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Weapon mounting (JobID=8, duration=20.2) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Oxygen       (JobID=5, duration=2.3) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+
+=== Step 7A: Dynamic Arrivals + Operator Constraints Test ===
+
+📋 SITE–JOB MAPPING
+   Site 00 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 01 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 02 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 03 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 04 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 05 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 06 → jobs [0, 1, 7, 2, 8]
+   Site 07 → jobs [3, 4, 5, 6]
+   Site 08 → jobs [0, 1, 7, 2, 8]
+   Site 09 → jobs [3, 4, 5, 6]
+   Site 10 → jobs [0, 1, 7, 2, 8]
+   Site 11 → jobs [3, 4, 5, 6]
+   Site 12 → jobs [0, 1, 7, 2, 8]
+   Site 13 → jobs [3, 4, 5, 6]
+   Site 14 → jobs [0, 1, 7, 2, 8]
+   Site 15 → jobs [3, 4, 5, 6]
+   Site 16 → jobs [0, 1, 7, 2, 8]
+   Site 17 → jobs [3, 4, 5, 6]
+
+📋 OPERATOR–SITE MAPPING
+   Operator 0 → sites [0, 1, 2, 3, 4, 5]
+   Operator 1 → sites [6, 7, 8, 9]
+   Operator 2 → sites [10, 11, 12, 13]
+   Operator 3 → sites [14, 15, 16, 17]
+
+[INIT] Step 7A env with 4 initial planes; max_planes=12.
+
+[Init] Operators created:
+   - Operator 0 → sites [0, 1, 2, 3, 4, 5]
+   - Operator 1 → sites [6, 7, 8, 9]
+   - Operator 2 → sites [10, 11, 12, 13]
+   - Operator 3 → sites [14, 15, 16, 17]
+
+[TaskGen] New plane 0 generated → 7 operations:
+   • Nitrogen     (JobID=6, duration=2.3) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Refueling    (JobID=2, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Oxygen       (JobID=5, duration=1.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Equipment cabin (JobID=1, duration=13.9) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Power supply (JobID=4, duration=6.6) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Weapon mounting (JobID=8, duration=14.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Equipment cabin (JobID=1, duration=13.3) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+
+[TaskGen] New plane 1 generated → 4 operations:
+   • Weapon mounting (JobID=8, duration=18.2) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Hydraulic    (JobID=3, duration=3.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Oxygen       (JobID=5, duration=1.8) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Inertial navigation (JobID=7, duration=11.0) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+
+[TaskGen] New plane 2 generated → 3 operations:
+   • Hydraulic    (JobID=3, duration=4.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Hydraulic    (JobID=3, duration=5.3) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Hydraulic    (JobID=3, duration=3.7) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+
+[TaskGen] New plane 3 generated → 5 operations:
+   • Weapon mounting (JobID=8, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Hydraulic    (JobID=3, duration=2.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Nitrogen     (JobID=6, duration=2.7) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Refueling    (JobID=2, duration=17.0) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Nitrogen     (JobID=6, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+
+=== Step 7A: Dynamic Arrivals + Operator Constraints Test ===
+
+📋 SITE–JOB MAPPING
+   Site 00 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 01 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 02 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 03 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 04 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 05 → jobs [0, 1, 2, 3, 4, 5, 6, 7, 8]
+   Site 06 → jobs [0, 1, 7, 2, 8]
+   Site 07 → jobs [3, 4, 5, 6]
+   Site 08 → jobs [0, 1, 7, 2, 8]
+   Site 09 → jobs [3, 4, 5, 6]
+   Site 10 → jobs [0, 1, 7, 2, 8]
+   Site 11 → jobs [3, 4, 5, 6]
+   Site 12 → jobs [0, 1, 7, 2, 8]
+   Site 13 → jobs [3, 4, 5, 6]
+   Site 14 → jobs [0, 1, 7, 2, 8]
+   Site 15 → jobs [3, 4, 5, 6]
+   Site 16 → jobs [0, 1, 7, 2, 8]
+   Site 17 → jobs [3, 4, 5, 6]
+
+📋 OPERATOR–SITE MAPPING
+   Operator 0 → sites [0, 1, 2, 3, 4, 5]
+   Operator 1 → sites [6, 7, 8, 9]
+   Operator 2 → sites [10, 11, 12, 13]
+   Operator 3 → sites [14, 15, 16, 17]
+
+[INIT] Step 7A env with 4 initial planes; max_planes=12.
+[t=0] Plane 0 entered the system.
+
+🛠️ [Plane 0] Next job=6
+   Step 1: Valid sites (can perform job 6): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (7, 1), (9, 1), (11, 2), (13, 2), (15, 3), (17, 3)]
+✅ Decision: choose Site 9 with Operator 1
+[t=0] Plane 1 entered the system.
+
+🛠️ [Plane 1] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 1), (8, 1), (10, 2), (12, 2), (14, 3), (16, 3)]
+✅ Decision: choose Site 0 with Operator 0
+[t=0] Plane 2 entered the system.
+
+🛠️ [Plane 2] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (7, 1), (11, 2), (13, 2), (15, 3), (17, 3)]
+✅ Decision: choose Site 17 with Operator 3
+[t=0] Plane 3 entered the system.
+
+🛠️ [Plane 3] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 1), (8, 1), (10, 2), (12, 2), (14, 3), (16, 3)]
+✅ Decision: choose Site 3 with Operator 0
+[Operator] Operator 1 assigned job 6 at site 9
+[Operator] Operator 0 assigned job 8 at site 0
+[Operator] Operator 3 assigned job 3 at site 17
+[Operator] Operator 0 assigned job 8 at site 3
+[DEBUG] Step=1 | t=0 | completed=0 | planes=4
+
+[TaskGen] New plane 4 generated → 4 operations:
+   • Equipment cabin (JobID=1, duration=12.1) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Hydraulic    (JobID=3, duration=2.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Oxygen       (JobID=5, duration=2.5) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Inertial navigation (JobID=7, duration=11.3) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+[ARRIVAL t=0] New plane 4 spawned with 4 ops.
+[t=0] Plane 4 entered the system.
+
+🛠️ [Plane 4] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(10, 2), (12, 2)]
+✅ Decision: choose Site 10 with Operator 2
+[Operator] Operator 2 assigned job 1 at site 10
+[DEBUG] Step=2 | t=0 | completed=0 | planes=5
+[Operator] Operator 1 released from job (6, 9)
+[t=2] Plane 0 finished job 6 at site 9 by operator 1
+
+🛠️ [Plane 0] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1)]
+✅ Decision: choose Site 6 with Operator 1
+[Operator] Operator 1 assigned job 2 at site 6
+[DEBUG] Step=3 | t=2 | completed=1 | planes=5
+[Operator] Operator 3 released from job (3, 17)
+[t=4] Plane 2 finished job 3 at site 17 by operator 3
+
+🛠️ [Plane 2] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(15, 3), (17, 3)]
+✅ Decision: choose Site 15 with Operator 3
+[Operator] Operator 3 assigned job 3 at site 15
+[DEBUG] Step=4 | t=4 | completed=2 | planes=5
+[Operator] Operator 3 released from job (3, 15)
+[t=8] Plane 2 finished job 3 at site 15 by operator 3
+
+🛠️ [Plane 2] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(15, 3), (17, 3)]
+✅ Decision: choose Site 15 with Operator 3
+[Operator] Operator 3 assigned job 3 at site 15
+[DEBUG] Step=5 | t=8 | completed=3 | planes=5
+[Operator] Operator 2 released from job (1, 10)
+[t=10] Plane 4 finished job 1 at site 10 by operator 2
+
+🛠️ [Plane 4] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(11, 2), (13, 2)]
+✅ Decision: choose Site 11 with Operator 2
+[Operator] Operator 2 assigned job 3 at site 11
+[DEBUG] Step=6 | t=10 | completed=4 | planes=5
+[Operator] Operator 3 released from job (3, 15)
+[t=12] Plane 2 finished job 3 at site 15 by operator 3
+[t=12] Plane 2 completed all jobs.
+[DEBUG] Step=7 | t=12 | completed=5 | planes=5
+[Operator] Operator 2 released from job (3, 11)
+[t=14] Plane 4 finished job 3 at site 11 by operator 2
+
+🛠️ [Plane 4] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(11, 2), (13, 2), (15, 3), (17, 3)]
+✅ Decision: choose Site 15 with Operator 3
+[Operator] Operator 3 assigned job 5 at site 15
+[DEBUG] Step=8 | t=14 | completed=6 | planes=5
+[Operator] Operator 0 released from job (8, 3)
+[t=15] Plane 1 finished job 8 at site 0 by operator 0
+
+🛠️ [Plane 1] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (4, 0), (5, 0), (11, 2), (13, 2)]
+✅ Decision: choose Site 2 with Operator 0
+[t=15] Plane 3 finished job 8 at site 3 by operator 0
+
+🛠️ [Plane 3] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (3, 0), (4, 0), (5, 0), (11, 2), (13, 2)]
+✅ Decision: choose Site 11 with Operator 2
+[Operator] Operator 0 assigned job 3 at site 2
+[Operator] Operator 2 assigned job 3 at site 11
+[DEBUG] Step=9 | t=15 | completed=8 | planes=5
+[Operator] Operator 3 released from job (5, 15)
+[t=16] Plane 4 finished job 5 at site 15 by operator 3
+
+🛠️ [Plane 4] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(14, 3), (16, 3)]
+✅ Decision: choose Site 14 with Operator 3
+[Operator] Operator 3 assigned job 7 at site 14
+[DEBUG] Step=10 | t=16 | completed=9 | planes=5
+[Operator] Operator 1 released from job (2, 6)
+[t=17] Plane 0 finished job 2 at site 6 by operator 1
+
+🛠️ [Plane 0] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(7, 1), (9, 1)]
+✅ Decision: choose Site 9 with Operator 1
+[Operator] Operator 1 assigned job 5 at site 9
+[DEBUG] Step=11 | t=17 | completed=10 | planes=5
+[Operator] Operator 0 released from job (3, 2)
+[t=19] Plane 1 finished job 3 at site 2 by operator 0
+
+🛠️ [Plane 1] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]
+✅ Decision: choose Site 1 with Operator 0
+[Operator] Operator 2 released from job (3, 11)
+[t=19] Plane 3 finished job 3 at site 11 by operator 2
+
+🛠️ [Plane 3] Next job=6
+   Step 1: Valid sites (can perform job 6): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (3, 0), (4, 0), (5, 0), (11, 2), (13, 2)]
+✅ Decision: choose Site 4 with Operator 0
+[Operator] Operator 1 released from job (5, 9)
+[t=19] Plane 0 finished job 5 at site 9 by operator 1
+
+🛠️ [Plane 0] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (3, 0), (5, 0), (6, 1), (8, 1), (10, 2), (12, 2)]
+✅ Decision: choose Site 10 with Operator 2
+[Operator] Operator 0 assigned job 5 at site 1
+[Operator] Operator 0 assigned job 6 at site 4
+[Operator] Operator 2 assigned job 1 at site 10
+[DEBUG] Step=12 | t=19 | completed=13 | planes=5
+
+[TaskGen] New plane 5 generated → 6 operations:
+   • Weapon mounting (JobID=8, duration=20.2) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Equipment cabin (JobID=1, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Weapon mounting (JobID=8, duration=17.0) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Oxygen       (JobID=5, duration=1.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Equipment cabin (JobID=1, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Oxygen       (JobID=5, duration=2.3) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+[ARRIVAL t=19] New plane 5 spawned with 6 ops.
+[t=19] Plane 5 entered the system.
+
+🛠️ [Plane 5] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1)]
+✅ Decision: choose Site 6 with Operator 1
+[Operator] Operator 1 assigned job 8 at site 6
+[DEBUG] Step=13 | t=19 | completed=13 | planes=6
+[Operator] Operator 0 released from job (6, 4)
+[t=21] Plane 1 finished job 5 at site 1 by operator 0
+
+🛠️ [Plane 1] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (5, 0)]
+✅ Decision: choose Site 0 with Operator 0
+[t=21] Plane 3 finished job 6 at site 4 by operator 0
+
+🛠️ [Plane 3] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]
+✅ Decision: choose Site 3 with Operator 0
+[Operator] Operator 0 assigned job 7 at site 0
+[Operator] Operator 0 assigned job 2 at site 3
+[DEBUG] Step=14 | t=21 | completed=15 | planes=6
+
+[TaskGen] New plane 6 generated → 5 operations:
+   • Inertial navigation (JobID=7, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Power supply (JobID=4, duration=5.6) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Weapon mounting (JobID=8, duration=17.0) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Hydraulic    (JobID=3, duration=3.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Inertial navigation (JobID=7, duration=9.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+[ARRIVAL t=21] New plane 6 spawned with 5 ops.
+[t=21] Plane 6 entered the system.
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 7 at t=21.
+[DEBUG] Step=15 | t=21 | completed=15 | planes=7
+
+[TaskGen] New plane 7 generated → 4 operations:
+   • Refueling    (JobID=2, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Nitrogen     (JobID=6, duration=2.2) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Hydraulic    (JobID=3, duration=4.5) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Oxygen       (JobID=5, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+[ARRIVAL t=21] New plane 7 spawned with 4 ops.
+[t=21] Plane 7 entered the system.
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 2 at t=21.
+[DEBUG] Step=16 | t=21 | completed=15 | planes=8
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 7 at t=22.
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 2 at t=22.
+[DEBUG] Step=17 | t=22 | completed=15 | planes=8
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 7 at t=23.
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 2 at t=23.
+[DEBUG] Step=18 | t=23 | completed=15 | planes=8
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 7 at t=24.
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 2 at t=24.
+[DEBUG] Step=19 | t=24 | completed=15 | planes=8
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 7 at t=25.
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 2 at t=25.
+[DEBUG] Step=20 | t=25 | completed=15 | planes=8
+[Operator] Operator 3 released from job (7, 14)
+[t=26] Plane 4 finished job 7 at site 14 by operator 3
+[t=26] Plane 4 completed all jobs.
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(14, 3), (16, 3)]
+✅ Decision: choose Site 16 with Operator 3
+
+🛠️ [Plane 7] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(14, 3)]
+✅ Decision: choose Site 14 with Operator 3
+[Operator] Operator 3 assigned job 7 at site 16
+[Operator] Operator 3 assigned job 2 at site 14
+[DEBUG] Step=21 | t=26 | completed=16 | planes=8
+[Operator] Operator 2 released from job (1, 10)
+[t=29] Plane 0 finished job 1 at site 10 by operator 2
+
+🛠️ [Plane 0] Next job=4
+   Step 1: Valid sites (can perform job 4): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(11, 2), (13, 2)]
+✅ Decision: choose Site 13 with Operator 2
+[Operator] Operator 2 assigned job 4 at site 13
+[DEBUG] Step=22 | t=29 | completed=17 | planes=8
+[Operator] Operator 0 released from job (2, 3)
+[t=31] Plane 1 finished job 7 at site 0 by operator 0
+[t=31] Plane 1 completed all jobs.
+[DEBUG] Step=23 | t=31 | completed=18 | planes=8
+[Operator] Operator 1 released from job (8, 6)
+[t=34] Plane 5 finished job 8 at site 6 by operator 1
+
+🛠️ [Plane 5] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (4, 0), (5, 0), (6, 1), (8, 1)]
+✅ Decision: choose Site 4 with Operator 0
+[Operator] Operator 0 assigned job 1 at site 4
+[DEBUG] Step=24 | t=34 | completed=19 | planes=8
+[Operator] Operator 2 released from job (4, 13)
+[t=35] Plane 0 finished job 4 at site 13 by operator 2
+
+🛠️ [Plane 0] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1), (10, 2), (12, 2)]
+✅ Decision: choose Site 8 with Operator 1
+[Operator] Operator 1 assigned job 8 at site 8
+[DEBUG] Step=25 | t=35 | completed=20 | planes=8
+[Operator] Operator 0 released from job (1, 4)
+[t=36] Plane 3 finished job 2 at site 3 by operator 0
+
+🛠️ [Plane 3] Next job=6
+   Step 1: Valid sites (can perform job 6): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (5, 0), (11, 2), (13, 2)]
+✅ Decision: choose Site 13 with Operator 2
+[Operator] Operator 3 released from job (2, 14)
+[t=36] Plane 6 finished job 7 at site 16 by operator 3
+
+🛠️ [Plane 6] Next job=4
+   Step 1: Valid sites (can perform job 4): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (5, 0), (11, 2), (15, 3), (17, 3)]
+✅ Decision: choose Site 2 with Operator 0
+[Operator] Operator 2 assigned job 6 at site 13
+[Operator] Operator 0 assigned job 4 at site 2
+[DEBUG] Step=26 | t=36 | completed=22 | planes=8
+[Operator] Operator 2 released from job (6, 13)
+[t=38] Plane 3 finished job 6 at site 13 by operator 2
+[t=38] Plane 3 completed all jobs.
+[DEBUG] Step=27 | t=38 | completed=23 | planes=8
+
+[TaskGen] New plane 8 generated → 4 operations:
+   • Equipment cabin (JobID=1, duration=12.1) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Weapon mounting (JobID=8, duration=14.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Weapon mounting (JobID=8, duration=18.5) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Equipment cabin (JobID=1, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+[ARRIVAL t=38] New plane 8 spawned with 4 ops.
+[t=38] Plane 8 entered the system.
+
+🛠️ [Plane 8] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(10, 2), (12, 2), (16, 3)]
+✅ Decision: choose Site 12 with Operator 2
+[Operator] Operator 2 assigned job 1 at site 12
+[DEBUG] Step=28 | t=38 | completed=23 | planes=9
+[t=41] Plane 7 finished job 2 at site 14 by operator 3
+
+🛠️ [Plane 7] Next job=6
+   Step 1: Valid sites (can perform job 6): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(15, 3), (17, 3)]
+✅ Decision: choose Site 17 with Operator 3
+[Operator] Operator 3 assigned job 6 at site 17
+[DEBUG] Step=29 | t=41 | completed=24 | planes=9
+[Operator] Operator 0 released from job (4, 2)
+[t=42] Plane 6 finished job 4 at site 2 by operator 0
+
+🛠️ [Plane 6] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (5, 0)]
+✅ Decision: choose Site 5 with Operator 0
+[Operator] Operator 0 assigned job 8 at site 5
+[DEBUG] Step=30 | t=42 | completed=25 | planes=9
+[Operator] Operator 3 released from job (6, 17)
+[t=43] Plane 7 finished job 6 at site 17 by operator 3
+
+🛠️ [Plane 7] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(15, 3), (17, 3)]
+✅ Decision: choose Site 15 with Operator 3
+[Operator] Operator 3 assigned job 3 at site 15
+[DEBUG] Step=31 | t=43 | completed=26 | planes=9
+
+[TaskGen] New plane 9 generated → 6 operations:
+   • Power supply (JobID=4, duration=4.3) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Oxygen       (JobID=5, duration=1.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Oxygen       (JobID=5, duration=1.8) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Refueling    (JobID=2, duration=14.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Cockpit      (JobID=0, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Power supply (JobID=4, duration=7.4) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+------------------------------------------------------------
+[ARRIVAL t=43] New plane 9 spawned with 6 ops.
+[t=43] Plane 9 entered the system.
+
+🛠️ [Plane 9] Next job=4
+   Step 1: Valid sites (can perform job 4): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+[WAIT] No available site/operator for job 4 at t=43.
+[DEBUG] Step=32 | t=43 | completed=26 | planes=10
+
+[TaskGen] New plane 10 generated → 3 operations:
+   • Cockpit      (JobID=0, duration=13.9) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Inertial navigation (JobID=7, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Weapon mounting (JobID=8, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+[ARRIVAL t=43] New plane 10 spawned with 3 ops.
+[t=43] Plane 10 entered the system.
+
+🛠️ [Plane 10] Next job=0
+   Step 1: Valid sites (can perform job 0): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+[WAIT] No available site/operator for job 0 at t=43.
+[DEBUG] Step=33 | t=43 | completed=26 | planes=11
+[Operator] Operator 0 released from job (8, 5)
+[t=44] Plane 5 finished job 1 at site 4 by operator 0
+
+🛠️ [Plane 5] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]
+✅ Decision: choose Site 3 with Operator 0
+
+🛠️ [Plane 9] Next job=4
+   Step 1: Valid sites (can perform job 4): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (4, 0)]
+✅ Decision: choose Site 1 with Operator 0
+
+🛠️ [Plane 10] Next job=0
+   Step 1: Valid sites (can perform job 0): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (4, 0)]
+✅ Decision: choose Site 4 with Operator 0
+[Operator] Operator 0 assigned job 8 at site 3
+[Operator] Operator 0 assigned job 4 at site 1
+[Operator] Operator 0 assigned job 0 at site 4
+[DEBUG] Step=34 | t=44 | completed=27 | planes=11
+[Operator] Operator 3 released from job (3, 15)
+[t=47] Plane 7 finished job 3 at site 15 by operator 3
+
+🛠️ [Plane 7] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(15, 3), (17, 3)]
+✅ Decision: choose Site 15 with Operator 3
+[Operator] Operator 3 assigned job 5 at site 15
+[DEBUG] Step=35 | t=47 | completed=28 | planes=11
+
+[TaskGen] New plane 11 generated → 6 operations:
+   • Hydraulic    (JobID=3, duration=3.8) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Hydraulic    (JobID=3, duration=3.9) → Sites [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   • Cockpit      (JobID=0, duration=13.5) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Equipment cabin (JobID=1, duration=8.4) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Refueling    (JobID=2, duration=12.6) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   • Refueling    (JobID=2, duration=20.9) → Sites [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+------------------------------------------------------------
+[ARRIVAL t=47] New plane 11 spawned with 6 ops.
+[t=47] Plane 11 entered the system.
+
+🛠️ [Plane 11] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+[WAIT] No available site/operator for job 3 at t=47.
+[DEBUG] Step=36 | t=47 | completed=28 | planes=12
+[Operator] Operator 2 released from job (1, 12)
+[t=48] Plane 8 finished job 1 at site 12 by operator 2
+
+🛠️ [Plane 8] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(10, 2), (12, 2)]
+✅ Decision: choose Site 10 with Operator 2
+
+🛠️ [Plane 11] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(11, 2), (13, 2)]
+✅ Decision: choose Site 11 with Operator 2
+[Operator] Operator 2 assigned job 8 at site 10
+[Operator] Operator 2 assigned job 3 at site 11
+[DEBUG] Step=37 | t=48 | completed=29 | planes=12
+[Operator] Operator 3 released from job (5, 15)
+[t=49] Plane 7 finished job 5 at site 15 by operator 3
+[t=49] Plane 7 completed all jobs.
+[DEBUG] Step=38 | t=49 | completed=30 | planes=12
+[Operator] Operator 1 released from job (8, 8)
+[t=50] Plane 0 finished job 8 at site 8 by operator 1
+
+🛠️ [Plane 0] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1), (14, 3), (16, 3)]
+✅ Decision: choose Site 14 with Operator 3
+[Operator] Operator 0 released from job (0, 4)
+[t=50] Plane 9 finished job 4 at site 1 by operator 0
+
+🛠️ [Plane 9] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators [3]
+       Site 17 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (7, 1), (9, 1), (15, 3), (17, 3)]
+✅ Decision: choose Site 9 with Operator 1
+[Operator] Operator 3 assigned job 1 at site 14
+[Operator] Operator 1 assigned job 5 at site 9
+[DEBUG] Step=39 | t=50 | completed=32 | planes=12
+[Operator] Operator 2 released from job (3, 11)
+[t=52] Plane 11 finished job 3 at site 11 by operator 2
+
+🛠️ [Plane 11] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (11, 2), (13, 2)]
+✅ Decision: choose Site 1 with Operator 0
+[Operator] Operator 1 released from job (5, 9)
+[t=52] Plane 9 finished job 5 at site 9 by operator 1
+
+🛠️ [Plane 9] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (7, 1), (9, 1), (11, 2), (13, 2)]
+✅ Decision: choose Site 7 with Operator 1
+[Operator] Operator 0 assigned job 3 at site 1
+[Operator] Operator 1 assigned job 5 at site 7
+[DEBUG] Step=40 | t=52 | completed=34 | planes=12
+[Operator] Operator 0 released from job (3, 1)
+[t=54] Plane 10 finished job 0 at site 4 by operator 0
+
+🛠️ [Plane 10] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (4, 0), (12, 2)]
+✅ Decision: choose Site 4 with Operator 0
+[Operator] Operator 1 released from job (5, 7)
+[t=54] Plane 9 finished job 5 at site 7 by operator 1
+
+🛠️ [Plane 9] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (2, 0), (6, 1), (8, 1), (12, 2)]
+✅ Decision: choose Site 12 with Operator 2
+[Operator] Operator 0 assigned job 7 at site 4
+[Operator] Operator 2 assigned job 2 at site 12
+[DEBUG] Step=41 | t=54 | completed=36 | planes=12
+[Operator] Operator 0 released from job (7, 4)
+[t=56] Plane 11 finished job 3 at site 1 by operator 0
+
+🛠️ [Plane 11] Next job=0
+   Step 1: Valid sites (can perform job 0): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (6, 1), (8, 1)]
+✅ Decision: choose Site 0 with Operator 0
+[Operator] Operator 0 assigned job 0 at site 0
+[DEBUG] Step=42 | t=56 | completed=37 | planes=12
+[Operator] Operator 0 released from job (0, 0)
+[t=57] Plane 6 finished job 8 at site 5 by operator 0
+
+🛠️ [Plane 6] Next job=3
+   Step 1: Valid sites (can perform job 3): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (5, 0), (7, 1), (9, 1)]
+✅ Decision: choose Site 7 with Operator 1
+[Operator] Operator 1 assigned job 3 at site 7
+[DEBUG] Step=43 | t=57 | completed=38 | planes=12
+[t=59] Plane 5 finished job 8 at site 3 by operator 0
+
+🛠️ [Plane 5] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators []
+       Site 9 → operators []
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (5, 0)]
+✅ Decision: choose Site 1 with Operator 0
+[Operator] Operator 0 assigned job 5 at site 1
+[DEBUG] Step=44 | t=59 | completed=39 | planes=12
+[Operator] Operator 3 released from job (1, 14)
+[t=60] Plane 0 finished job 1 at site 14 by operator 3
+[t=60] Plane 0 completed all jobs.
+[DEBUG] Step=45 | t=60 | completed=40 | planes=12
+[Operator] Operator 1 released from job (3, 7)
+[t=61] Plane 6 finished job 3 at site 7 by operator 1
+
+🛠️ [Plane 6] Next job=7
+   Step 1: Valid sites (can perform job 7): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1), (14, 3), (16, 3)]
+✅ Decision: choose Site 8 with Operator 1
+[Operator] Operator 0 released from job (5, 1)
+[t=61] Plane 5 finished job 5 at site 1 by operator 0
+
+🛠️ [Plane 5] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (5, 0), (6, 1), (14, 3), (16, 3)]
+✅ Decision: choose Site 5 with Operator 0
+[Operator] Operator 1 assigned job 7 at site 8
+[Operator] Operator 0 assigned job 1 at site 5
+[DEBUG] Step=46 | t=61 | completed=42 | planes=12
+[Operator] Operator 2 released from job (2, 12)
+[t=63] Plane 8 finished job 8 at site 10 by operator 2
+
+🛠️ [Plane 8] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(10, 2), (14, 3), (16, 3)]
+✅ Decision: choose Site 16 with Operator 3
+[Operator] Operator 3 assigned job 8 at site 16
+[DEBUG] Step=47 | t=63 | completed=43 | planes=12
+[Operator] Operator 0 released from job (1, 5)
+[t=64] Plane 10 finished job 7 at site 4 by operator 0
+
+🛠️ [Plane 10] Next job=8
+   Step 1: Valid sites (can perform job 8): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(1, 0), (2, 0), (3, 0), (4, 0), (10, 2)]
+✅ Decision: choose Site 2 with Operator 0
+[Operator] Operator 0 assigned job 8 at site 2
+[DEBUG] Step=48 | t=64 | completed=44 | planes=12
+[Operator] Operator 0 released from job (8, 2)
+[t=66] Plane 11 finished job 0 at site 0 by operator 0
+
+🛠️ [Plane 11] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (3, 0), (4, 0), (10, 2)]
+✅ Decision: choose Site 3 with Operator 0
+[Operator] Operator 0 assigned job 1 at site 3
+[DEBUG] Step=49 | t=66 | completed=45 | planes=12
+[t=69] Plane 9 finished job 2 at site 12 by operator 2
+
+🛠️ [Plane 9] Next job=0
+   Step 1: Valid sites (can perform job 0): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators []
+       Site 8 → operators []
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(10, 2), (12, 2)]
+✅ Decision: choose Site 12 with Operator 2
+[Operator] Operator 2 assigned job 0 at site 12
+[DEBUG] Step=50 | t=69 | completed=46 | planes=12
+[Operator] Operator 1 released from job (7, 8)
+[t=71] Plane 6 finished job 7 at site 8 by operator 1
+[t=71] Plane 6 completed all jobs.
+[Operator] Operator 0 released from job (1, 3)
+[t=71] Plane 5 finished job 1 at site 5 by operator 0
+
+🛠️ [Plane 5] Next job=5
+   Step 1: Valid sites (can perform job 5): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators []
+       Site 13 → operators []
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (4, 0), (5, 0), (7, 1), (9, 1)]
+✅ Decision: choose Site 7 with Operator 1
+[Operator] Operator 1 assigned job 5 at site 7
+[DEBUG] Step=51 | t=71 | completed=48 | planes=12
+[Operator] Operator 1 released from job (5, 7)
+[t=73] Plane 5 finished job 5 at site 7 by operator 1
+[t=73] Plane 5 completed all jobs.
+[DEBUG] Step=52 | t=73 | completed=49 | planes=12
+[t=76] Plane 11 finished job 1 at site 3 by operator 0
+
+🛠️ [Plane 11] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators []
+       Site 16 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (3, 0), (4, 0), (5, 0), (6, 1), (8, 1)]
+✅ Decision: choose Site 3 with Operator 0
+[Operator] Operator 0 assigned job 2 at site 3
+[DEBUG] Step=53 | t=76 | completed=50 | planes=12
+[Operator] Operator 3 released from job (8, 16)
+[t=78] Plane 8 finished job 8 at site 16 by operator 3
+
+🛠️ [Plane 8] Next job=1
+   Step 1: Valid sites (can perform job 1): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators []
+       Site 1 → operators []
+       Site 2 → operators []
+       Site 3 → operators []
+       Site 4 → operators []
+       Site 5 → operators []
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators []
+       Site 12 → operators []
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(6, 1), (8, 1), (14, 3), (16, 3)]
+✅ Decision: choose Site 14 with Operator 3
+[Operator] Operator 3 assigned job 1 at site 14
+[DEBUG] Step=54 | t=78 | completed=51 | planes=12
+[Operator] Operator 0 released from job (2, 3)
+[t=79] Plane 10 finished job 8 at site 2 by operator 0
+[t=79] Plane 10 completed all jobs.
+[Operator] Operator 2 released from job (0, 12)
+[t=79] Plane 9 finished job 0 at site 12 by operator 2
+
+🛠️ [Plane 9] Next job=4
+   Step 1: Valid sites (can perform job 4): [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 7 → operators [1]
+       Site 9 → operators [1]
+       Site 11 → operators [2]
+       Site 13 → operators [2]
+       Site 15 → operators []
+       Site 17 → operators []
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (4, 0), (5, 0), (7, 1), (9, 1), (11, 2), (13, 2)]
+✅ Decision: choose Site 11 with Operator 2
+[Operator] Operator 2 assigned job 4 at site 11
+[DEBUG] Step=55 | t=79 | completed=53 | planes=12
+[Operator] Operator 2 released from job (4, 11)
+[t=85] Plane 9 finished job 4 at site 11 by operator 2
+[t=85] Plane 9 completed all jobs.
+[DEBUG] Step=56 | t=85 | completed=54 | planes=12
+[Operator] Operator 3 released from job (1, 14)
+[t=88] Plane 8 finished job 1 at site 14 by operator 3
+[t=88] Plane 8 completed all jobs.
+[DEBUG] Step=57 | t=88 | completed=55 | planes=12
+[t=91] Plane 11 finished job 2 at site 3 by operator 0
+
+🛠️ [Plane 11] Next job=2
+   Step 1: Valid sites (can perform job 2): [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]
+   Step 2: Operator availability per site:
+       Site 0 → operators [0]
+       Site 1 → operators [0]
+       Site 2 → operators [0]
+       Site 3 → operators [0]
+       Site 4 → operators [0]
+       Site 5 → operators [0]
+       Site 6 → operators [1]
+       Site 8 → operators [1]
+       Site 10 → operators [2]
+       Site 12 → operators [2]
+       Site 14 → operators [3]
+       Site 16 → operators [3]
+   Step 3: Feasible (site, operator) candidates → [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 1), (8, 1), (10, 2), (12, 2), (14, 3), (16, 3)]
+✅ Decision: choose Site 5 with Operator 0
+[Operator] Operator 0 assigned job 2 at site 5
+[DEBUG] Step=58 | t=91 | completed=56 | planes=12
+[Operator] Operator 0 released from job (2, 5)
+[t=106] Plane 11 finished job 2 at site 5 by operator 0
+[t=106] Plane 11 completed all jobs.
+✅ All planes finished at SimPy time = 106
+[DEBUG] Step=59 | t=106 | completed=57 | planes=12
+✅ Step 7A dynamic arrivals + operator constraint test completed.
+✅ Step 7A environment behavior verified.
+
