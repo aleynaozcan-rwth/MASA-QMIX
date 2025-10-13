@@ -1,12 +1,17 @@
 """
 environment.py
-Step 7A – Dynamic Job Arrivals + Site–Operator Constraints + Explainable Logs
-------------------------------------------------------------------------------
-SimPy tabanlı üretim ortamı:
-- Dinamik plane (job) gelişleri
-- Site (makine) ve operator (insan kaynağı) birlikte gerekli
-- Operatorler yalnızca belirli site aralıklarında çalışır; yapabildiği iş, site'nin izin verdiği işlerden türetilir
-- Karar zinciri ve uygunluklar terminale açıklamalı loglanır
+Step 7A/7B – Dynamic Job Arrivals + Site–Operator Constraints + Explainable Logs
+--------------------------------------------------------------------------------
+7A:
+  - Dynamic plane (job) arrivals
+  - Site (machine) and operator constraints
+  - Explainable logs for (site, operator) selection
+
+7B (new):
+  - Extra info() fields so rollout/replay can handle dynamic arrivals:
+      * 'active_agents'      -> currently active plane_ids
+      * 'new_records'        -> newly appended Gantt rows since last step
+      * 'newly_completed_by' -> list of plane_ids that completed a job at this step
 """
 
 import simpy
@@ -24,12 +29,14 @@ from utils.operator import Operators
 class ScheduleEnv(gym.Env):
     environment_name = "MASA-SimPy-Scheduler"
 
-    def __init__(self,
-                 start_planes: int = 4,
-                 max_planes: int = 12,
-                 arrival_prob: float = 0.20,
-                 variable_ops: bool = True,
-                 seed: int = 123):
+    def __init__(
+        self,
+        start_planes: int = 4,
+        max_planes: int = 12,
+        arrival_prob: float = 0.20,   # per step spawn probability if capacity allows
+        variable_ops: bool = True,
+        seed: int = 123,
+    ):
         # --- Config (Step 7A) ---
         self.start_planes = int(start_planes)
         self.max_planes = int(max_planes)
@@ -37,13 +44,15 @@ class ScheduleEnv(gym.Env):
         self.variable_ops = bool(variable_ops)
         self.rng = np.random.default_rng(seed)
 
-        # --- Basic structures ---
+        # --- Basic structures (init placeholders) ---
         self.sites = []
         self.jobs = []
         self.planes = []
         self.job_record_for_gant = []
         self.done = False
         self.step_count = 0
+
+        # For 7B: track how many records we had previously (to extract "new" ones)
         self._completed_prev = 0
 
         # --- Simulation world ---
@@ -52,16 +61,16 @@ class ScheduleEnv(gym.Env):
 
         # --- Generators & Operators ---
         self.task_gen = TaskGenerator()
-        self.operators = None
+        self.operators = None  # will be created after Sites are ready in initialize()
 
-        # --- Gym interface ---
+        # --- Gym interface (placeholder) ---
         self.action_space = spaces.Discrete(21)
 
         # --- Initialize world ---
         self.initialize()
 
     # ============================================================
-    # === Explainability Logs ===================================
+    # === Pretty Logs / Explainability ===========================
     # ============================================================
 
     def print_site_job_map(self):
@@ -75,23 +84,46 @@ class ScheduleEnv(gym.Env):
             print(f"   Operator {op.operator_id} → sites {op.qualified_sites}")
 
     # ============================================================
-    # === Core SimPy Processes ==================================
+    # === Helpers for Step 7B ===================================
+    # ============================================================
+
+    def get_active_agents(self):
+        """Return the list of plane_ids that are currently active."""
+        return [p.plane_id for p in self.planes if p.is_active]
+
+    def get_num_planes(self):
+        return len(self.planes)
+
+    # ============================================================
+    # === Candidate discovery ====================================
     # ============================================================
 
     def _candidate_pairs_for_job(self, job_id):
-        candidates, valid_sites = [], []
+        """
+        Compute feasible (site_id, operator_id) pairs for a job:
+        - site must allow the job
+        - site must be free now
+        - operator must be qualified for that site and not busy
+        """
+        candidates = []
+        valid_sites = []
         for site_id, site in enumerate(self.sites):
             if job_id in site.resource_ids_list:
                 valid_sites.append(site_id)
                 if len(self.site_resources[site_id].users) == 0:
                     op = self.operators.find_free_operator(job_id, site_id)
-                    if op:
+                    if op is not None:
                         candidates.append((site_id, op.operator_id))
         return valid_sites, candidates
+
+    # ============================================================
+    # === Plane process ==========================================
+    # ============================================================
 
     def plane_process(self, plane_id: int):
         plane = self.planes[plane_id]
 
+        # Respect arrival time (dynamic arrivals)
         if plane.arrival_time > self.sim_env.now:
             yield self.sim_env.timeout(plane.arrival_time - self.sim_env.now)
         plane.is_active = True
@@ -108,7 +140,7 @@ class ScheduleEnv(gym.Env):
             print(f"\n🛠️ [Plane {plane_id}] Next job={current_job_id}")
             print(f"   Step 1: Valid sites (can perform job {current_job_id}): {valid_sites}")
 
-            if valid_sites:
+            if len(valid_sites) > 0:
                 print("   Step 2: Operator availability per site:")
                 for s_id in valid_sites:
                     can_ops = []
@@ -135,14 +167,13 @@ class ScheduleEnv(gym.Env):
                 operator.assign_job(current_job_id, chosen_site_id)
 
                 start_time = self.sim_env.now
-                process_time = self.jobs[current_job_id].time_span
-                yield self.sim_env.timeout(process_time)
+                proc_time = self.jobs[current_job_id].time_span
+                yield self.sim_env.timeout(proc_time)
                 end_time = self.sim_env.now
 
                 operator.release()
                 self.save_env_info(
-                    (start_time, end_time, current_job_id,
-                     chosen_site_id, plane_id, operator.operator_id)
+                    (start_time, end_time, current_job_id, chosen_site_id, plane_id, operator.operator_id)
                 )
                 plane.left_job.pop(0)
                 print(
@@ -151,12 +182,14 @@ class ScheduleEnv(gym.Env):
                 )
 
         print(f"[t={self.sim_env.now}] Plane {plane_id} completed all jobs.")
+        plane.is_active = False
 
     def save_env_info(self, record):
+        """Append (start, end, job, site, plane, operator)."""
         self.job_record_for_gant.append(record)
 
     # ============================================================
-    # === Initialization ========================================
+    # === Initialization =========================================
     # ============================================================
 
     def _create_initial_planes(self):
@@ -169,7 +202,7 @@ class ScheduleEnv(gym.Env):
     def initialize(self):
         sites_obj = Sites()
         jobs_obj = Jobs()
-        self.sites_ref = sites_obj
+
         self.sites = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
 
@@ -177,21 +210,25 @@ class ScheduleEnv(gym.Env):
         self.site_resources = [simpy.Resource(self.sim_env, capacity=1)
                                for _ in range(len(self.sites))]
 
-        self.operators = Operators(self.sites_ref)
-        self.operators.release_all()
-
         self.planes = []
         self.job_record_for_gant = []
         self.done = False
         self._completed_prev = 0
         self.step_count = 0
 
+        # ✅ FIXED LINE — pass the Sites() object, not a list
+        self.operators = Operators(sites_obj)
+        self.operators.release_all()
+
         self._create_initial_planes()
 
         print("\n=== Step 7A: Dynamic Arrivals + Operator Constraints Test ===")
         self.print_site_job_map()
         self.print_operator_site_map()
-        print(f"\n[INIT] Step 7A env with {self.start_planes} initial planes; max_planes={self.max_planes}.")
+        print(
+            f"\n[INIT] Step 7A env with {self.start_planes} initial planes; "
+            f"max_planes={self.max_planes}."
+        )
 
     # ============================================================
     # === Dynamic Arrivals =======================================
@@ -216,7 +253,7 @@ class ScheduleEnv(gym.Env):
             self.add_new_plane(self.sim_env.now)
 
     # ============================================================
-    # === Clock and Step =========================================
+    # === Clock control ==========================================
     # ============================================================
 
     def advance_clock(self, max_time=None):
@@ -229,17 +266,27 @@ class ScheduleEnv(gym.Env):
         while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
             self.sim_env.step()
 
+    # ============================================================
+    # === Core step ==============================================
+    # ============================================================
+
     def all_jobs_completed(self):
         return all((not p.is_active) or (len(p.left_job) == 0) for p in self.planes)
 
     def step(self, action=None):
         self.step_count += 1
         self.maybe_spawn()
-        reward = -1
+
+        reward = -1  # time penalty
         self.advance_clock()
-        completed_now = len(self.job_record_for_gant) - self._completed_prev
+
+        new_records = self.job_record_for_gant[self._completed_prev:]
+        newly_completed_by = [rec[4] for rec in new_records]
+        completed_now = len(new_records)
         self._completed_prev = len(self.job_record_for_gant)
+
         reward += completed_now * 10
+
         self.done = self.all_jobs_completed()
         if self.done:
             print(f"✅ All planes finished at SimPy time = {self.sim_env.now}")
@@ -249,10 +296,15 @@ class ScheduleEnv(gym.Env):
             "completed_jobs": len(self.job_record_for_gant),
             "episodes_situation": list(self.job_record_for_gant),
             "n_planes": len(self.planes),
+            "active_agents": self.get_active_agents(),
+            "new_records": list(new_records),
+            "newly_completed_by": list(newly_completed_by),
         }
 
-        print(f"[DEBUG] Step={self.step_count} | t={self.sim_env.now} | "
-              f"completed={len(self.job_record_for_gant)} | planes={len(self.planes)}")
+        print(
+            f"[DEBUG] Step={self.step_count} | t={self.sim_env.now} | "
+            f"completed={len(self.job_record_for_gant)} | planes={len(self.planes)}"
+        )
         return reward, self.done, info
 
     def reset(self):
@@ -262,7 +314,7 @@ class ScheduleEnv(gym.Env):
     def get_env_info(self):
         return {
             "n_agents": len(self.planes),
-            "n_actions": self.action_space.n,
+            "n_actions": self.action_space.n if hasattr(self.action_space, "n") else 21,
             "state_shape": 10,
             "obs_shape": 10,
             "episode_limit": 200,
@@ -274,7 +326,7 @@ class ScheduleEnv(gym.Env):
             _, done, _ = self.step(None)
             if done:
                 break
-        print("✅ Step 7A dynamic arrivals + operator constraint test completed.")
+        print("✅ Step 7A/7B dynamic arrivals test completed.")
 
 
 if __name__ == "__main__":

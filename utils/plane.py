@@ -1,50 +1,43 @@
 """
-Plane class
-Contains: plane id, complete static task list, finished task list, remaining task list, current time spent.
-
-Step 7A additions:
-- Each Plane now has an `arrival_time` (float) → determines when the plane enters the simulation.
-- Each Plane has an `is_active` flag → becomes True once its SimPy process starts (after its arrival time).
-- Fully backward-compatible with previous plane/task logic.
+utils/plane.py
+Step 7B — Dynamic Arrivals + Replay-Safe Plane State
+-----------------------------------------------------
+Enhancements vs Step 7A:
+- Robust `reset()` method for env reuse.
+- `completed_at` timestamp for replay/log credit.
+- Safe `mark_completed()` helper.
+- Compatible with dynamic arrivals & SimPy-driven scheduling.
 """
+
 from utils.task import Task
 
 
+# ======================================================================
+# Container for all planes
+# ======================================================================
+
 class Planes:
-    """
-    Container for all Plane objects.
-    Responsible for initialization and simple bookkeeping utilities
-    such as counting remaining jobs across all planes.
-    """
+    """Manages all Plane objects and simple bookkeeping utilities."""
 
     def __init__(self, numbers=8, dynamic=False):
-        """
-        numbers : int
-            Initial number of planes to create.
-        dynamic : bool
-            If True, allows additional planes to be added later (Step 7A dynamic arrivals).
-        """
-        # Plane speed retained only for backward compatibility (not used since Step 1B)
-        self.plane_speed = 20
+        self.plane_speed = 20  # legacy, unused
         self.dynamic = dynamic
         self.planes_object_list = []
 
-        # Create initial planes
         task = Task()
         for i in range(numbers):
-            temp_object = Plane(i, task.simple_task_object)
+            temp_object = Plane(i, task.simple_task_object, arrival_time=0.0)
             self.planes_object_list.append(temp_object)
 
-    # ----------------------------------------------------------------------
-    # Utility methods
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
     def count_jobs(self):
         """Return (remaining_jobs, total_jobs) across all planes."""
-        left_jobs = 0
-        all_jobs = 0
-        for eve in self.planes_object_list:
-            left_jobs += len(eve.left_job)
-            all_jobs += len(eve.static_job_list)
+        left_jobs, all_jobs = 0, 0
+        for p in self.planes_object_list:
+            left_jobs += len(p.left_job)
+            all_jobs += len(p.static_job_list)
         return left_jobs, all_jobs
 
     def add_new_plane(self, plane):
@@ -53,71 +46,83 @@ class Planes:
         print(f"[Planes] Added new plane {plane.plane_id} at t={plane.arrival_time}, "
               f"{len(plane.left_job)} jobs.")
 
+    def active_plane_ids(self):
+        """Return IDs of currently active planes."""
+        return [p.plane_id for p in self.planes_object_list if p.is_active]
+
+    def reset_all(self):
+        """Reset all planes (for environment re-init)."""
+        for p in self.planes_object_list:
+            p.reset()
+
 
 # ======================================================================
-# Individual Plane definition
+# Individual Plane
 # ======================================================================
 
 class Plane:
     """
     Represents one aircraft/agent that executes a predefined sequence of jobs.
-    The plane keeps track of its completed and remaining jobs, cumulative
-    time spent, and the sites it visited.
-
-    Step 7A introduces:
-    - `arrival_time` → simulation time when the plane appears.
-    - `is_active` → True once its SimPy process starts.
+    Step 7B adds replay-safe state control and timestamps for explainable logs.
     """
 
     def __init__(self, plane_id, job_object_list, arrival_time: float = 0.0):
-        # -------- Agent STATE --------
-        self.plane_id = plane_id                    # Unique agent ID
-        self.static_job_list = list(job_object_list) # Immutable reference list
-        self.left_job = [eve for eve in job_object_list]  # Remaining jobs
-        self.finished_job = []                      # Completed jobs
-        self.time_spent = 0                         # Accumulated processing time
-        self.site_history = []                      # Ordered list of visited site IDs
+        # --- Core state ---
+        self.plane_id = plane_id
+        self.static_job_list = list(job_object_list)
+        self.left_job = [j for j in job_object_list]
+        self.finished_job = []
+        self.time_spent = 0.0
+        self.site_history = []
 
-        # -------- Step 7A additions --------
-        self.arrival_time = float(arrival_time)     # Time of appearance in SimPy env
-        self.is_active = False                      # False until its process starts
-        # -----------------------------------
+        # --- Step 7A fields ---
+        self.arrival_time = float(arrival_time)
+        self.is_active = False
+
+        # --- Step 7B additions ---
+        self.completed_at = None  # SimPy time when plane completed all jobs
 
     # ------------------------------------------------------------------
-    # Agent ACTION
+    # Task execution
     # ------------------------------------------------------------------
     def execute_task(self, job_object, site_object):
         """
-        Execute the next job in the sequence.
-        Parameters
-        ----------
-        job_object : Job
-            The job to execute (must match the first in left_job list).
-        site_object : Site
-            The site (machine) where the job is executed.
-        Returns
-        -------
-        time : float
-            Processing time for this job.
+        Execute next job in the sequence and update internal state.
+        Returns processing time.
         """
-        # Sanity check
         assert job_object.index_id == self.left_job[0].index_id, \
             f"Plane {self.plane_id} mismatch: expected job {self.left_job[0].index_id}, got {job_object.index_id}"
 
-        # --- Update plane state ---
-        time = job_object.time_span
-        self.time_spent += time
+        t_proc = job_object.time_span
+        self.time_spent += t_proc
         self.finished_job.append(job_object)
-        self.left_job.pop(0)                        # Remove from queue
+        self.left_job.pop(0)
         self.site_history.append(site_object.site_id)
-
-        # (Spatial tracking removed since Step 1B)
-        return time
+        return t_proc
 
     # ------------------------------------------------------------------
-    # Helper methods (for debug/logging)
+    # Lifecycle helpers
+    # ------------------------------------------------------------------
+    def mark_completed(self, sim_time: float | None = None):
+        """Mark plane as completed (for replay/log credit)."""
+        self.is_active = False
+        self.completed_at = sim_time
+        print(f"[Plane] Plane {self.plane_id} completed all jobs at t={sim_time}")
+
+    def reset(self):
+        """Reset internal state (used on environment reset)."""
+        self.left_job = list(self.static_job_list)
+        self.finished_job.clear()
+        self.time_spent = 0.0
+        self.site_history.clear()
+        self.is_active = False
+        self.completed_at = None
+
+    # ------------------------------------------------------------------
+    # Debug representation
     # ------------------------------------------------------------------
     def __repr__(self):
         status = "active" if self.is_active else "waiting"
         return (f"<Plane id={self.plane_id}, status={status}, "
-                f"arrival={self.arrival_time}, left_jobs={len(self.left_job)}>")
+                f"arrival={self.arrival_time}, left_jobs={len(self.left_job)}, "
+                f"completed_at={self.completed_at}>")

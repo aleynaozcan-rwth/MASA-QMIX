@@ -15,8 +15,8 @@ from MARL.common.replay_buffer import ReplayBuffer
 
 def plot_gantt(for_gantt_data, filename="gantt.png"):
     """
-    Step 7A – Plot one episode's Gantt chart.
-    Supports both 5-element (old) and 6-element (with operator) tuples.
+    Step 7B – Plot one episode's Gantt chart.
+    Supports tuples (start,end,job,site,plane,operator).
     """
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
         return False
@@ -25,7 +25,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         return False
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    job_types = sorted(set([rec[2] for rec in for_gantt_data]))  # job_id
+    job_types = sorted(set([rec[2] for rec in for_gantt_data]))
     colors = list(mcolors.TABLEAU_COLORS.values())
     color_map = {jt: colors[i % len(colors)] for i, jt in enumerate(job_types)}
 
@@ -40,12 +40,12 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
                 color=color_map[job], edgecolor="black")
         ax.text((start + end) / 2, plane,
                 f"J{job}|S{site}|O{operator}",
-                va="center", ha="center", fontsize=6, color="black")
+                va="center", ha="center", fontsize=6)
         max_end = max(max_end, end)
 
     ax.set_xlabel("Simulation Time (SimPy clock)")
     ax.set_ylabel("Plane (Agent)")
-    ax.set_title("Step 7A – SimPy Schedule with Operators and Dynamic Arrivals")
+    ax.set_title("Step 7B – Dynamic Arrivals & Operator Constraints")
     ax.set_xlim(0, max_end + 1)
     handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[jt]) for jt in job_types]
     labels = [f"Job {jt}" for jt in job_types]
@@ -63,28 +63,25 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 7A Runner
+    Step 7B Runner
     ------------------------------------------------------------
-    Manages training and evaluation loops.
-    Compatible with ScheduleEnv (dynamic arrivals + operators).
+    - Integrates RolloutWorker (7B) + ReplayBuffer (dynamic, plane-aware)
+    - Handles training / evaluation / Gantt visualization
     """
 
     def __init__(self, env, args):
         self.env = env
         self.args = args
 
-        # --- Agent and rollout worker initialization ---
+        # --- Agents & RolloutWorker setup ---
         if args.alg.find('commnet') > -1 or args.alg.find('g2anet') > -1:
             self.agents = CommAgents(args)
-            self.rolloutWorker = CommRolloutWorker(env, self.agents, args)
+            self.buffer = ReplayBuffer(size=100_000)
+            self.rolloutWorker = CommRolloutWorker(env, self.agents, args, self.buffer)
         else:
             self.agents = Agents(args)
-            self.rolloutWorker = RolloutWorker(env, self.agents, args)
-
-        if args.learn and args.alg not in ['coma', 'central_v', 'reinforce']:
-            self.buffer = ReplayBuffer(args)
-        else:
-            self.buffer = None
+            self.buffer = ReplayBuffer(size=100_000)
+            self.rolloutWorker = RolloutWorker(env, self.agents, args, self.buffer)
 
         self.win_rates = []
         self.episode_rewards = []
@@ -92,8 +89,7 @@ class Runner:
         # --- Output directories ---
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
-
-        print(f"[Runner] Initialized for algorithm={args.alg}")
+        print(f"[Runner 7B] Initialized for algorithm = {args.alg}")
 
     # ============================================================
     # === Main Training Loop =====================================
@@ -102,24 +98,21 @@ class Runner:
     def run(self, num):
         train_steps = 0
         all_gantt_data = []
-        avg_rewards = [0]
+        avg_rewards = [0.0]
         global_ep_idx = 0
 
         for epoch in range(self.args.n_epoch):
-            text = '\rRun {}, epoch {}, avg rewards {:.2f}'
+            text = '\rRun {} | epoch {} | avg rewards {:.2f}'
             sys.stdout.write(text.format(num, epoch, np.mean(avg_rewards)))
             sys.stdout.flush()
 
-            # --------------------------------------------------------
-            # Evaluation every few epochs
-            # --------------------------------------------------------
+            # ---------------- Evaluation ----------------
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
                 win_rate, ep_reward, global_ep_idx, gantt_eval = \
                     self.evaluate(all_gantt_data, global_ep_idx)
                 self.win_rates.append(win_rate)
                 self.episode_rewards.append(ep_reward)
-                print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
-
+                print(f"\n[Eval 7B] Epoch {epoch} | Reward={ep_reward:.2f}")
                 try:
                     plot_gantt(gantt_eval,
                                filename=f"./my_data_and_graph/historydata/"
@@ -127,13 +120,11 @@ class Runner:
                 except Exception as e:
                     print("[WARN] Gantt plot failed:", e)
 
-            # --------------------------------------------------------
-            # Training Episodes
-            # --------------------------------------------------------
+            # ---------------- Training Episodes ----------------
             episodes = []
             avg_rewards = []
 
-            for episode_idx in range(self.args.n_episodes):
+            for ep_idx in range(self.args.n_episodes):
                 episode, _, _, gantt_data = \
                     self.rolloutWorker.generate_episode(global_ep_idx)
                 all_gantt_data.extend(gantt_data)
@@ -147,29 +138,23 @@ class Runner:
             episode_batch = episodes[0]
             episodes.pop(0)
             for ep in episodes:
-                for key in episode_batch.keys():
-                    episode_batch[key] = np.concatenate(
-                        (episode_batch[key], ep[key]), axis=0
-                    )
+                for k in episode_batch.keys():
+                    episode_batch[k] = np.concatenate((episode_batch[k], ep[k]), axis=0)
 
-            # --------------------------------------------------------
-            # Training Step
-            # --------------------------------------------------------
+            # ---------------- Policy Update ----------------
             if self.args.alg in ['coma', 'central_v', 'reinforce']:
-                self.agents.train(
-                    episode_batch, train_steps, self.rolloutWorker.epsilon
-                )
+                self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
             else:
-                if self.buffer is not None:
-                    self.buffer.store_episode(episode_batch)
+                # use replay buffer filled by rolloutWorker
+                if len(self.buffer) >= self.args.batch_size:
                     for _ in range(self.args.train_steps):
-                        mini_batch = self.buffer.sample(
-                            min(self.buffer.current_size, self.args.batch_size)
-                        )
-                        self.agents.train(mini_batch, train_steps)
+                        batch = self.buffer.sample(self.args.batch_size)
+                        loss = self.agents.train(batch, train_steps)
                         train_steps += 1
+                    stats = self.buffer.plane_stats()
+                    print(f"[Runner 7B] Buffer {len(self.buffer)} | planes={len(stats)}")
 
-        print("\n[Runner] Training completed successfully.")
+        print("\n✅ [Runner 7B] Training completed successfully.")
 
     # ============================================================
     # === Evaluation =============================================
@@ -210,10 +195,7 @@ class Runner:
         plt.ylabel('episode_rewards')
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_path, f'plt_{num}.png'),
-                    format='png')
-        np.save(os.path.join(self.save_path, f'win_rates_{num}.npy'),
-                self.win_rates)
-        np.save(os.path.join(self.save_path, f'episode_rewards_{num}.npy'),
-                self.episode_rewards)
-        print(f"[Runner] Plots saved to {self.save_path}")
+        plt.savefig(os.path.join(self.save_path, f'plt_{num}.png'))
+        np.save(os.path.join(self.save_path, f'win_rates_{num}.npy'), self.win_rates)
+        np.save(os.path.join(self.save_path, f'episode_rewards_{num}.npy'), self.episode_rewards)
+        print(f"[Runner 7B] Plots saved to {self.save_path}")
