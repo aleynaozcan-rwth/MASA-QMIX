@@ -1,0 +1,12 @@
+[INFO] Module GCCcore/12.2.0 loaded.
+[INFO] Module Python/3.10.8 loaded.
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Traceback (most recent call last):
+  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/main.py", line 21, in <module>
+    from utils.PDRs.shortestDistence import SDrules
+  File "/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/utils/PDRs/shortestDistence.py", line 5, in <module>
+    from utils.util import count_path_on_road
+ImportError: cannot import name 'count_path_on_road' from 'utils.util' (/rwthfs/rz/cluster/home/cc253232/MASA-QMIX/utils/util.py)

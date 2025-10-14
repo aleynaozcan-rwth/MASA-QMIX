@@ -1,0 +1,22 @@
+[CLEANUP] Removing old training outputs...
+=== JOB 61651913 STARTED at Tue Oct 14 01:50:10 AM CEST 2025 ===
+Python: /home/cc253232/masa-qmix-env-gpu/bin/python
+Git branch: step7b1-replay-aware-qmix-integration
+Commit: 3477dcd - Step 7B.1 – Replay-buffer aware QMIX integration (2025-10-13 23:09:07 +0200)
+------------------------------------------------------------
+[TRAIN] Starting Step 7B.2 replay-aware QMIX training...
+[TRAIN] Finished at Tue Oct 14 01:50:20 AM CEST 2025
+------------------------------------------------------------
+[ANALYZE] Running analyse_rewards.py...
+Starting reward/loss/time/wait analysis...
+[WARN] No reward file found.
+[WARN] No loss file found.
+[WARN] No times file found.
+[WARN] No waittimes file found.
+[WARN] No waittimes file found.
+Analysis complete.
+[ANALYZE] Finished at Tue Oct 14 01:50:20 AM CEST 2025
+------------------------------------------------------------
+=== JOB 61651913 FINISHED at Tue Oct 14 01:50:20 AM CEST 2025 ===
+Check generated plots and training data in:
+→ ./my_data_and_graph/historydata/

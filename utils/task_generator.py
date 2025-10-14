@@ -1,10 +1,11 @@
 """
 utils/task_generator.py
-Step 7B — Safe Dynamic Task Generation
---------------------------------------
+Step 7B.3 — Safe Dynamic Task Generation (No Repeated Operations)
+-----------------------------------------------------------------
 Enhancements:
 - Guarantees non-empty operation sequences.
-- Auto-retries generation up to N times if a site has no valid jobs.
+- Ensures no operation type repeats within one plane.
+- Auto-retries generation up to N times if a site has no valid new jobs.
 - Logs gracefully even if dynamic spawning occurs mid-simulation.
 - Fully backward-compatible with Step 7A.
 """
@@ -33,17 +34,26 @@ class TaskGenerator:
     def generate_constrained_task(self, num_ops=None, plane_id=None):
         """
         Create a random but valid operation list for one plane.
-        Ensures non-empty valid job sequence even under limited site-job coverage.
+        Ensures:
+        - Non-empty valid job sequence
+        - No repeated job type within the same plane
         """
         if num_ops is None:
             num_ops = random.randint(3, 7)
 
         ops_sequence = []
+        used_job_ids = set()
         retries = 0
 
-        while len(ops_sequence) < num_ops and retries < self.max_retries:
+        while len(ops_sequence) < num_ops and retries < self.max_retries * num_ops:
             site = random.choice(self.sites.sites_object_list)
-            valid_ops = site.resource_ids_list
+
+            # Filter site operations so none are already used
+            valid_ops = [
+                j for j in site.resource_ids_list
+                if j not in used_job_ids
+            ]
+
             if not valid_ops:
                 retries += 1
                 continue
@@ -63,6 +73,7 @@ class TaskGenerator:
                 time_span=duration
             )
             ops_sequence.append(new_job)
+            used_job_ids.add(op_id)
 
         # Fallback safeguard — avoid returning empty task lists
         if not ops_sequence:
@@ -78,7 +89,7 @@ class TaskGenerator:
 
         # -------- Logging (explainable trace) --------
         print(f"\n[TaskGen] Plane {plane_id if plane_id is not None else '?'} "
-              f"generated → {len(ops_sequence)} operation(s):")
+              f"generated → {len(ops_sequence)} unique operation(s):")
         for job in ops_sequence:
             possible_sites = [
                 s.site_id for s in self.sites.sites_object_list

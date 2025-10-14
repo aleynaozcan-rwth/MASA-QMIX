@@ -2,11 +2,11 @@ import argparse
 
 """
 Arguments for MASA-QMIX / ScheduleEnv
-Step 7B update:
-----------------
-- Added replay and rollout configuration (episode_limit, buffer sizes, etc.)
-- Added extra parameters for explainable logs and training stability.
-- Fully backward-compatible with Step 7A.
+Step 7B.3 update:
+-----------------
+- Reduced batch size and buffer size for faster replay warm-up
+- Ensures early loss/reward logging even under dynamic arrivals
+- Keeps compatibility with Step 7A and other algorithms
 """
 
 def get_common_args():
@@ -39,7 +39,7 @@ def get_common_args():
     # ============================================================
     parser.add_argument('--start_planes', type=int, default=4)
     parser.add_argument('--max_planes', type=int, default=12)
-    parser.add_argument('--arrival_prob', type=float, default=0.20)
+    parser.add_argument('--arrival_prob', type=float, default=0.25)
     parser.add_argument('--variable_ops', type=bool, default=True)
     parser.add_argument('--num_operators', type=int, default=4)
     parser.add_argument('--machine_speed_range', type=float, nargs=2, default=[0.7, 1.4])
@@ -47,25 +47,22 @@ def get_common_args():
     # ============================================================
     # === Step 7B — Replay + Rollout parameters ==================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=200,
-                        help='max timesteps per episode (for rollout buffer shape)')
-    parser.add_argument('--n_agents', type=int, default=12,
-                        help='max number of active agents (planes) during episode')
-    parser.add_argument('--n_actions', type=int, default=21,
-                        help='discrete action space size (site selection, etc.)')
+    parser.add_argument('--episode_limit', type=int, default=200)
+    parser.add_argument('--n_agents', type=int, default=12)
+    parser.add_argument('--n_actions', type=int, default=21)
     parser.add_argument('--state_shape', type=int, default=10)
     parser.add_argument('--obs_shape', type=int, default=10)
 
-    # Replay buffer parameters
-    parser.add_argument('--buffer_size', type=int, default=100000,
+    # Replay buffer parameters (adjusted for early warm-up)
+    parser.add_argument('--buffer_size', type=int, default=500,
                         help='max total transitions in replay buffer')
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=8,
                         help='minibatch size for training updates')
     parser.add_argument('--train_steps', type=int, default=4,
                         help='number of gradient updates per epoch')
 
     # Evaluation / checkpoint cadence
-    parser.add_argument('--n_epoch', type=int, default=400)
+    parser.add_argument('--n_epoch', type=int, default=300)
     parser.add_argument('--n_episodes', type=int, default=4)
     parser.add_argument('--evaluate_cycle', type=int, default=20)
     parser.add_argument('--save_cycle', type=int, default=100)
@@ -82,10 +79,8 @@ def get_common_args():
     parser.add_argument('--grad_norm_clip', type=float, default=10)
 
     # Misc logging / explainability
-    parser.add_argument('--enable_logs', type=bool, default=True,
-                        help='enable step-by-step explainable console logs')
-    parser.add_argument('--save_gantt', type=bool, default=True,
-                        help='save gantt chart per evaluation cycle')
+    parser.add_argument('--enable_logs', type=bool, default=True)
+    parser.add_argument('--save_gantt', type=bool, default=True)
 
     args = parser.parse_args()
     return args
@@ -109,12 +104,12 @@ def get_mixer_args(args):
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
-    args.n_epoch     = 400
+    args.n_epoch     = 300
     args.n_episodes  = 4
     args.train_steps = 2
     args.evaluate_cycle = 20
-    args.batch_size  = 24
-    args.buffer_size = 3000
+    args.batch_size  = 8         # reduced from 24 → faster warm-up
+    args.buffer_size = 500       # reduced from 3000 → fills quicker
     args.save_cycle  = 100
     args.target_update_cycle = 50
 
