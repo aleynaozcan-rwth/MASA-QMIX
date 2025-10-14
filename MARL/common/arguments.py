@@ -2,11 +2,11 @@ import argparse
 
 """
 Arguments for MASA-QMIX / ScheduleEnv
-Step 7B.3 update:
------------------
-- Reduced batch size and buffer size for faster replay warm-up
-- Ensures early loss/reward logging even under dynamic arrivals
-- Keeps compatibility with Step 7A and other algorithms
+Step 7B.3 – Fast Convergence Configuration
+------------------------------------------
+- Slightly faster epsilon decay for earlier exploitation
+- More gradient steps per epoch
+- Stable replay and batch configuration retained
 """
 
 def get_common_args():
@@ -53,32 +53,32 @@ def get_common_args():
     parser.add_argument('--state_shape', type=int, default=10)
     parser.add_argument('--obs_shape', type=int, default=10)
 
-    # Replay buffer parameters (adjusted for early warm-up)
-    parser.add_argument('--buffer_size', type=int, default=500,
+    # --- Replay Buffer / Training Hyperparameters ---
+    parser.add_argument('--buffer_size', type=int, default=3000,
                         help='max total transitions in replay buffer')
-    parser.add_argument('--batch_size', type=int, default=8,
+    parser.add_argument('--batch_size', type=int, default=32,
                         help='minibatch size for training updates')
-    parser.add_argument('--train_steps', type=int, default=4,
-                        help='number of gradient updates per epoch')
+    parser.add_argument('--train_steps', type=int, default=10,
+                        help='number of gradient updates per epoch')   # 🔸 increased
 
-    # Evaluation / checkpoint cadence
-    parser.add_argument('--n_epoch', type=int, default=300)
-    parser.add_argument('--n_episodes', type=int, default=4)
-    parser.add_argument('--evaluate_cycle', type=int, default=20)
-    parser.add_argument('--save_cycle', type=int, default=100)
-    parser.add_argument('--target_update_cycle', type=int, default=50)
+    # --- Training Cadence ---
+    parser.add_argument('--n_epoch', type=int, default=200)
+    parser.add_argument('--n_episodes', type=int, default=8)
+    parser.add_argument('--evaluate_cycle', type=int, default=10)
+    parser.add_argument('--save_cycle', type=int, default=50)
+    parser.add_argument('--target_update_cycle', type=int, default=25)
 
-    # Exploration / annealing
+    # --- Exploration / Annealing ---
     parser.add_argument('--epsilon', type=float, default=1.0)
     parser.add_argument('--min_epsilon', type=float, default=0.05)
-    parser.add_argument('--anneal_epsilon', type=float, default=0.0001)
+    parser.add_argument('--anneal_epsilon', type=float, default=0.001)   # 🔸 faster decay
     parser.add_argument('--epsilon_anneal_scale', type=str, default='step')
 
-    # Gradient / optimization
+    # --- Gradient / Optimization ---
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--grad_norm_clip', type=float, default=10)
 
-    # Misc logging / explainability
+    # --- Logging / Visualization ---
     parser.add_argument('--enable_logs', type=bool, default=True)
     parser.add_argument('--save_gantt', type=bool, default=True)
 
@@ -104,19 +104,22 @@ def get_mixer_args(args):
     args.anneal_epsilon   = (args.epsilon - args.min_epsilon) / anneal_steps
     args.epsilon_anneal_scale = 'step'
 
-    args.n_epoch     = 300
-    args.n_episodes  = 4
-    args.train_steps = 2
-    args.evaluate_cycle = 20
-    args.batch_size  = 8         # reduced from 24 → faster warm-up
-    args.buffer_size = 500       # reduced from 3000 → fills quicker
-    args.save_cycle  = 100
-    args.target_update_cycle = 50
+    # --- Fast Convergence ---
+    args.n_epoch     = 200
+    args.n_episodes  = 8
+    args.train_steps = 10
+    args.evaluate_cycle = 10
+    args.batch_size  = 32
+    args.buffer_size = 3000
+    args.save_cycle  = 50
+    args.target_update_cycle = 25
 
+    # --- Mixer Regularization ---
     args.lambda_opt  = 1
     args.lambda_nopt = 1
     args.grad_norm_clip = 10
 
+    # --- Additional Mixer Settings ---
     args.noise_dim            = 16
     args.lambda_mi            = 0.001
     args.lambda_ql            = 1

@@ -1,50 +1,44 @@
+#!/usr/bin/env python3
 """
 run_step7b.py
--------------------------------------------------------------
-Runs Step 7B environment with dynamic job arrivals,
-SimPy scheduling, replay buffer, and QMIX training loop.
-
-This file is for testing the Step 7B integration
-(environment + rollout + replay + runner) before merging
-into main.py.
+Launch Step 7B.2 (Replay-Aware QMIX Training) in a cluster-safe way.
 """
 
-import sys, os
+import os
+import sys
+import subprocess
 
-# === Project Path Setup ===
-sys.path.append("/home/cc253232/MASA-QMIX")
+# ============================================================
+# === Dynamic Project Path Setup ==============================
+# ============================================================
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-# === Imports ===
-from MARL.common.arguments import get_common_args, get_mixer_args
-from MARL.runner import Runner
-from environment import ScheduleEnv
+print(f"[INFO] Using PROJECT_ROOT={PROJECT_ROOT}")
+print(f"[INFO] sys.path[0]={sys.path[0]}")
 
+# ============================================================
+# === Step 7B.2 Launcher =====================================
+# ============================================================
+print("\n🚀 Running Step 7B.2 (Replay-Aware QMIX) locally/cluster...")
 
-if __name__ == "__main__":
-    print("\n🚀 Starting Step 7B simulation test...")
+# Optional: clear old data
+try:
+    os.makedirs("./my_data_and_graph/historydata", exist_ok=True)
+    os.makedirs("./my_data_and_graph/pickles", exist_ok=True)
+except Exception as e:
+    print(f"[WARN] Could not create output dirs: {e}")
 
-    # === 1. Load arguments ===
-    args = get_common_args()
-    args = get_mixer_args(args)
+# Execute the main training file with Step 7B mode
+cmd = [
+    sys.executable,
+    "main.py",
+    "--mode", "7b",
+    "--alg", "qmix",
+    "--seed", "123"
+]
+print(f"[INFO] Launch command: {' '.join(cmd)}\n")
+subprocess.run(cmd, check=True)
 
-    # === 2. Create environment ===
-    env = ScheduleEnv(
-        start_planes=args.start_planes,
-        max_planes=args.max_planes,
-        arrival_prob=args.arrival_prob,
-        variable_ops=args.variable_ops,
-        seed=args.seed,
-    )
-
-    # === 3. Initialize runner ===
-    runner = Runner(env, args)
-
-    # === 4. Quick rollout test ===
-    print("\n[TEST] Running one rollout episode (evaluation mode)...")
-    runner.rolloutWorker.generate_episode(global_ep_idx=0, evaluate=True)
-
-    # === 5. Training ===
-    print("\n[TRAIN] Starting Step 7B training loop...")
-    runner.run(num=1)
-
-    print("\n✅ Step 7B finished successfully.")
+print("\n✅ Step 7B.2 run_step7b.py finished successfully.")

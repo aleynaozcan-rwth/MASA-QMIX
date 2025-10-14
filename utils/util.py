@@ -38,4 +38,22 @@ def advance_by_min_time(min_time, state_left_time):
             res.append(0)
     return res
 
-# NOTE: count_path_on_road removed in Step 1B (distance logic fully deleted)
+
+# ============================================================
+# === Temporary Compatibility Stub ===========================
+# ============================================================
+def count_path_on_road(path):
+    """
+    Placeholder for legacy function (used by SDrules in shortestDistence.py).
+    Currently returns a simple path length to preserve compatibility.
+
+    TODO:
+        - Replace with actual road/path distance logic if SDrules is reactivated
+          for rule-based scheduling or visualization modes.
+    """
+    if path is None:
+        return 0
+    try:
+        return len(path)
+    except Exception:
+        return 0

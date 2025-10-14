@@ -1,30 +1,0 @@
-
-=== Training Setup Summary (Args) ===
-Algorithm: qmix
-Map: boatschedule
-Random seed: 123
-Total epochs: 400
-Episodes per epoch: 4
-Evaluation every 20 epochs, with 5 episodes
-Replay buffer size: 3000
-Batch size: 24
-Learning enabled: True
-GPU enabled: False
-Load pretrained model: False
-====================================
-
-=== Environment Info ===
-Number of agents: 8
-Number of actions: 21
-State shape: 170
-Observation shape: 22
-Episode limit (steps per episode): 80
-====================================
-
-Load model (test only: False Print intermediates: False Train: True
-Init alg QMIX
-Init Agents
-Init RolloutWorker
-Run 0, train epoch 0, ave_rewards 0.0Run 0, train epoch 1, ave_rewards 7.981006519190055Run 0, train epoch 2, ave_rewards 6.356829870064552Run 0, train epoch 3, ave_rewards 4.628634676391577Run 0, train epoch 4, ave_rewards 2.0508220368913417Run 0, train epoch 5, ave_rewards -10.857460170733003Run 0, train epoch 6, ave_rewards -31.524684782785023Run 0, train epoch 7, ave_rewards -63.57113771645022Run 0, train epoch 8, ave_rewards -134.9375Run 0, train epoch 9, ave_rewards -153.75Run 0, train epoch 10, ave_rewards -154.03125Run 0, train epoch 11, ave_rewards -152.21875Run 0, train epoch 12, ave_rewards -153.1875Run 0, train epoch 13, ave_rewards -153.21875Run 0, train epoch 14, ave_rewards -153.34375Run 0, train epoch 15, ave_rewards -153.15625Run 0, train epoch 16, ave_rewards -153.40625Run 0, train epoch 17, ave_rewards -151.3125Run 0, train epoch 18, ave_rewards -153.25Run 0, train epoch 19, ave_rewards -153.0625Run 0, train epoch 20, ave_rewards -155.15625
-episode_reward: -1333.9999999999998 epoch: 20
-Run 0, train epoch 21, ave_rewards -149.78125Run 0, train epoch 22, ave_rewards -153.75Run 0, train epoch 23, ave_rewards -154.71875Run 0, train epoch 24, ave_rewards -154.96875Run 0, train epoch 25, ave_rewards -150.53125Run 0, train epoch 26, ave_rewards -150.78125Run 0, train epoch 27, ave_rewards -151.9375Run 0, train epoch 28, ave_rewards -154.15625Run 0, train epoch 29, ave_rewards -152.125Run 0, train epoch 30, ave_rewards -153.8125Run 0, train epoch 31, ave_rewards -152.6875Run 0, train epoch 32, ave_rewards -151.78125
