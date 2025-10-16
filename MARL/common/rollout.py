@@ -3,14 +3,11 @@ import numpy as np
 class RolloutWorker:
     """
     rollout.py
-    Step 7B.3 – Replay Transition Training (debug version)
-    --------------------------------------
-    - Keeps fixed shapes for episodic buffers (compat).
-    - Writes transition-level tuples into ReplayBuffer each env step:
-        * time penalty (global)
-        * per-plane completion bonus
-        * optional per-plane heartbeat (0-reward)
-    - Adds debug logs for replay filling.
+    Step 8A.2.2 – Terminology Refactor (JobAgent/WorkCenter)
+    ----------------------------------------------------------
+    - Unified terminology with environment (JobAgent ↔ WorkCenter)
+    - Keeps replay-aware structure from Step 7B.3
+    - Functional behavior unchanged
     """
 
     def __init__(self, env, agents, args, buffer=None):
@@ -29,8 +26,11 @@ class RolloutWorker:
         self.anneal_epsilon = args.anneal_epsilon
         self.min_epsilon = args.min_epsilon
 
-        print("[INFO] RolloutWorker (Step 7B.3-debug) initialized (replay transitions enabled)")
+        print("[INFO] RolloutWorker (Step 8A.2.2) initialized — unified terminology mode enabled")
 
+    # ============================================================
+    # === Helper: normalize available actions mask ===============
+    # ============================================================
     def _normalize_avail_mask(self, mask):
         if mask is None:
             return np.ones((self.n_agents, self.n_actions), dtype=np.float32)
@@ -44,6 +44,9 @@ class RolloutWorker:
             return out
         return np.ones((self.n_agents, self.n_actions), dtype=np.float32)
 
+    # ============================================================
+    # === Core episode generation ===============================
+    # ============================================================
     def generate_episode(self, global_ep_idx=None, evaluate=False):
         self.env.reset()
         self.agents.policy.init_hidden(1)
@@ -56,7 +59,7 @@ class RolloutWorker:
         o, s, u, u_onehot, r, terminate, padded, avail_u = [], [], [], [], [], [], [], []
         epsilon = 0.0 if evaluate else self.epsilon
 
-        print(f"\n[Rollout 7B.3] === New episode started (ep={global_ep_idx}) ===")
+        print(f"\n[Rollout 8A.2.2] === New episode started (ep={global_ep_idx}) ===")
         last_state = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
         local_trans_count = 0
 
@@ -78,19 +81,23 @@ class RolloutWorker:
             o.append(obs_t)
             s.append(state_t)
 
-            # ---------- ReplayBuffer push (debug) ----------
+            # ---------- ReplayBuffer push ----------
             if self.buffer is not None:
                 t_now = float(info.get("time", 0.0))
+
+                # Global time penalty
                 self.buffer.add_time_penalty(time=t_now, penalty=-1.0)
                 local_trans_count += 1
 
-                for pid in info.get("newly_completed_by", []):
-                    self.buffer.add_completion_bonus(plane_id=int(pid), time=t_now, bonus=10.0)
+                # Per-JobAgent completion bonuses
+                for jid in info.get("newly_completed_by", []):
+                    self.buffer.add_completion_bonus(jobagent_id=int(jid), time=t_now, bonus=10.0)
                     local_trans_count += 1
 
-                for pid in info.get("active_agents", []):
+                # Per-active JobAgent heartbeat transitions (0-reward)
+                for jid in info.get("active_agents", []):
                     self.buffer.add_transition(
-                        plane_id=int(pid),
+                        jobagent_id=int(jid),
                         time=t_now,
                         state=last_state[0] if last_state.ndim == 2 else np.zeros(10, np.float32),
                         action=np.array([0], dtype=np.int64),
@@ -113,6 +120,7 @@ class RolloutWorker:
                 gantt_records = info.get("episodes_situation", [])
                 break
 
+        # Pad episode for mixer compatibility
         for t in range(step, self.episode_limit):
             o.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
             s.append(np.zeros((self.state_shape,), dtype=np.float32))
@@ -141,7 +149,7 @@ class RolloutWorker:
             terminated=np.array([terminate], dtype=np.float32),
         )
 
-        print(f"[Rollout 7B.3] Episode finished in {step} steps | total reward={episode_reward:.1f}")
+        print(f"[Rollout 8A.2.2] Episode finished in {step} steps | total reward={episode_reward:.1f}")
         if self.buffer is not None:
             print(f"[Replay] Episode {global_ep_idx} contributed {local_trans_count} transitions | buffer size ≈ {len(self.buffer)}")
         print("-----------------------------------------------------------------")
@@ -151,4 +159,4 @@ class RolloutWorker:
 class CommRolloutWorker(RolloutWorker):
     def __init__(self, env, agents, args, buffer=None):
         super().__init__(env, agents, args, buffer=buffer)
-        print("[INFO] CommRolloutWorker (Step 7B.3-debug) initialized")
+        print("[INFO] CommRolloutWorker (8A.2.2) initialized — unified terminology mode")

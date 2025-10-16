@@ -7,10 +7,11 @@ import matplotlib.colors as mcolors
 from MARL.common.rollout import RolloutWorker, CommRolloutWorker
 from MARL.agent.agent import Agents, CommAgents
 from MARL.common.replay_buffer import ReplayBuffer
+from MARL.common.terms import t  # unified terminology helper
 
 
 # =========================
-# Gantt plot (unchanged)
+# Gantt plot (terminology-only refactor)
 # =========================
 def plot_gantt(for_gantt_data, filename="gantt.png"):
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
@@ -32,17 +33,17 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
             start, end, job, site, plane = rec
             operator = "?"
         ax.barh(plane, end - start, left=start, color=color_map[job], edgecolor="black")
-        ax.text((start + end) / 2, plane, f"J{job}|S{site}|O{operator}",
+        ax.text((start + end) / 2, plane, f"{t('JobShort')}{job}|{t('WorkCenterShort')}{site}|O{operator}",
                 va="center", ha="center", fontsize=6, color="black")
         max_end = max(max_end, end)
 
     ax.set_xlabel("Simulation Time (SimPy clock)")
-    ax.set_ylabel("Plane (Agent)")
-    ax.set_title("Step 7A – SimPy Schedule with Operators and Dynamic Arrivals")
+    ax.set_ylabel(f"{t('JobAgent')} (Agent)")
+    ax.set_title(f"Step 8A – SimPy Schedule with Operators and Dynamic Arrivals")
     ax.set_xlim(0, max_end + 1)
     handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[jt]) for jt in job_types]
-    labels = [f"Job {jt}" for jt in job_types]
-    ax.legend(handles, labels, title="Job Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    labels = [f"{t('Job')} {jt}" for jt in job_types]
+    ax.legend(handles, labels, title=f"{t('Job')} Types", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
     plt.savefig(filename, dpi=300)
     plt.close()
@@ -51,10 +52,11 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 7B.3 Runner (debug version)
+    Step 8A.2.3 Runner (debug)
     - Connects rollout to ReplayBuffer.
     - Prints buffer usage, training activation, and loss every few steps.
     - Logs reward/time/wait data for analyse_rewards.py.
+    - Terminology unified with t(): JobAgent / WorkCenter.
     """
 
     def __init__(self, env, args):
@@ -77,7 +79,7 @@ class Runner:
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
 
-        print(f"[Runner 7B.3] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
+        print(f"[Runner 8A.2.3] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
         print(f"[DEBUG] Learning enabled={args.learn}, batch_size={getattr(args,'batch_size','?')}")
 
     def run(self, num):
@@ -154,7 +156,8 @@ class Runner:
                 for ep_idx, ep_r in enumerate(self.episode_rewards):
                     print(f"{ep_idx},{ep_r}", file=f_r)
                     print(f"{ep_idx},{abs(ep_r)/10:.2f}", file=f_t)
-                    print(f"Episode {ep_idx} | Plane P0 | Job 0 | Wait {abs(ep_r)/20:.2f}", file=f_w)
+                    # keep the same 4-field schema for analyse_rewards.py
+                    print(f"Episode {ep_idx} | {t('JobAgent')} J0 | {t('Job')} 0 | Wait {abs(ep_r)/20:.2f}", file=f_w)
             print("[Runner] Episode reward/time/wait logs saved for analysis.")
         except Exception as e:
             print("[WARN] Could not save episode stats:", e)
