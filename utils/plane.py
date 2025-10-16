@@ -9,6 +9,7 @@ Enhancements vs Step 7A:
 - Compatible with dynamic arrivals & SimPy-driven scheduling.
 """
 
+from typing import Optional
 from utils.task import Task
 
 
@@ -80,7 +81,7 @@ class Plane:
         self.is_active = False
 
         # --- Step 7B additions ---
-        self.completed_at = None  # SimPy time when plane completed all jobs
+        self.completed_at: Optional[float] = None  # SimPy time when plane completed all jobs
 
     # ------------------------------------------------------------------
     # Task execution
@@ -103,7 +104,7 @@ class Plane:
     # ------------------------------------------------------------------
     # Lifecycle helpers
     # ------------------------------------------------------------------
-    def mark_completed(self, sim_time: float | None = None):
+    def mark_completed(self, sim_time: Optional[float] = None):
         """Mark plane as completed (for replay/log credit)."""
         self.is_active = False
         self.completed_at = sim_time
