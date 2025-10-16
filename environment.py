@@ -1,17 +1,16 @@
 """
 environment.py
-Step 7A/7B – Dynamic JobAgent Arrivals + WorkCenter–Operator Constraints + Explainable Logs
+Step 8A.3 — Dynamic JobAgent Arrivals + WorkCenter–Operator Constraints + Explainable Logs
 --------------------------------------------------------------------------------
 7A:
   - Dynamic job-agent arrivals
   - WorkCenter (machine) and operator constraints
   - Explainable logs for (WorkCenter, operator) selection
 
-7B (new):
-  - Extra info() fields so rollout/replay can handle dynamic arrivals:
-      * 'active_agents'      -> currently active JobAgent IDs
-      * 'new_records'        -> newly appended Gantt rows since last step
-      * 'newly_completed_by' -> list of JobAgent IDs that completed an operation at this step
+8A.3:
+  - Renamed Plane → JobAgent, Site → WorkCenter
+  - Imports from utils.jobagent
+  - Fully terminology-aligned version
 """
 
 import simpy
@@ -22,7 +21,7 @@ from gym import spaces
 from utils.site import Sites
 from utils.job import Jobs
 from utils.task_generator import TaskGenerator
-from utils.plane import Plane
+from utils.jobagent import JobAgent
 from utils.operator import Operators
 from MARL.common.terms import t
 
@@ -32,33 +31,33 @@ class ScheduleEnv(gym.Env):
 
     def __init__(
         self,
-        start_planes: int = 4,
-        max_planes: int = 12,
+        start_agents: int = 4,
+        max_agents: int = 12,
         arrival_prob: float = 0.20,
         variable_ops: bool = True,
         seed: int = 123,
     ):
-        # --- Config (Step 7A) ---
-        self.start_planes = int(start_planes)
-        self.max_planes = int(max_planes)
+        # --- Config ---
+        self.start_agents = int(start_agents)
+        self.max_agents = int(max_agents)
         self.arrival_prob = float(arrival_prob)
         self.variable_ops = bool(variable_ops)
         self.rng = np.random.default_rng(seed)
 
-        # --- Basic structures (init placeholders) ---
-        self.sites = []
+        # --- Core structures ---
+        self.workcenters = []
         self.jobs = []
-        self.planes = []
+        self.agents = []
         self.job_record_for_gant = []
         self.done = False
         self.step_count = 0
 
-        # For 7B
+        # Step 7B additions
         self._completed_prev = 0
 
         # --- Simulation world ---
         self.sim_env = simpy.Environment()
-        self.site_resources = []
+        self.workcenter_resources = []
 
         # --- Generators & Operators ---
         self.task_gen = TaskGenerator()
@@ -74,97 +73,92 @@ class ScheduleEnv(gym.Env):
     # === Pretty Logs / Explainability ===========================
     # ============================================================
 
-    def print_site_job_map(self):
-        print(f"\n📋 {t('site').upper()}–{t('job').upper()} MAPPING")
-        for site in self.sites:
-            print(f"   {t('site')} {site.site_id:02d} → {t('job')}s {site.resource_ids_list}")
+    def print_workcenter_job_map(self):
+        print(f"\n📋 {t('WorkCenter').upper()}–{t('Job').upper()} MAPPING")
+        for wc in self.workcenters:
+            print(f"   {t('WorkCenter')} {wc.site_id:02d} → {t('Job')}s {wc.resource_ids_list}")
 
-    def print_operator_site_map(self):
-        print(f"\n📋 {t('operator').upper()}–{t('site').upper()} MAPPING")
+    def print_operator_workcenter_map(self):
+        print(f"\n📋 {t('Operator').upper()}–{t('WorkCenter').upper()} MAPPING")
         for op in self.operators.operators_object_list:
-            print(f"   {t('operator')} {op.operator_id} → {t('site')}s {op.qualified_sites}")
+            print(f"   {t('Operator')} {op.operator_id} → {t('WorkCenter')}s {op.qualified_workcenters}")
 
     # ============================================================
-    # === Helpers for Step 7B ===================================
+    # === Helpers ================================================
     # ============================================================
 
     def get_active_agents(self):
         """Return list of active JobAgent IDs."""
-        return [p.plane_id for p in self.planes if p.is_active]
+        return [a.agent_id for a in self.agents if a.is_active]
 
-    def get_num_planes(self):
-        return len(self.planes)
+    def get_num_agents(self):
+        return len(self.agents)
 
     # ============================================================
     # === Candidate discovery ====================================
     # ============================================================
 
     def _candidate_pairs_for_job(self, job_id):
-        """
-        Compute feasible (WorkCenter_id, operator_id) pairs for an operation:
-        - WorkCenter must allow the operation
-        - WorkCenter must be free
-        - Operator must be qualified for that WorkCenter and not busy
-        """
+        """Find feasible (WorkCenter, Operator) pairs for an operation."""
         candidates = []
-        valid_sites = []
-        for site_id, site in enumerate(self.sites):
-            if job_id in site.resource_ids_list:
-                valid_sites.append(site_id)
-                if len(self.site_resources[site_id].users) == 0:
-                    op = self.operators.find_free_operator(job_id, site_id)
+        valid_wcs = []
+        for wc_id, wc in enumerate(self.workcenters):
+            if job_id in wc.resource_ids_list:
+                valid_wcs.append(wc_id)
+                if len(self.workcenter_resources[wc_id].users) == 0:
+                    op = self.operators.find_free_operator(job_id, wc_id)
                     if op is not None:
-                        candidates.append((site_id, op.operator_id))
-        return valid_sites, candidates
+                        candidates.append((wc_id, op.operator_id))
+        return valid_wcs, candidates
 
     # ============================================================
     # === JobAgent process =======================================
     # ============================================================
 
-    def plane_process(self, plane_id: int):
-        plane = self.planes[plane_id]
+    def jobagent_process(self, agent_id: int):
+        agent = self.agents[agent_id]
 
         # Respect dynamic arrival
-        if plane.arrival_time > self.sim_env.now:
-            yield self.sim_env.timeout(plane.arrival_time - self.sim_env.now)
-        plane.is_active = True
-        print(f"[t={self.sim_env.now}] {t('plane')} {plane_id} entered the system.")
+        if agent.arrival_time > self.sim_env.now:
+            yield self.sim_env.timeout(agent.arrival_time - self.sim_env.now)
+        agent.is_active = True
+        print(f"[t={self.sim_env.now}] {t('JobAgent')} {agent_id} entered the system.")
 
-        while plane.left_job:
+        while agent.left_job:
             current_job_id = (
-                plane.left_job[0].index_id
-                if hasattr(plane.left_job[0], "index_id")
-                else plane.left_job[0]
+                agent.left_job[0].index_id
+                if hasattr(agent.left_job[0], "index_id")
+                else agent.left_job[0]
             )
 
-            valid_sites, candidate_pairs = self._candidate_pairs_for_job(current_job_id)
-            print(f"\n🛠️ [{t('plane')} {plane_id}] Next {t('job')}={current_job_id}")
-            print(f"   Step 1: Valid {t('site')}s (can perform {t('job')} {current_job_id}): {valid_sites}")
+            valid_wcs, candidate_pairs = self._candidate_pairs_for_job(current_job_id)
+            print(f"\n🛠️ [{t('JobAgent')} {agent_id}] Next {t('Job')}={current_job_id}")
+            print(f"   Step 1: Valid {t('WorkCenter')}s (can perform {t('Job')} {current_job_id}): {valid_wcs}")
 
-            if len(valid_sites) > 0:
-                print(f"   Step 2: {t('operator').capitalize()} availability per {t('site')}:")
-                for s_id in valid_sites:
+            if len(valid_wcs) > 0:
+                print(f"   Step 2: {t('Operator')} availability per {t('WorkCenter')}:")
+                for w_id in valid_wcs:
                     can_ops = []
                     for op in self.operators.operators_object_list:
-                        if (not op.is_busy) and op.can_do_job(current_job_id, s_id):
+                        if (not op.is_busy) and op.can_do_job(current_job_id, w_id):
                             can_ops.append(op.operator_id)
-                    print(f"       {t('site')} {s_id} → {t('operator')}s {can_ops if can_ops else '[]'}")
+                    print(f"       {t('WorkCenter')} {w_id} → {t('Operator')}s {can_ops if can_ops else '[]'}")
 
             if not candidate_pairs:
-                print(f"[WAIT] No available {t('site')}/{t('operator')} for {t('job')} {current_job_id} at t={self.sim_env.now}.")
+                print(f"[WAIT] No available {t('WorkCenter')}/{t('Operator')} for {t('Job')} {current_job_id} at t={self.sim_env.now}.")
                 yield self.sim_env.timeout(1)
                 continue
 
-            print(f"   Step 3: Feasible ({t('site')}, {t('operator')}) candidates → {candidate_pairs}")
-            chosen_site_id, chosen_op_id = self.rng.choice(candidate_pairs)
-            print(f"✅ Decision: choose {t('site')} {chosen_site_id} with {t('operator')} {chosen_op_id}")
+            print(f"   Step 3: Feasible ({t('WorkCenter')}, {t('Operator')}) candidates → {candidate_pairs}")
+            chosen_wc_id, chosen_op_id = self.rng.choice(candidate_pairs)
+            print(f"✅ Decision: choose {t('WorkCenter')} {chosen_wc_id} with {t('Operator')} {chosen_op_id}")
 
-            site_resource = self.site_resources[chosen_site_id]
+            wc_resource = self.workcenter_resources[chosen_wc_id]
             operator = [op for op in self.operators.operators_object_list if op.operator_id == chosen_op_id][0]
 
-            with site_resource.request() as req:
+            with wc_resource.request() as req:
                 yield req
-                operator.assign_job(current_job_id, chosen_site_id)
+                operator.assign_job(current_job_id, chosen_wc_id)
 
                 start_time = self.sim_env.now
                 proc_time = self.jobs[current_job_id].time_span
@@ -172,15 +166,15 @@ class ScheduleEnv(gym.Env):
                 end_time = self.sim_env.now
 
                 operator.release()
-                self.save_env_info((start_time, end_time, current_job_id, chosen_site_id, plane_id, operator.operator_id))
-                plane.left_job.pop(0)
+                self.save_env_info((start_time, end_time, current_job_id, chosen_wc_id, agent_id, operator.operator_id))
+                agent.left_job.pop(0)
                 print(
-                    f"[t={self.sim_env.now}] {t('plane')} {plane_id} finished {t('job')} {current_job_id} "
-                    f"at {t('site')} {chosen_site_id} by {t('operator')} {operator.operator_id}"
+                    f"[t={self.sim_env.now}] {t('JobAgent')} {agent_id} finished {t('Job')} {current_job_id} "
+                    f"at {t('WorkCenter')} {chosen_wc_id} by {t('Operator')} {operator.operator_id}"
                 )
 
-        print(f"[t={self.sim_env.now}] {t('plane')} {plane_id} completed all {t('job')}s.")
-        plane.is_active = False
+        print(f"[t={self.sim_env.now}] {t('JobAgent')} {agent_id} completed all {t('Job')}s.")
+        agent.is_active = False
 
     def save_env_info(self, record):
         """Append (start, end, operation, WorkCenter, JobAgent, operator)."""
@@ -190,24 +184,24 @@ class ScheduleEnv(gym.Env):
     # === Initialization =========================================
     # ============================================================
 
-    def _create_initial_planes(self):
-        for pid in range(self.start_planes):
-            task_objs = self.task_gen.generate_constrained_task(plane_id=pid)
-            plane = Plane(plane_id=pid, job_object_list=task_objs, arrival_time=0)
-            self.planes.append(plane)
-            self.sim_env.process(self.plane_process(pid))
+    def _create_initial_agents(self):
+        for aid in range(self.start_agents):
+            task_objs = self.task_gen.generate_constrained_task(jobagent_id=aid)
+            agent = JobAgent(agent_id=aid, job_object_list=task_objs, arrival_time=0)
+            self.agents.append(agent)
+            self.sim_env.process(self.jobagent_process(aid))
 
     def initialize(self):
         sites_obj = Sites()
         jobs_obj = Jobs()
 
-        self.sites = sites_obj.sites_object_list
+        self.workcenters = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
 
         self.sim_env = simpy.Environment()
-        self.site_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.sites))]
+        self.workcenter_resources = [simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.workcenters))]
 
-        self.planes = []
+        self.agents = []
         self.job_record_for_gant = []
         self.done = False
         self._completed_prev = 0
@@ -216,14 +210,14 @@ class ScheduleEnv(gym.Env):
         self.operators = Operators(sites_obj)
         self.operators.release_all()
 
-        self._create_initial_planes()
+        self._create_initial_agents()
 
-        print(f"\n=== Step 7A: Dynamic Arrivals + {t('operator').capitalize()} Constraints Test ===")
-        self.print_site_job_map()
-        self.print_operator_site_map()
+        print(f"\n=== Step 8A.3: Dynamic Arrivals + Operator Constraints Test ===")
+        self.print_workcenter_job_map()
+        self.print_operator_workcenter_map()
         print(
-            f"\n[INIT] Step 7A env with {self.start_planes} initial {t('plane')}s; "
-            f"max_{t('plane')}s={self.max_planes}."
+            f"\n[INIT] Step 8A.3 env with {self.start_agents} initial {t('JobAgent')}s; "
+            f"max_{t('JobAgent')}s={self.max_agents}."
         )
 
     # ============================================================
@@ -231,22 +225,22 @@ class ScheduleEnv(gym.Env):
     # ============================================================
 
     def can_spawn_more(self) -> bool:
-        return len(self.planes) < self.max_planes
+        return len(self.agents) < self.max_agents
 
-    def add_new_plane(self, time_now: float):
+    def add_new_agent(self, time_now: float):
         if not self.can_spawn_more():
             return False
-        pid = len(self.planes)
-        task_objs = self.task_gen.generate_constrained_task(plane_id=pid)
-        plane = Plane(plane_id=pid, job_object_list=task_objs, arrival_time=time_now)
-        self.planes.append(plane)
-        self.sim_env.process(self.plane_process(pid))
-        print(f"[ARRIVAL t={time_now}] New {t('plane')} {pid} spawned with {len(task_objs)} ops.")
+        aid = len(self.agents)
+        task_objs = self.task_gen.generate_constrained_task(jobagent_id=aid)
+        agent = JobAgent(agent_id=aid, job_object_list=task_objs, arrival_time=time_now)
+        self.agents.append(agent)
+        self.sim_env.process(self.jobagent_process(aid))
+        print(f"[ARRIVAL t={time_now}] New {t('JobAgent')} {aid} spawned with {len(task_objs)} ops.")
         return True
 
     def maybe_spawn(self):
         if self.can_spawn_more() and self.rng.random() < self.arrival_prob:
-            self.add_new_plane(self.sim_env.now)
+            self.add_new_agent(self.sim_env.now)
 
     # ============================================================
     # === Clock control ==========================================
@@ -267,7 +261,7 @@ class ScheduleEnv(gym.Env):
     # ============================================================
 
     def all_jobs_completed(self):
-        return all((not p.is_active) or (len(p.left_job) == 0) for p in self.planes)
+        return all((not a.is_active) or (len(a.left_job) == 0) for a in self.agents)
 
     def step(self, action=None):
         self.step_count += 1
@@ -285,13 +279,13 @@ class ScheduleEnv(gym.Env):
 
         self.done = self.all_jobs_completed()
         if self.done:
-            print(f"✅ All {t('plane')}s finished at SimPy time = {self.sim_env.now}")
+            print(f"✅ All {t('JobAgent')}s finished at SimPy time = {self.sim_env.now}")
 
         info = {
             "time": self.sim_env.now,
             "completed_jobs": len(self.job_record_for_gant),
             "episodes_situation": list(self.job_record_for_gant),
-            f"n_{t('plane')}s": len(self.planes),
+            f"n_{t('JobAgent')}s": len(self.agents),
             "active_agents": self.get_active_agents(),
             "new_records": list(new_records),
             "newly_completed_by": list(newly_completed_by),
@@ -299,7 +293,7 @@ class ScheduleEnv(gym.Env):
 
         print(
             f"[DEBUG] Step={self.step_count} | t={self.sim_env.now} | "
-            f"completed={len(self.job_record_for_gant)} | {t('plane')}s={len(self.planes)}"
+            f"completed={len(self.job_record_for_gant)} | {t('JobAgent')}s={len(self.agents)}"
         )
         return reward, self.done, info
 
@@ -309,7 +303,7 @@ class ScheduleEnv(gym.Env):
 
     def get_env_info(self):
         return {
-            "n_agents": len(self.planes),
+            "n_agents": len(self.agents),
             "n_actions": self.action_space.n if hasattr(self.action_space, "n") else 21,
             "state_shape": 10,
             "obs_shape": 10,
@@ -322,7 +316,7 @@ class ScheduleEnv(gym.Env):
             _, done, _ = self.step(None)
             if done:
                 break
-        print("✅ Step 7A/7B dynamic arrivals test completed.")
+        print("✅ Step 8A.3 dynamic arrivals test completed.")
 
 
 if __name__ == "__main__":

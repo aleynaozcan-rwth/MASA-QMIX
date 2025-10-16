@@ -11,7 +11,7 @@ from MARL.common.terms import t  # unified terminology helper
 
 
 # =========================
-# Gantt plot (terminology-only refactor)
+# Gantt plot (terminology cleanup)
 # =========================
 def plot_gantt(for_gantt_data, filename="gantt.png"):
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
@@ -28,13 +28,17 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     max_end = 0
     for rec in for_gantt_data:
         if len(rec) == 6:
-            start, end, job, site, plane, operator = rec
+            start, end, job, workcenter, jobagent, operator = rec
         else:
-            start, end, job, site, plane = rec
+            start, end, job, workcenter, jobagent = rec
             operator = "?"
-        ax.barh(plane, end - start, left=start, color=color_map[job], edgecolor="black")
-        ax.text((start + end) / 2, plane, f"{t('JobShort')}{job}|{t('WorkCenterShort')}{site}|O{operator}",
-                va="center", ha="center", fontsize=6, color="black")
+        ax.barh(jobagent, end - start, left=start, color=color_map[job], edgecolor="black")
+        ax.text(
+            (start + end) / 2,
+            jobagent,
+            f"{t('JobShort')}{job}|{t('WorkCenterShort')}{workcenter}|O{operator}",
+            va="center", ha="center", fontsize=6, color="black"
+        )
         max_end = max(max_end, end)
 
     ax.set_xlabel("Simulation Time (SimPy clock)")
@@ -52,11 +56,10 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 8A.2.3 Runner (debug)
-    - Connects rollout to ReplayBuffer.
-    - Prints buffer usage, training activation, and loss every few steps.
-    - Logs reward/time/wait data for analyse_rewards.py.
-    - Terminology unified with t(): JobAgent / WorkCenter.
+    Step 8A.3 Runner – fully unified terminology
+    - Plane → JobAgent
+    - Site  → WorkCenter
+    - No functional or behavioral changes
     """
 
     def __init__(self, env, args):
@@ -79,7 +82,7 @@ class Runner:
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
 
-        print(f"[Runner 8A.2.3] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
+        print(f"[Runner 8A.3] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
         print(f"[DEBUG] Learning enabled={args.learn}, batch_size={getattr(args,'batch_size','?')}")
 
     def run(self, num):
@@ -156,7 +159,6 @@ class Runner:
                 for ep_idx, ep_r in enumerate(self.episode_rewards):
                     print(f"{ep_idx},{ep_r}", file=f_r)
                     print(f"{ep_idx},{abs(ep_r)/10:.2f}", file=f_t)
-                    # keep the same 4-field schema for analyse_rewards.py
                     print(f"Episode {ep_idx} | {t('JobAgent')} J0 | {t('Job')} 0 | Wait {abs(ep_r)/20:.2f}", file=f_w)
             print("[Runner] Episode reward/time/wait logs saved for analysis.")
         except Exception as e:
