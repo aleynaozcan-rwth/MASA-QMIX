@@ -3,11 +3,11 @@ import numpy as np
 class RolloutWorker:
     """
     rollout.py
-    Step 8A.2.2 – Terminology Refactor (JobAgent/WorkCenter)
-    ----------------------------------------------------------
-    - Unified terminology with environment (JobAgent ↔ WorkCenter)
-    - Keeps replay-aware structure from Step 7B.3
-    - Functional behavior unchanged
+    Step 8A.5 – True SimPy Time Tracking + Unified Terminology
+    ------------------------------------------------------------
+    - JobAgent ↔ WorkCenter refactor (from 8A.2.2)
+    - Adds real episode duration (SimPy time delta)
+    - Keeps replay-aware behavior from Step 7B
     """
 
     def __init__(self, env, agents, args, buffer=None):
@@ -16,17 +16,19 @@ class RolloutWorker:
         self.args = args
         self.buffer = buffer  # replay buffer or None
 
+        # Core configuration
         self.episode_limit = args.episode_limit
         self.n_actions = args.n_actions
         self.n_agents = args.n_agents
         self.state_shape = args.state_shape
         self.obs_shape = args.obs_shape
 
+        # Exploration
         self.epsilon = args.epsilon
         self.anneal_epsilon = args.anneal_epsilon
         self.min_epsilon = args.min_epsilon
 
-        print("[INFO] RolloutWorker (Step 8A.2.2) initialized — unified terminology mode enabled")
+        print("[INFO] RolloutWorker (Step 8A.5) initialized — unified terminology + true SimPy time tracking")
 
     # ============================================================
     # === Helper: normalize available actions mask ===============
@@ -45,7 +47,7 @@ class RolloutWorker:
         return np.ones((self.n_agents, self.n_actions), dtype=np.float32)
 
     # ============================================================
-    # === Core episode generation ===============================
+    # === Core Episode Generation ================================
     # ============================================================
     def generate_episode(self, global_ep_idx=None, evaluate=False):
         self.env.reset()
@@ -56,21 +58,29 @@ class RolloutWorker:
         episode_reward = 0.0
         gantt_records = []
 
+        # 🕒 Track real simulation duration
+        episode_start_time = 0.0
+        episode_end_time = 0.0
+        self.episode_duration = 0.0
+
         o, s, u, u_onehot, r, terminate, padded, avail_u = [], [], [], [], [], [], [], []
         epsilon = 0.0 if evaluate else self.epsilon
-
-        print(f"\n[Rollout 8A.2.2] === New episode started (ep={global_ep_idx}) ===")
-        last_state = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
         local_trans_count = 0
+        last_state = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
+
+        print(f"\n[Rollout 8A.5] === New episode started (ep={global_ep_idx}) ===")
 
         while not terminated and step < self.episode_limit:
             obs_t = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
             state_t = np.zeros((self.state_shape,), dtype=np.float32)
             actions = None
 
+            # === Environment step ===
             reward, done_flag, info = self.env.step(actions)
             episode_reward += float(reward)
+            episode_end_time = info.get("time", episode_end_time)  # update live SimPy time
 
+            # === Store transition placeholders ===
             avail_mask = self._normalize_avail_mask(info.get("avail_actions", None))
             r.append([reward])
             terminate.append([done_flag])
@@ -81,7 +91,7 @@ class RolloutWorker:
             o.append(obs_t)
             s.append(state_t)
 
-            # ---------- ReplayBuffer push ----------
+            # === Replay Buffer Updates ===
             if self.buffer is not None:
                 t_now = float(info.get("time", 0.0))
 
@@ -94,7 +104,7 @@ class RolloutWorker:
                     self.buffer.add_completion_bonus(jobagent_id=int(jid), time=t_now, bonus=10.0)
                     local_trans_count += 1
 
-                # Per-active JobAgent heartbeat transitions (0-reward)
+                # Heartbeat transitions
                 for jid in info.get("active_agents", []):
                     self.buffer.add_transition(
                         jobagent_id=int(jid),
@@ -120,7 +130,11 @@ class RolloutWorker:
                 gantt_records = info.get("episodes_situation", [])
                 break
 
-        # Pad episode for mixer compatibility
+        # === Episode duration (SimPy time delta) ===
+        self.episode_duration = max(0.0, episode_end_time - episode_start_time)
+        print(f"[Rollout] Episode duration = {self.episode_duration:.2f} (SimPy time units)")
+
+        # === Padding for mixer compatibility ===
         for t in range(step, self.episode_limit):
             o.append(np.zeros((self.n_agents, self.obs_shape), dtype=np.float32))
             s.append(np.zeros((self.state_shape,), dtype=np.float32))
@@ -149,7 +163,7 @@ class RolloutWorker:
             terminated=np.array([terminate], dtype=np.float32),
         )
 
-        print(f"[Rollout 8A.2.2] Episode finished in {step} steps | total reward={episode_reward:.1f}")
+        print(f"[Rollout 8A.5] Episode finished in {step} steps | total reward={episode_reward:.1f}")
         if self.buffer is not None:
             print(f"[Replay] Episode {global_ep_idx} contributed {local_trans_count} transitions | buffer size ≈ {len(self.buffer)}")
         print("-----------------------------------------------------------------")
@@ -159,4 +173,4 @@ class RolloutWorker:
 class CommRolloutWorker(RolloutWorker):
     def __init__(self, env, agents, args, buffer=None):
         super().__init__(env, agents, args, buffer=buffer)
-        print("[INFO] CommRolloutWorker (8A.2.2) initialized — unified terminology mode")
+        print("[INFO] CommRolloutWorker (8A.5) initialized — unified terminology + true SimPy time tracking")

@@ -11,6 +11,7 @@ Step 8A.3 — Dynamic JobAgent Arrivals + WorkCenter–Operator Constraints + Ex
   - Renamed Plane → JobAgent, Site → WorkCenter
   - Imports from utils.jobagent
   - Fully terminology-aligned version
+  - NEW: per-JobAgent wait-time accounting exposed via info["wait_times"]
 """
 
 import simpy
@@ -63,6 +64,9 @@ class ScheduleEnv(gym.Env):
         self.task_gen = TaskGenerator()
         self.operators = None
 
+        # --- NEW: per-JobAgent wait times (cumulative, SimPy time units)
+        self.wait_time_dict = {}
+
         # --- Gym interface ---
         self.action_space = spaces.Discrete(21)
 
@@ -105,6 +109,7 @@ class ScheduleEnv(gym.Env):
         for wc_id, wc in enumerate(self.workcenters):
             if job_id in wc.resource_ids_list:
                 valid_wcs.append(wc_id)
+                # tezgâh boş mu?
                 if len(self.workcenter_resources[wc_id].users) == 0:
                     op = self.operators.find_free_operator(job_id, wc_id)
                     if op is not None:
@@ -117,6 +122,8 @@ class ScheduleEnv(gym.Env):
 
     def jobagent_process(self, agent_id: int):
         agent = self.agents[agent_id]
+        # NEW: init wait counter
+        agent.total_wait_time = 0.0
 
         # Respect dynamic arrival
         if agent.arrival_time > self.sim_env.now:
@@ -144,9 +151,14 @@ class ScheduleEnv(gym.Env):
                             can_ops.append(op.operator_id)
                     print(f"       {t('WorkCenter')} {w_id} → {t('Operator')}s {can_ops if can_ops else '[]'}")
 
+            # hiçbir uygun ikili yoksa bekle
             if not candidate_pairs:
                 print(f"[WAIT] No available {t('WorkCenter')}/{t('Operator')} for {t('Job')} {current_job_id} at t={self.sim_env.now}.")
+                # 1 zaman birimi bekle, bekleme süresine ekle
                 yield self.sim_env.timeout(1)
+                agent.total_wait_time += 1.0
+                # canlı iken anlık toplamını sakla
+                self.wait_time_dict[agent_id] = agent.total_wait_time
                 continue
 
             print(f"   Step 3: Feasible ({t('WorkCenter')}, {t('Operator')}) candidates → {candidate_pairs}")
@@ -175,6 +187,8 @@ class ScheduleEnv(gym.Env):
 
         print(f"[t={self.sim_env.now}] {t('JobAgent')} {agent_id} completed all {t('Job')}s.")
         agent.is_active = False
+        # tamamlanan ajanın son bekleme süresini yaz
+        self.wait_time_dict[agent_id] = agent.total_wait_time
 
     def save_env_info(self, record):
         """Append (start, end, operation, WorkCenter, JobAgent, operator)."""
@@ -206,6 +220,7 @@ class ScheduleEnv(gym.Env):
         self.done = False
         self._completed_prev = 0
         self.step_count = 0
+        self.wait_time_dict = {}  # reset
 
         self.operators = Operators(sites_obj)
         self.operators.release_all()
@@ -281,6 +296,11 @@ class ScheduleEnv(gym.Env):
         if self.done:
             print(f"✅ All {t('JobAgent')}s finished at SimPy time = {self.sim_env.now}")
 
+        # expose current cumulative waits (for plotting)
+        current_waits = {a.agent_id: getattr(a, "total_wait_time", 0.0) for a in self.agents}
+        # also merge any finished agents from dict (safety)
+        current_waits.update(self.wait_time_dict)
+
         info = {
             "time": self.sim_env.now,
             "completed_jobs": len(self.job_record_for_gant),
@@ -289,6 +309,7 @@ class ScheduleEnv(gym.Env):
             "active_agents": self.get_active_agents(),
             "new_records": list(new_records),
             "newly_completed_by": list(newly_completed_by),
+            "wait_times": current_waits,  # NEW
         }
 
         print(
