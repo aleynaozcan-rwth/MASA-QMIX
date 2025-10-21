@@ -4,7 +4,8 @@ import sys
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from MARL.common.rollout import RolloutWorker, CommRolloutWorker
+from MARL.common.rollout import RolloutWorker
+
 from MARL.agent.agent import Agents, CommAgents
 from MARL.common.replay_buffer import ReplayBuffer
 from MARL.common.terms import t  # unified terminology helper

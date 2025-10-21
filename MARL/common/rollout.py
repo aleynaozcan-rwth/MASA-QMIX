@@ -3,160 +3,234 @@ import torch
 
 class RolloutWorker:
     """
-    rollout.py
-    Step 8A.6.3 – Full Compatible Learning Rollout
-    ----------------------------------------------
-    - Compatible with env.step() → (obs_next, reward, done, info)
-    - Handles inconsistent obs_next shapes robustly
-    - Records transitions into replay buffer (with next state)
-    - Prepares environment for QMix-style centralized training
+    Step 8A.6.4 – Full learning rollout worker (RNN-safe, replay-aware)
+
+    • Resets env and builds replay-ready transitions
+    • Epsilon-greedy action selection (with availability masks)
+    • Maintains RNN hidden state per agent for eval_rnn()
+    • Inserts full episode into ReplayBuffer if provided
     """
 
-    def __init__(self, env, agents, args, buffer=None):
+    def __init__(
+        self,
+        env,
+        agents,
+        buffer=None,
+        args=None,
+        episode_limit=200,
+        epsilon_start=1.0,
+        epsilon_end=0.05,
+        epsilon_anneal_steps=50000,
+        device="cpu",
+        log_prefix="8A.6.4",
+    ):
         self.env = env
         self.agents = agents
-        self.args = args
         self.buffer = buffer
+        self.args = args
+        self.episode_limit = getattr(args, "episode_limit", episode_limit)
+        self.device = getattr(args, "device", device)
+        self.log_prefix = log_prefix
 
-        self.episode_limit = args.episode_limit
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
+        # --- epsilon schedule ---
+        self.epsilon = float(epsilon_start)
+        self.epsilon_start = float(epsilon_start)
+        self.epsilon_end = float(epsilon_end)
+        self.epsilon_anneal_steps = int(epsilon_anneal_steps)
+        self._eps_decay = (
+            (self.epsilon_start - self.epsilon_end)
+            / max(1, self.epsilon_anneal_steps)
+        )
 
-        self.epsilon = args.epsilon
-        self.anneal_epsilon = args.anneal_epsilon
-        self.min_epsilon = args.min_epsilon
+        # --- hidden state placeholder ---
+        self._reset_hidden_states()
 
-        print("[INFO] RolloutWorker 8A.6.3 initialized — full learning + shape-safe observation handling")
-
-    # ============================================================
-    # === Helper: normalize available actions ====================
-    # ============================================================
-    def _normalize_avail_mask(self, mask):
-        if mask is None:
-            return np.ones((self.n_agents, self.n_actions), dtype=np.float32)
-        mask = np.asarray(mask)
-        if mask.ndim == 1 and mask.shape[0] == self.n_actions:
-            return np.tile(mask[None, :], (self.n_agents, 1)).astype(np.float32)
-        if mask.ndim == 2 and mask.shape[1] == self.n_actions:
-            rows = min(mask.shape[0], self.n_agents)
-            out = np.zeros((self.n_agents, self.n_actions), dtype=np.float32)
-            out[:rows] = mask[:rows]
-            return out
-        return np.ones((self.n_agents, self.n_actions), dtype=np.float32)
+        print(
+            f"[INFO] RolloutWorker {self.log_prefix} initialized — RNN-compatible + full learning mode"
+        )
+        print(
+            f"  → Episode limit: {self.episode_limit}\n"
+            f"  → Epsilon decay: {self.epsilon_start} → {self.epsilon_end} over {self.epsilon_anneal_steps} steps\n"
+            f"  → Using device: {self.device}"
+        )
 
     # ============================================================
-    # === Action selection (epsilon-greedy) =======================
+    #                    MAIN ROLLOUT
     # ============================================================
-    def _select_actions(self, obs, avail_actions, epsilon, evaluate=False):
-        obs_t = torch.tensor(obs, dtype=torch.float32)
-        h_in = self.agents.policy.eval_hidden
+    def generate_episode(self, global_ep_idx=0, evaluate=False):
+        self._maybe_decay_epsilon(evaluate)
+        self._reset_hidden_states()
 
-        q_values, self.agents.policy.eval_hidden = self.agents.policy.eval_rnn(obs_t, h_in)
-        q_values = q_values.detach().cpu().numpy()
+        obs_list, info = self._reset_env()
+        s = self._get_state_from_info(info)
+        avail = self._get_avail_from_info(info, self.agents.n_actions)
 
-        actions = np.zeros(self.n_agents, dtype=np.int64)
-        for i in range(self.n_agents):
-            if np.random.uniform() < epsilon and not evaluate:
-                avail = np.where(avail_actions[i] > 0)[0]
-                actions[i] = np.random.choice(avail)
-            else:
-                avail = np.where(avail_actions[i] > 0)[0]
-                masked_q = q_values[i][avail]
-                actions[i] = avail[np.argmax(masked_q)]
-        return actions
+        ep_transitions, ep_reward, t = [], 0.0, 0
+        while t < self.episode_limit:
+            actions, q_vals = self._select_actions(obs_list, avail, evaluate)
+            obs_next, reward, done, info_next = self.env.step(actions)
 
-    # ============================================================
-    # === Core episode generation ================================
-    # ============================================================
-    def generate_episode(self, global_ep_idx=None, evaluate=False):
-        self.env.reset()
-        self.agents.policy.init_hidden(1)
+            s_next = self._get_state_from_info(info_next)
+            avail_next = self._get_avail_from_info(info_next, self.agents.n_actions)
 
-        # initialize hidden state for RNN-based policy
-        self.agents.policy.eval_hidden = torch.zeros(self.args.n_agents, 64)
+            trans = dict(
+                o=self._obs_list_to_array(obs_list),
+                o_next=self._obs_list_to_array(obs_next),
+                s=s.astype(np.float32),
+                s_next=s_next.astype(np.float32),
+                u=np.asarray(actions, np.int64),
+                avail_a=self._normalize_avail(avail),
+                avail_a_next=self._normalize_avail(avail_next),
+                r=float(reward),
+                terminated=bool(done),
+                padded=False,
+            )
+            ep_transitions.append(trans)
+            ep_reward += float(reward)
 
-        terminated = False
-        step = 0
-        episode_reward = 0.0
-        gantt_records = []
-
-        epsilon = 0.0 if evaluate else self.epsilon
-        o, s, u, r, avail_u, terminate, padded = [], [], [], [], [], [], []
-
-        print(f"[Rollout 8A.6.3] === New episode (ep={global_ep_idx}) ===")
-
-        # Initial dummy obs/state
-        obs = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
-        state = np.zeros((self.state_shape,), dtype=np.float32)
-
-        while not terminated and step < self.episode_limit:
-            avail = np.ones((self.n_agents, self.n_actions), dtype=np.float32)
-            actions = self._select_actions(obs, avail, epsilon, evaluate)
-
-            # Environment step: expects 4 returns
-            obs_next, reward, done_flag, info = self.env.step(actions)
-
-            # --- Observation shape normalization ---
-            if obs_next is None:
-                obs_next = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
-            else:
-                try:
-                    obs_next = np.asarray(obs_next, dtype=np.float32)
-                    if obs_next.ndim == 1:
-                        obs_next = np.expand_dims(obs_next, axis=0)
-                except Exception as e:
-                    print(f"[WARN] obs_next shape inconsistent → {type(obs_next)} | {e}")
-                    obs_next = np.zeros((self.n_agents, self.obs_shape), dtype=np.float32)
-
-            # --- Compute next state (mean pooling of obs) ---
-            try:
-                state_next = np.mean(obs_next, axis=0)
-            except Exception as e:
-                print(f"[WARN] state_next mean failed → {e}")
-                state_next = np.zeros((self.state_shape,), dtype=np.float32)
-
-            # --- Store transition ---
-            o.append(obs)
-            s.append(state)
-            u.append(actions)
-            r.append([reward])
-            avail_u.append(avail)
-            terminate.append([done_flag])
-            padded.append([0.0])
-
-            episode_reward += float(reward)
-            step += 1
-            terminated = bool(done_flag)
-
-            # --- Replay buffer logging ---
-            if self.buffer is not None:
-                self.buffer.add_transition(
-                    jobagent_id=0,
-                    time=float(info.get("time", 0.0)),
-                    state=state,
-                    action=actions,
-                    reward=reward,
-                    next_state=state_next,
-                    done=terminated,
-                )
-
-            obs = obs_next
-            state = state_next
-
-            if terminated:
-                gantt_records = info.get("episodes_situation", [])
+            obs_list, s, avail = obs_next, s_next, avail_next
+            t += 1
+            if done:
                 break
 
-        print(f"[Rollout] Episode finished in {step} steps | total reward={episode_reward:.2f}")
-        return {"r": np.array(r)}, episode_reward, True, gantt_records
+        episode = self._pack_episode(ep_transitions)
+        if self.buffer is not None:
+            self._insert_episode(episode)
 
+        print(
+            f"[Rollout] Episode finished in {len(ep_transitions)} steps | total reward={ep_reward:.2f}"
+        )
+        if self.buffer is not None:
+            print(f"Episode reward: {ep_reward:.2f}, buffer length: {len(self.buffer)}")
 
-# =============================================================
-# === Communication-enabled variant ============================
-# =============================================================
-class CommRolloutWorker(RolloutWorker):
-    def __init__(self, env, agents, args, buffer=None):
-        super().__init__(env, agents, args, buffer)
-        print("[INFO] CommRolloutWorker 8A.6.3 initialized — shape-safe full compatibility")
+        return episode, ep_reward, bool(ep_transitions[-1]["terminated"]), info_next
+
+    # ============================================================
+    #                    ACTION SELECTION
+    # ============================================================
+    def _select_actions(self, obs_list, avail, evaluate=False):
+        n_agents, n_actions = self.agents.n_agents, self.agents.n_actions
+        obs_t = torch.as_tensor(
+            self._obs_list_to_array(obs_list), dtype=torch.float32, device=self.device
+        )
+
+        if hasattr(self.agents.policy, "eval_rnn"):
+            q_t, h_out = self.agents.policy.eval_rnn(obs_t, self.eval_hidden)
+            self.eval_hidden = h_out
+        elif hasattr(self.agents.policy, "get_q_values"):
+            batch = {"o": obs_t.unsqueeze(0)}
+            q_t, _ = self.agents.policy.get_q_values(batch, t=0)
+            q_t = q_t.squeeze(0)
+        else:
+            raise RuntimeError("Policy must implement eval_rnn() or get_q_values().")
+
+        q_np = q_t.detach().cpu().numpy()
+
+        mask = (
+            np.ones((n_agents, n_actions), bool)
+            if avail is None
+            else np.asarray(avail, bool)
+        )
+        if mask.ndim == 1:
+            mask = np.tile(mask[None, :], (n_agents, 1))
+        masked_q = np.where(mask, q_np, -1e9)
+
+        actions = []
+        for i in range(n_agents):
+            if (not evaluate) and (np.random.rand() < self.epsilon):
+                valid = np.where(mask[i])[0]
+                a = np.random.choice(valid) if valid.size else np.random.randint(0, n_actions)
+            else:
+                a = int(np.argmax(masked_q[i]))
+            actions.append(a)
+        return actions, q_np
+
+    # ============================================================
+    #                    HELPERS / UTILS
+    # ============================================================
+    def _reset_env(self):
+        out = self.env.reset()
+        return out if isinstance(out, tuple) and len(out) == 2 else (out, {})
+
+    def _get_state_from_info(self, info):
+        s = info.get("state_vec", None)
+        if s is None:
+            dim = getattr(self.env, "state_dim", 64)
+            return np.zeros((dim,), np.float32)
+        return np.asarray(s, np.float32).reshape(-1)
+
+    def _get_avail_from_info(self, info, n_actions):
+        avail = info.get("avail_actions", None)
+        if avail is None:
+            return None
+        avail = np.asarray(avail, bool)
+        if avail.ndim == 1 and avail.size != n_actions:
+            return None
+        if avail.ndim == 2 and avail.shape[1] != n_actions:
+            return None
+        return avail
+
+    def _obs_list_to_array(self, obs_list):
+        arr = (
+            obs_list
+            if isinstance(obs_list, np.ndarray)
+            else np.asarray([np.asarray(o, np.float32).ravel() for o in obs_list], np.float32)
+        )
+        target = getattr(self.env, "obs_dim_agent", arr.shape[1])
+        if arr.shape[1] < target:
+            arr = np.pad(arr, ((0, 0), (0, target - arr.shape[1])))
+        elif arr.shape[1] > target:
+            arr = arr[:, :target]
+        return arr.astype(np.float32)
+
+    def _normalize_avail(self, avail):
+        if avail is None:
+            return None
+        mask = np.asarray(avail, bool)
+        if mask.ndim == 1:
+            mask = np.tile(mask[None, :], (self.agents.n_agents, 1))
+        return mask
+
+    def _pack_episode(self, trans):
+        T = len(trans)
+        def stack_or_none(k):
+            vals = [t[k] for t in trans]
+            return None if vals[0] is None else np.stack(vals)
+        ep = {
+            "o": np.stack([t["o"] for t in trans]).astype(np.float32),
+            "o_next": np.stack([t["o_next"] for t in trans]).astype(np.float32),
+            "s": np.stack([t["s"] for t in trans]).astype(np.float32),
+            "s_next": np.stack([t["s_next"] for t in trans]).astype(np.float32),
+            "u": np.stack([t["u"] for t in trans]).astype(np.int64),
+            "avail_a": stack_or_none("avail_a"),
+            "avail_a_next": stack_or_none("avail_a_next"),
+            "r": np.array([t["r"] for t in trans], np.float32),
+            "terminated": np.array([t["terminated"] for t in trans], np.float32),
+            "padded": np.array([t["padded"] for t in trans], np.float32),
+            "episode_len": T,
+        }
+        return ep
+
+    def _insert_episode(self, ep):
+        for name in ("store_episode", "insert_episode", "push_episode", "add_episode", "push"):
+            fn = getattr(self.buffer, name, None)
+            if callable(fn):
+                fn(ep)
+                return
+        add_fn = getattr(self.buffer, "add", None)
+        if callable(add_fn):
+            for t in range(ep["episode_len"]):
+                add_fn({k: v[t] for k, v in ep.items() if k not in ("episode_len",)})
+
+    def _maybe_decay_epsilon(self, evaluate):
+        if not evaluate and self.epsilon > self.epsilon_end:
+            self.epsilon = max(self.epsilon_end, self.epsilon - self._eps_decay)
+
+    def _reset_hidden_states(self):
+        """Create RNN hidden state tensor matching policy hidden_dim."""
+        n_agents = getattr(self.agents, "n_agents", 1)
+        # try to read hidden_dim from policy.rnn if exists
+        hdim = 64
+        if hasattr(self.agents.policy, "rnn") and hasattr(self.agents.policy.rnn, "hidden_size"):
+            hdim = self.agents.policy.rnn.hidden_size
+        self.eval_hidden = torch.zeros((n_agents, hdim), dtype=torch.float32, device=self.device)
