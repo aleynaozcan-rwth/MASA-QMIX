@@ -1,13 +1,12 @@
 """
 utils/jobagent.py
-Step 8A.3 — Dynamic Arrivals + Replay-Safe JobAgent State
-----------------------------------------------------------
-Enhancements vs Step 7B:
-- Renamed Plane → JobAgent, Site → WorkCenter
-- Robust `reset()` for environment reuse
-- `completed_at` timestamp for replay/log credit
-- Safe `mark_completed()` helper
-- Compatible with dynamic arrivals & SimPy-driven scheduling
+Step 8A.5.3 — Machine-level Decision Integration
+------------------------------------------------
+Enhancements vs Step 8A.3:
+- JobAgent can now choose and record actions at the Machine level.
+- Each JobAgent tracks its last chosen Machine ID and speed factor.
+- execute_task() accepts (machine_id, workcenter_id, speed_factor).
+- Machine and WorkCenter histories stored separately for explainable logs.
 """
 
 from typing import Optional
@@ -17,7 +16,6 @@ from utils.task import Task
 # ======================================================================
 # Container for all JobAgents
 # ======================================================================
-
 class JobAgents:
     """Manages all JobAgent objects and simple bookkeeping utilities."""
 
@@ -30,8 +28,6 @@ class JobAgents:
             temp_object = JobAgent(i, task.simple_task_object, arrival_time=0.0)
             self.agents_object_list.append(temp_object)
 
-    # ------------------------------------------------------------------
-    # Utilities
     # ------------------------------------------------------------------
     def count_jobs(self):
         """Return (remaining_jobs, total_jobs) across all JobAgents."""
@@ -60,11 +56,10 @@ class JobAgents:
 # ======================================================================
 # Individual JobAgent
 # ======================================================================
-
 class JobAgent:
     """
-    Represents one JobAgent (former Plane) executing a predefined sequence of jobs.
-    Step 8A.3 adds replay-safe state control and timestamps for explainable logs.
+    Represents one JobAgent executing a predefined sequence of jobs.
+    Step 8A.5.3 adds machine-level decision tracking and explainable logs.
     """
 
     def __init__(self, agent_id, job_object_list, arrival_time: float = 0.0):
@@ -74,7 +69,12 @@ class JobAgent:
         self.left_job = [j for j in job_object_list]
         self.finished_job = []
         self.time_spent = 0.0
-        self.workcenter_history = []
+
+        # --- Decision tracking ---
+        self.last_chosen_machine: Optional[str] = None
+        self.machine_history = []     # Stores chosen machine IDs
+        self.workcenter_history = []  # Still stored for compatibility
+        self.speed_factor_history = []  # For performance explainability
 
         # --- Arrival / activity control ---
         self.arrival_time = float(arrival_time)
@@ -86,20 +86,34 @@ class JobAgent:
     # ------------------------------------------------------------------
     # Task execution
     # ------------------------------------------------------------------
-    def execute_task(self, job_object, workcenter_object):
+    def execute_task(self, job_object, machine_id, workcenter_id=None, speed_factor: float = 1.0):
         """
-        Execute next job in the sequence and update internal state.
-        Returns processing time.
+        Execute next job and update internal state.
+        Machine-level integration (Step 8A.5.3):
+          - Records selected machine and speed factor.
+          - Returns actual processing time after speed adjustment.
         """
         assert job_object.index_id == self.left_job[0].index_id, \
             f"JobAgent {self.agent_id} mismatch: expected job {self.left_job[0].index_id}, got {job_object.index_id}"
 
-        t_proc = job_object.time_span
-        self.time_spent += t_proc
+        base_time = job_object.time_span
+        adjusted_time = base_time * (1.0 / speed_factor)
+
+        # Update internal metrics
+        self.time_spent += adjusted_time
         self.finished_job.append(job_object)
         self.left_job.pop(0)
-        self.workcenter_history.append(workcenter_object.site_id)
-        return t_proc
+        self.last_chosen_machine = machine_id
+        self.machine_history.append(machine_id)
+        if workcenter_id is not None:
+            self.workcenter_history.append(workcenter_id)
+        self.speed_factor_history.append(speed_factor)
+
+        print(f"[JobAgent {self.agent_id}] Executed {job_object.index_id} "
+              f"on Machine {machine_id} (WC {workcenter_id}) "
+              f"speed×{speed_factor} | duration={adjusted_time:.2f}")
+
+        return adjusted_time
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
@@ -115,7 +129,10 @@ class JobAgent:
         self.left_job = list(self.static_job_list)
         self.finished_job.clear()
         self.time_spent = 0.0
+        self.machine_history.clear()
         self.workcenter_history.clear()
+        self.speed_factor_history.clear()
+        self.last_chosen_machine = None
         self.is_active = False
         self.completed_at = None
 
@@ -124,6 +141,7 @@ class JobAgent:
     # ------------------------------------------------------------------
     def __repr__(self):
         status = "active" if self.is_active else "waiting"
+        last_m = self.last_chosen_machine if self.last_chosen_machine else "-"
         return (f"<JobAgent id={self.agent_id}, status={status}, "
-                f"arrival={self.arrival_time}, left_jobs={len(self.left_job)}, "
-                f"completed_at={self.completed_at}>")
+                f"last_machine={last_m}, left_jobs={len(self.left_job)}, "
+                f"arrival={self.arrival_time}, completed_at={self.completed_at}>")

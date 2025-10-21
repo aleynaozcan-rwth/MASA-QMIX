@@ -11,13 +11,12 @@ from MARL.common.terms import t  # unified terminology helper
 
 
 # =========================
-# Gantt plot helper (clean version)
+# Gantt plot helper (8A.5.5)
 # =========================
 def plot_gantt(for_gantt_data, filename="gantt.png"):
     """
-    Step 8A.5 Gantt – Clean visual layout
-    - Shows WC + Operator labels only
-    - Colors represent operation types
+    Step 8A.5.5 Gantt – Machine-level clean layout
+    - Shows Machine, WorkCenter, and Operator labels
     - Y-axis = JobAgent IDs
     """
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
@@ -26,8 +25,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         print("[WARN] Gantt plot skipped: wrong or empty tuple format")
         return False
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    # Operation types determine colors
+    fig, ax = plt.subplots(figsize=(13, 6))
     operation_types = sorted(set([rec[2] for rec in for_gantt_data]))
     colors = list(mcolors.TABLEAU_COLORS.values())
     color_map = {op: colors[i % len(colors)] for i, op in enumerate(operation_types)}
@@ -41,26 +39,24 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
             operator = "?"
         ax.barh(jobagent, end - start, left=start, color=color_map[operation], edgecolor="black")
 
-        # 🟩 Only show WorkCenter + Operator label
+        # 🟦 Label includes Machine + WC + Operator (new)
         ax.text(
             (start + end) / 2,
             jobagent,
-            f"WC{workcenter} | O{operator}",
+            f"M{operation} | WC{workcenter} | O{operator}",
             va="center", ha="center", fontsize=7, color="black"
         )
         max_end = max(max_end, end)
 
-    # 🧭 Y axis = exact JobAgent IDs
     jobagent_ids = sorted(set([rec[4] for rec in for_gantt_data]))
     ax.set_yticks(jobagent_ids)
     ax.set_yticklabels([str(j) for j in jobagent_ids])
 
     ax.set_xlabel("Simulation Time (SimPy clock)")
     ax.set_ylabel(f"{t('JobAgent')} (ID)")
-    ax.set_title("Step 8A.5 – SimPy Schedule with Operators and Dynamic Arrivals")
+    ax.set_title("Step 8A.5.5 – Machine-level Schedule (WC + Operator + Dynamic Arrivals)")
     ax.set_xlim(0, max_end + 1)
 
-    # 🎨 Legend: operation types by color
     handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[op]) for op in operation_types]
     labels = [f"Operation {op}" for op in operation_types]
     ax.legend(handles, labels, title="Operation Types", bbox_to_anchor=(1.05, 1), loc="upper left")
@@ -73,12 +69,11 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 8A.5 Runner – with true SimPy time tracking
-    ------------------------------------------------
-    - Plane → JobAgent
-    - Site  → WorkCenter
-    - Adds real episode duration logging (SimPy time)
-    - Compatible with analyse_rewards.py
+    Step 8A.5.5 Runner – Machine-level Gantt + SimPy time sync
+    ----------------------------------------------------------
+    - Integrated with 8A.5.3 Environment (RL-driven dispatch)
+    - Plots Gantt with Machine + WC + Operator labels
+    - Logs real SimPy episode durations and wait times
     """
 
     def __init__(self, env, args):
@@ -97,14 +92,13 @@ class Runner:
 
         self.win_rates = []
         self.episode_rewards = []
-        self.episode_durations = []  # SimPy episode durations
-        self.wait_time_records = []  # per-episode wait times
+        self.episode_durations = []
+        self.wait_time_records = []
 
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
 
-        print(f"[Runner 8A.5] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
-        print(f"[DEBUG] Learning enabled={args.learn}, batch_size={getattr(args,'batch_size','?')}")
+        print(f"[Runner 8A.5.5] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
 
     def run(self, num):
         train_steps = 0
@@ -118,7 +112,7 @@ class Runner:
             sys.stdout.write(f"\rRun {num}, epoch {epoch}, avg rewards {np.mean(avg_rewards):.2f}")
             sys.stdout.flush()
 
-            # Evaluation
+            # Periodic evaluation
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
                 win_rate, ep_reward, global_ep_idx, gantt_eval = self.evaluate(all_gantt_data, global_ep_idx)
                 self.win_rates.append(win_rate)
@@ -129,7 +123,6 @@ class Runner:
                 except Exception as e:
                     print("[WARN] Gantt plot failed:", e)
 
-            # -------- Training episodes --------
             episodes = []
             avg_rewards = []
 
@@ -142,26 +135,25 @@ class Runner:
                 episodes.append(episode)
                 global_ep_idx += 1
 
-                # ✅ Real SimPy duration if available
                 if hasattr(self.rolloutWorker, "episode_duration"):
                     self.episode_durations.append(self.rolloutWorker.episode_duration)
                 else:
                     self.episode_durations.append(len(episode['r']))
 
-                # ✅ Wait time tracking
-                if hasattr(self.rolloutWorker, "wait_time_record"):
-                    self.wait_time_records.append(self.rolloutWorker.wait_time_record)
+                # Wait time extraction from env info if available
+                if hasattr(self.env, "wait_time_dict"):
+                    self.wait_time_records.append(dict(self.env.wait_time_dict))
                 else:
                     self.wait_time_records.append({0: np.mean(episode['r']) / 20})
 
-            # Merge batch for QMIX
+            # Merge batch
             episode_batch = episodes[0]
             episodes.pop(0)
             for ep in episodes:
                 for key in episode_batch.keys():
                     episode_batch[key] = np.concatenate((episode_batch[key], ep[key]), axis=0)
 
-            # -------- Training --------
+            # Training updates
             if self.args.alg in ['coma', 'central_v', 'reinforce']:
                 self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
             else:
@@ -169,7 +161,7 @@ class Runner:
                     if len(self.buffer) < self.args.batch_size:
                         print(f"\n[DEBUG] Buffer warm-up ({len(self.buffer)}/{self.args.batch_size}) – skipping training")
                     else:
-                        print(f"\n[DEBUG] Training active (buffer={len(self.buffer)}) – starting gradient updates...")
+                        print(f"\n[DEBUG] Training active (buffer={len(self.buffer)}) – gradient updates...")
                         for _ in range(self.args.train_steps):
                             mini_batch = self.buffer.sample(self.args.batch_size)
                             if mini_batch is None:
@@ -179,28 +171,25 @@ class Runner:
                             if train_steps % 50 == 0:
                                 print(f"[TRAIN] step={train_steps}, loss={loss:.4f}, buffer={len(self.buffer)}")
 
-        # === Save training metrics ===
+        # === Save logs ===
         try:
             history_dir = "./my_data_and_graph/historydata/"
             os.makedirs(history_dir, exist_ok=True)
 
-            # Rewards
             with open(os.path.join(history_dir, "episode_rewards.txt"), "w") as f_r:
                 for ep_idx, ep_r in enumerate(self.episode_rewards):
                     f_r.write(f"{ep_idx},{ep_r:.2f}\n")
 
-            # SimPy Times
             with open(os.path.join(history_dir, "times.txt"), "w") as f_t:
                 for ep_idx, dur in enumerate(self.episode_durations):
                     f_t.write(f"{ep_idx},{dur:.2f}\n")
 
-            # Wait times
             with open(os.path.join(history_dir, "waittimes.txt"), "w") as f_w:
                 for ep_idx, waits in enumerate(self.wait_time_records):
                     for job_id, wait_val in waits.items():
-                        f_w.write(f"Episode {ep_idx} | JobAgent J{job_id} | Operation {job_id % 9} | Wait {wait_val:.2f}\n")
+                        f_w.write(f"Episode {ep_idx} | JobAgent J{job_id} | Wait {wait_val:.2f}\n")
 
-            print("[Runner] Episode reward/time/wait logs saved for analysis.")
+            print("[Runner] Reward/time/wait logs saved for analysis.")
         except Exception as e:
             print("[WARN] Could not save episode stats:", e)
 

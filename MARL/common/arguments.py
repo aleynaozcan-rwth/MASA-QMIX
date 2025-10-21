@@ -71,7 +71,7 @@ def get_common_args():
     # --- Exploration / Annealing ---
     parser.add_argument('--epsilon', type=float, default=1.0)
     parser.add_argument('--min_epsilon', type=float, default=0.05)
-    parser.add_argument('--anneal_epsilon', type=float, default=0.001)   # 🔸 faster decay
+    parser.add_argument('--anneal_epsilon', type=float, default=0.0005)   # 🔸 faster decay
     parser.add_argument('--epsilon_anneal_scale', type=str, default='step')
 
     # --- Gradient / Optimization ---
