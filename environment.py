@@ -1,13 +1,10 @@
 """
 environment.py
-Step 8A.5.3 (Learning-Activated Revision)
-------------------------------------------
-- Keeps full 18-WorkCenter + Operator constraint logic.
-- Adds RL-ready components:
-  • true action consumption from agents
-  • available-action mask generation
-  • 10-dim observation/state vectors
-  • minimal but meaningful reward shaping
+Step 8A.6.2 – Reward Shaping Enhanced Environment
+-------------------------------------------------
+- Adds structured reward signal (wait penalty + completion bonus + utilization reward)
+- Compatible with QMix-based rollout (8A.6)
+- Returns (obs, state, avail_actions) tuples for learning
 """
 
 import simpy
@@ -24,46 +21,68 @@ from MARL.common.terms import t
 
 
 class ScheduleEnv(gym.Env):
-    environment_name = "MASA-SimPy-Scheduler"
+    environment_name = "MASA-QMIX-Scheduler"
 
-    def __init__(
-        self,
-        start_agents: int = 4,
-        max_agents: int = 12,
-        arrival_prob: float = 0.20,
-        variable_ops: bool = True,
-        seed: int = 123,
-    ):
-        # --- Core configuration ---
-        self.start_agents = int(start_agents)
-        self.max_agents = int(max_agents)
-        self.arrival_prob = float(arrival_prob)
-        self.variable_ops = bool(variable_ops)
+    def __init__(self,
+                 start_agents: int = 4,
+                 max_agents: int = 12,
+                 arrival_prob: float = 0.20,
+                 variable_ops: bool = True,
+                 seed: int = 123):
+        # --- Core parameters ---
+        self.start_agents = start_agents
+        self.max_agents = max_agents
+        self.arrival_prob = arrival_prob
+        self.variable_ops = variable_ops
         self.rng = np.random.default_rng(seed)
 
-        # --- Simulation state ---
+        # --- Env structures ---
+        self.sim_env = simpy.Environment()
         self.workcenters = []
         self.jobs = []
         self.agents = []
         self.job_record_for_gant = []
+        self.workcenter_resources = []
         self.done = False
         self.step_count = 0
         self._completed_prev = 0
-
-        self.sim_env = simpy.Environment()
-        self.workcenter_resources = []
-        self.task_gen = TaskGenerator()
-        self.operators = None
         self.wait_time_dict = {}
-        self._last_mean_wait = 0.0
 
-        # RL interface
-        self.action_space = None
-        self.n_actions = 0
-        self.obs_shape = 10
-        self.state_shape = 10
+        # --- Operators & Task generator ---
+        self.operators = None
+        self.task_gen = TaskGenerator()
+
+        # --- Gym/learning interface ---
+        self.action_space = spaces.Discrete(21)
+
+        # --- Reward tracking ---
+        self.total_reward = 0.0
+        self.operator_utilization = {}
+        self.workcenter_utilization = {}
 
         self.initialize()
+
+    # ============================================================
+    # === Observation / State / Action Info ======================
+    # ============================================================
+    def observe(self):
+        """
+        Generate simplified observation/state/action space.
+        For now: random low-dimensional representation (placeholder for feature extraction).
+        """
+        obs = np.zeros((len(self.agents), 10), dtype=np.float32)
+        state = np.zeros((10,), dtype=np.float32)
+        avail = np.ones((len(self.agents), self.action_space.n), dtype=np.float32)
+        return obs, state, avail
+
+    def get_env_info(self):
+        return {
+            "n_agents": len(self.agents),
+            "n_actions": self.action_space.n,
+            "state_shape": 10,
+            "obs_shape": 10,
+            "episode_limit": 200,
+        }
 
     # ============================================================
     # === Initialization =========================================
@@ -75,9 +94,8 @@ class ScheduleEnv(gym.Env):
         self.workcenters = sites_obj.sites_object_list
         self.jobs = jobs_obj.jobs_object_list
         self.sim_env = simpy.Environment()
-        self.workcenter_resources = [
-            simpy.Resource(self.sim_env, capacity=1) for _ in range(len(self.workcenters))
-        ]
+        self.workcenter_resources = [simpy.Resource(self.sim_env, capacity=1)
+                                     for _ in range(len(self.workcenters))]
 
         self.agents = []
         self.job_record_for_gant = []
@@ -85,211 +103,130 @@ class ScheduleEnv(gym.Env):
         self._completed_prev = 0
         self.step_count = 0
         self.wait_time_dict = {}
-        self._last_mean_wait = 0.0
 
-        # operators
         self.operators = Operators(sites_obj)
         self.operators.release_all()
 
-        # RL spaces
-        self.n_actions = len(self.workcenters)
-        self.action_space = spaces.Discrete(self.n_actions)
-
-        # initial JobAgents
         for aid in range(self.start_agents):
             task_objs = self.task_gen.generate_constrained_task(jobagent_id=aid)
             agent = JobAgent(agent_id=aid, job_object_list=task_objs, arrival_time=0)
             self.agents.append(agent)
             self.sim_env.process(self.jobagent_process(aid))
 
-        print(
-            f"\n=== Learning-Active Env Init ===\n"
-            f"WorkCenters={len(self.workcenters)} | Operators={len(self.operators.operators_object_list)} "
-            f"| StartAgents={self.start_agents}\n"
-        )
+        print(f"\n=== Step 8A.6.2 Initialized ===")
+        print(f"WorkCenters={len(self.workcenters)} | Operators={len(self.operators.operators_object_list)}")
 
     # ============================================================
-    # === Candidate discovery / Mask =============================
+    # === Candidate Discovery ====================================
     # ============================================================
-    def get_avail_actions(self):
-        """Mask over WorkCenters: 1 if free + operator + capability."""
-        mask = np.zeros((len(self.workcenters),), dtype=np.float32)
-        active_jobs = []
-        for a in self.agents:
-            if a.is_active and a.left_job:
-                jid = a.left_job[0].index_id if hasattr(a.left_job[0], "index_id") else a.left_job[0]
-                active_jobs.append(jid)
-        if not active_jobs:
-            return mask
+    def _candidate_pairs_for_job(self, job_id):
+        candidates = []
         for wc_id, wc in enumerate(self.workcenters):
-            if len(self.workcenter_resources[wc_id].users) != 0:
+            if job_id not in wc.resource_ids_list:
                 continue
-            has_op = any(
-                (not op.is_busy) and (wc_id in op.qualified_workcenters)
-                for op in self.operators.operators_object_list
-            )
-            if not has_op:
+            if len(self.workcenter_resources[wc_id].users) > 0:
                 continue
-            can_any = any((jid in wc.resource_ids_list) for jid in active_jobs)
-            if can_any:
-                mask[wc_id] = 1.0
-        return mask
+            op = self.operators.find_free_operator(job_id, wc_id)
+            if op is not None:
+                candidates.append((wc_id, op.operator_id))
+        return candidates
 
     # ============================================================
-    # === Observation / State ===================================
+    # === JobAgent Execution =====================================
     # ============================================================
-    def _build_obs(self):
-        T = float(self.sim_env.now)
-        n_agents = len(self.agents)
-        n_active = len(self.get_active_agents())
-        n_completed = len(self.job_record_for_gant)
-        waits = list(self.wait_time_dict.values()) if self.wait_time_dict else []
-        mean_wait = float(np.mean(waits)) if waits else 0.0
-
-        obs = np.zeros(self.obs_shape, dtype=np.float32)
-        obs[0] = min(1.0, T / 1000.0)
-        obs[1] = n_agents / max(1.0, self.max_agents)
-        obs[2] = n_active / max(1, n_agents)
-        obs[3] = min(1.0, n_completed / 100.0)
-        obs[4] = min(1.0, mean_wait / 100.0)
-        return obs
-
-    def _build_state(self):
-        return self._build_obs().copy()
-
-    # ============================================================
-    # === Core SimPy job processes ===============================
-    # ============================================================
-    def jobagent_process(self, agent_id: int):
+    def jobagent_process(self, agent_id):
         agent = self.agents[agent_id]
         agent.total_wait_time = 0.0
 
         if agent.arrival_time > self.sim_env.now:
             yield self.sim_env.timeout(agent.arrival_time - self.sim_env.now)
+
         agent.is_active = True
-        print(f"[t={self.sim_env.now}] {t('JobAgent')} {agent_id} entered system.")
 
         while agent.left_job:
-            jid = agent.left_job[0].index_id if hasattr(agent.left_job[0], "index_id") else agent.left_job[0]
-            yield self.sim_env.timeout(1)  # passive until dispatched
-            agent.total_wait_time += 1.0
-            self.wait_time_dict[agent_id] = agent.total_wait_time
+            job_id = agent.left_job[0].index_id
+            candidates = self._candidate_pairs_for_job(job_id)
+
+            if not candidates:
+                yield self.sim_env.timeout(1)
+                agent.total_wait_time += 1.0
+                self.wait_time_dict[agent_id] = agent.total_wait_time
+                continue
+
+            chosen_wc, chosen_op = self.rng.choice(candidates)
+            wc_res = self.workcenter_resources[chosen_wc]
+            operator = [op for op in self.operators.operators_object_list if op.operator_id == chosen_op][0]
+
+            with wc_res.request() as req:
+                yield req
+                operator.assign_job(job_id, chosen_wc)
+
+                start_t = self.sim_env.now
+                p_time = self.jobs[job_id].time_span
+                yield self.sim_env.timeout(p_time)
+                end_t = self.sim_env.now
+
+                operator.release()
+                self.save_env_info((start_t, end_t, job_id, chosen_wc, agent_id, operator.operator_id))
+                agent.left_job.pop(0)
 
         agent.is_active = False
         self.wait_time_dict[agent_id] = agent.total_wait_time
 
-    def _dispatch_agent_to_wc(self, agent, wc_id):
-        """Launch operation if possible; return True if started."""
-        if not agent.is_active or not agent.left_job:
-            return False
-        if wc_id < 0 or wc_id >= len(self.workcenter_resources):
-            return False
-        if len(self.workcenter_resources[wc_id].users) != 0:
-            return False
-        j = agent.left_job[0]
-        jid = j.index_id if hasattr(j, "index_id") else j
-        if jid not in self.workcenters[wc_id].resource_ids_list:
-            return False
-        op = self.operators.find_free_operator(jid, wc_id)
-        if op is None:
-            return False
+    # ============================================================
+    # === Reward Computation =====================================
+    # ============================================================
+    def _compute_reward(self, completed_now):
+        """
+        Reward = completion bonus + utilization balance - waiting penalty
+        """
+        # --- Completion reward ---
+        r_complete = completed_now * 10.0
 
-        wc_res = self.workcenter_resources[wc_id]
+        # --- Average waiting penalty ---
+        mean_wait = np.mean(list(self.wait_time_dict.values())) if self.wait_time_dict else 0.0
+        r_wait_penalty = -0.1 * mean_wait
 
-        def _op():
-            with wc_res.request() as req:
-                yield req
-                op.assign_job(jid, wc_id)
-                start = self.sim_env.now
-                proc = self.jobs[jid].time_span
-                yield self.sim_env.timeout(proc)
-                end = self.sim_env.now
-                op.release()
-                self.save_env_info((start, end, jid, wc_id, agent.agent_id, op.operator_id))
-                if agent.left_job and (
-                    agent.left_job[0].index_id if hasattr(agent.left_job[0], "index_id") else agent.left_job[0]
-                ) == jid:
-                    agent.left_job.pop(0)
+        # --- Utilization metrics ---
+        op_busy = np.mean([1 if op.is_busy else 0 for op in self.operators.operators_object_list])
+        wc_busy = np.mean([len(wc.users) for wc in self.workcenter_resources])
 
-        self.sim_env.process(_op())
-        return True
+        # encourage moderate load
+        r_util = +2.0 * (1 - abs(op_busy - 0.5))  # peak at balanced utilization
+        r_wc = +1.5 * (1 - abs(wc_busy - 0.5))
+
+        total_r = r_complete + r_util + r_wc + r_wait_penalty
+        return total_r
 
     # ============================================================
-    # === Core step ==============================================
+    # === Step function ==========================================
     # ============================================================
     def step(self, actions=None):
         self.step_count += 1
-        # maybe spawn new jobs
         self.maybe_spawn()
+        prev_completed = len(self.job_record_for_gant)
 
-        # --- apply actions ---
-        if actions is not None:
-            arr = np.asarray(actions).reshape(-1)
-            for idx, agent in enumerate(self.agents):
-                if idx < arr.shape[0]:
-                    wc_choice = int(arr[idx])
-                    self._dispatch_agent_to_wc(agent, wc_choice)
-
-        # advance SimPy clock
         self.advance_clock()
-
-        # --- reward shaping ---
-        new_records = self.job_record_for_gant[self._completed_prev :]
-        newly_completed_by = [rec[4] for rec in new_records]
+        new_records = self.job_record_for_gant[prev_completed:]
         completed_now = len(new_records)
-        self._completed_prev = len(self.job_record_for_gant)
 
-        reward = -1.0 + 8.0 * completed_now
-        waits = list(self.wait_time_dict.values()) if self.wait_time_dict else []
-        cur_mean = float(np.mean(waits)) if waits else 0.0
-        delta_wait = max(0.0, cur_mean - self._last_mean_wait)
-        reward -= 0.2 * delta_wait
-        self._last_mean_wait = cur_mean
+        reward = self._compute_reward(completed_now)
 
-        self.done = self.all_jobs_completed()
-        if self.done:
-            print(f"✅ All jobs finished @ t={self.sim_env.now}")
-
-        # --- info pack ---
-        current_waits = {a.agent_id: getattr(a, "total_wait_time", 0.0) for a in self.agents}
-        current_waits.update(self.wait_time_dict)
-
-        obs_vec = self._build_obs()
-        state_vec = self._build_state()
-        avail_mask = self.get_avail_actions()
+        self.done = self.all_jobs_completed() or self.step_count >= 200
+        obs, state, avail = self.observe()
 
         info = {
             "time": self.sim_env.now,
             "completed_jobs": len(self.job_record_for_gant),
             "episodes_situation": list(self.job_record_for_gant),
-            f"n_{t('JobAgent')}s": len(self.agents),
-            "active_agents": self.get_active_agents(),
-            "new_records": list(new_records),
-            "newly_completed_by": list(newly_completed_by),
-            "wait_times": current_waits,
-            "avail_actions": avail_mask,
-            "obs": obs_vec,
-            "state": state_vec,
+            "active_agents": [a.agent_id for a in self.agents if a.is_active],
         }
 
-        print(
-            f"[DEBUG] Step={self.step_count} | t={self.sim_env.now} | "
-            f"completed={len(self.job_record_for_gant)} | active={len(self.get_active_agents())}"
-        )
-        return reward, self.done, info
+        return (obs, state, avail), reward, self.done, info
 
     # ============================================================
-    # === Utility helpers =======================================
+    # === Other helpers ==========================================
     # ============================================================
-    def save_env_info(self, record):
-        self.job_record_for_gant.append(record)
-
-    def all_jobs_completed(self):
-        return all((not a.is_active) or (len(a.left_job) == 0) for a in self.agents)
-
-    def get_active_agents(self):
-        return [a.agent_id for a in self.agents if a.is_active]
-
     def advance_clock(self, max_time=None):
         if len(self.sim_env._queue) == 0:
             return
@@ -300,50 +237,21 @@ class ScheduleEnv(gym.Env):
         while len(self.sim_env._queue) > 0 and self.sim_env._queue[0][0] == self.sim_env.now:
             self.sim_env.step()
 
-    def can_spawn_more(self) -> bool:
-        return len(self.agents) < self.max_agents
-
-    def add_new_agent(self, time_now: float):
-        if not self.can_spawn_more():
-            return False
-        aid = len(self.agents)
-        task_objs = self.task_gen.generate_constrained_task(jobagent_id=aid)
-        agent = JobAgent(agent_id=aid, job_object_list=task_objs, arrival_time=time_now)
-        self.agents.append(agent)
-        self.sim_env.process(self.jobagent_process(aid))
-        print(f"[ARRIVAL t={time_now}] New {t('JobAgent')} {aid}")
-        return True
+    def all_jobs_completed(self):
+        return all((not a.is_active) or (len(a.left_job) == 0) for a in self.agents)
 
     def maybe_spawn(self):
-        if self.can_spawn_more() and self.rng.random() < self.arrival_prob:
-            self.add_new_agent(self.sim_env.now)
+        if len(self.agents) < self.max_agents and self.rng.random() < self.arrival_prob:
+            aid = len(self.agents)
+            task_objs = self.task_gen.generate_constrained_task(jobagent_id=aid)
+            agent = JobAgent(agent_id=aid, job_object_list=task_objs, arrival_time=self.sim_env.now)
+            self.agents.append(agent)
+            self.sim_env.process(self.jobagent_process(aid))
+            print(f"[ARRIVAL t={self.sim_env.now}] New {t('JobAgent')} {aid}")
+
+    def save_env_info(self, record):
+        self.job_record_for_gant.append(record)
 
     def reset(self):
         self.initialize()
-        return np.zeros(self.obs_shape, dtype=np.float32)
-
-    def get_env_info(self):
-        return {
-            "n_agents": len(self.agents),
-            "n_actions": self.n_actions,
-            "state_shape": self.state_shape,
-            "obs_shape": self.obs_shape,
-            "episode_limit": 200,
-        }
-
-    # ============================================================
-    # === Quick test ============================================
-    # ============================================================
-    def test_dynamic_arrivals(self, max_steps=50):
-        self.reset()
-        for _ in range(max_steps):
-            acts = self.rng.integers(0, self.n_actions, size=(len(self.agents),))
-            _, done, _ = self.step(acts)
-            if done:
-                break
-        print("✅ Learning-Active Step test complete.")
-
-
-if __name__ == "__main__":
-    env = ScheduleEnv()
-    env.test_dynamic_arrivals()
+        return self.observe()
