@@ -8,7 +8,7 @@
 #   • Optional batch summary print for monitoring (disabled by default)
 
 from collections import deque
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union, Tuple
 import numpy as np
 import random
 
@@ -136,11 +136,9 @@ class ReplayBuffer:
         if len(self._episodes) == 0 and len(self._current) == 0:
             return None
 
-        # Include current partial episode if exists
+        pool = list(self._episodes)
         if len(self._current) > 0:
-            pool = list(self._episodes) + [list(self._current)]
-        else:
-            pool = list(self._episodes)
+            pool.append(list(self._current))
 
         B = min(batch_size, len(pool))
         episodes = self._rng.sample(pool, k=B)
@@ -149,18 +147,16 @@ class ReplayBuffer:
         n_agents, obs_dim = _infer_agents_obs(episodes)
 
         # Pre-allocate main tensors
-        o        = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
-        o_next   = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
-        u        = np.zeros((B, T, n_agents, 1), dtype=np.int64)
-        r        = np.zeros((B, T, 1), dtype=np.float32)
+        o = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
+        o_next = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
+        u = np.zeros((B, T, n_agents, 1), dtype=np.int64)
+        r = np.zeros((B, T, 1), dtype=np.float32)
         terminated = np.zeros((B, T, 1), dtype=np.float32)
-        filled     = np.zeros((B, T, 1), dtype=np.float32)
+        filled = np.zeros((B, T, 1), dtype=np.float32)
 
-        # Optional blocks
         have_avail = have_state = have_u_onehot = False
         avail_u = avail_u_next = state = state_next = u_onehot = None
 
-        # Pack transitions
         for b, ep in enumerate(episodes):
             t_limit = min(T, len(ep))
             for t in range(t_limit):
@@ -212,7 +208,7 @@ class ReplayBuffer:
                 # Filled mask
                 filled[b, t, 0] = 1.0
 
-        # If one-hot missing but n_actions provided
+        # One-hot fallback
         if u_onehot is None and n_actions is not None:
             u_onehot = np.zeros((B, T, n_agents, n_actions), dtype=np.float32)
             idx = u.squeeze(-1)
@@ -222,7 +218,7 @@ class ReplayBuffer:
                         if filled[b, t, 0] > 0.5:
                             u_onehot[b, t, a, idx[b, t, a]] = 1.0
 
-        # --- Job-agent ID tracking (optional debug / TD analysis) ---
+        # Job-agent IDs (for analysis)
         job_ids = np.zeros((B, 1), dtype=np.int32)
         for b, ep in enumerate(episodes):
             if len(ep) > 0 and "jobagent_id" in ep[0]:
@@ -246,8 +242,6 @@ class ReplayBuffer:
             batch["state"] = state
             batch["state_next"] = state_next
 
-        # Optional debug log
-        # print(f"[ReplayBuffer] Sampled batch: B={B}, T={T}, n_agents={n_agents}, obs_dim={obs_dim}")
         return batch
 
     def __len__(self) -> int:
@@ -304,7 +298,7 @@ def _slice_first_dim(arr: Any, t: int) -> Any:
     return arr
 
 
-def _infer_agents_obs(episodes: List[Episode]) -> (int, int):
+def _infer_agents_obs(episodes: List[Episode]) -> Tuple[int, int]:
     """Infer (n_agents, obs_dim). Fallback now 11D due to progress_ratio feature."""
     for ep in episodes:
         for tr in ep:
