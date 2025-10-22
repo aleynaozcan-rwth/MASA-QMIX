@@ -1,8 +1,8 @@
-# environment.py – MASA-QMIX Environment (Step 8A.6.4)
+# environment.py – MASA-QMIX Environment (Step 8A.6.5)
 # ------------------------------------------------------
-# Integrated environment compatible with Step 8A.6.3 rollout and replay-aware QMIX.
-# Includes: dynamic job arrivals, WorkCenter/operator constraints, shaped reward, and
-# fixed observation/state dimensions for policy and mixer compatibility.
+# Added: progress_ratio feature for pattern-level generalization across heterogeneous jobs
+# Observation vector now 11D (was 10D)
+# Purpose: allow agents to learn from relative progress rather than absolute job length.
 
 import numpy as np
 from collections import deque
@@ -13,23 +13,20 @@ from utils.site import Sites
 
 class MASAEnv:
     """
-    MASA-QMIX Environment (Step 8A.6.4)
+    MASA-QMIX Environment (Step 8A.6.5)
     ------------------------------------
     Key Features:
-      • Job arrivals are dynamic (continuous generation)
-      • Each operator acts as an agent selecting a WorkCenter (WC)
-      • Operator–WorkCenter eligibility enforced (group-based)
-      • Machine queues and speeds defined via Sites (Step 8A.5.1)
-      • Observation size fixed (10), global state fixed (64)
-      • Reward shaping with component breakdown
-    Compatible with rollout expecting:
-        obs_next, reward, done, info
+      • Dynamic job arrivals (continuous generation)
+      • Operator–WorkCenter eligibility constraints
+      • RNN-compatible observation/state (obs_dim=11, state_dim=64)
+      • Reward shaping (complete, progress, wait, wip, idle)
+      • Added progress_ratio feature for cross-job generalization
     """
 
     def __init__(
         self,
         num_operators: int = 4,
-        obs_dim_agent: int = 10,
+        obs_dim_agent: int = 11,   # <-- updated from 10 to 11
         state_dim: int = 64,
         episode_limit: int = 200,
         seed: int = 42,
@@ -203,7 +200,13 @@ class MASAEnv:
         return [self._build_agent_obs(op) for op in range(self.num_ops)]
 
     def _build_agent_obs(self, op_id: int) -> np.ndarray:
-        """Agent observation vector (10D)."""
+        """Agent observation vector (11D) with progress ratio."""
+        # --- New feature: overall progress ratio ---
+        total_jobs = float(self.completed_jobs + self._wip())
+        progress_ratio = float(self.completed_jobs / total_jobs) if total_jobs > 0 else 0.0
+        # This captures global progress of the system (0–1) and helps generalize
+        # across jobs of varying lengths and sequences.
+
         op_busy = 1.0 if self.operator_busy[op_id] else 0.0
         group_norm = float(op_id / max(1, (self.num_ops - 1)))
 
@@ -217,11 +220,14 @@ class MASAEnv:
 
         base = np.array(
             [op_busy, group_norm, avg_q_norm, wip_norm, time_norm,
-             completed_norm, util_ops, util_machines],
+             completed_norm, util_ops, util_machines, progress_ratio],
             dtype=np.float32,
         )
+        # pad or trim to obs_dim_agent
         if base.shape[0] < self.obs_dim_agent:
-            base = np.concatenate([base, np.zeros((self.obs_dim_agent - base.shape[0],), dtype=np.float32)], axis=0)
+            base = np.concatenate([base,
+                                   np.zeros((self.obs_dim_agent - base.shape[0],),
+                                            dtype=np.float32)], axis=0)
         elif base.shape[0] > self.obs_dim_agent:
             base = base[:self.obs_dim_agent]
         return base

@@ -4,8 +4,15 @@ import sys
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+# Rollout
 from MARL.common.rollout import RolloutWorker
+try:
+    # Optional: if a CommRolloutWorker exists for communication-based algs
+    from MARL.common.rollout import CommRolloutWorker  # type: ignore
+except Exception:
+    CommRolloutWorker = RolloutWorker  # safe fallback
 
+# Agents / Buffer
 from MARL.agent.agent import Agents, CommAgents
 from MARL.common.replay_buffer import ReplayBuffer
 from MARL.common.terms import t  # unified terminology helper
@@ -38,9 +45,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         else:
             start, end, operation, workcenter, jobagent = rec
             operator = "?"
-        ax.barh(jobagent, end - start, left=start, color=color_map[operation], edgecolor="black")
-
-        # 🟦 Label includes Machine + WC + Operator (new)
+        ax.barh(jobagent, end - start, left=start, edgecolor="black")
         ax.text(
             (start + end) / 2,
             jobagent,
@@ -58,7 +63,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     ax.set_title("Step 8A.5.5 – Machine-level Schedule (WC + Operator + Dynamic Arrivals)")
     ax.set_xlim(0, max_end + 1)
 
-    handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[op]) for op in operation_types]
+    handles = [plt.Rectangle((0, 0), 1, 1) for _ in operation_types]
     labels = [f"Operation {op}" for op in operation_types]
     ax.legend(handles, labels, title="Operation Types", bbox_to_anchor=(1.05, 1), loc="upper left")
 
@@ -70,11 +75,11 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 8A.5.5 Runner – Machine-level Gantt + SimPy time sync
-    ----------------------------------------------------------
-    - Integrated with 8A.5.3 Environment (RL-driven dispatch)
-    - Plots Gantt with Machine + WC + Operator labels
-    - Logs real SimPy episode durations and wait times
+    Step 8A.6.5 Runner – Replay-based QMIX integration
+    --------------------------------------------------
+    - Works with 11D observations (progress_ratio)
+    - Uses episodic ReplayBuffer sampling for learning
+    - Keeps Gantt plotting & episode/wait logging
     """
 
     def __init__(self, env, args):
@@ -84,11 +89,11 @@ class Runner:
         # Agents & rollout setup
         if args.alg.find('commnet') > -1 or args.alg.find('g2anet') > -1:
             self.agents = CommAgents(args)
-            self.buffer = ReplayBuffer(size=args.buffer_size, seed=args.seed) if args.learn else None
+            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) if getattr(args, "learn", True) else None
             self.rolloutWorker = CommRolloutWorker(env, self.agents, args, buffer=self.buffer)
         else:
             self.agents = Agents(args)
-            self.buffer = ReplayBuffer(size=args.buffer_size, seed=args.seed) if args.learn else None
+            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) if getattr(args, "learn", True) else None
             self.rolloutWorker = RolloutWorker(env, self.agents, args, buffer=self.buffer)
 
         self.win_rates = []
@@ -99,7 +104,7 @@ class Runner:
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
 
-        print(f"[Runner 8A.5.5] Initialized | alg={args.alg} | buffer_size={getattr(args,'buffer_size','-')}")
+        print(f"[Runner 8A.6.5] Initialized | alg={args.alg} | buffer={getattr(args,'buffer_size','-')} | batch={getattr(args,'batch_size','-')}")
 
     def run(self, num):
         train_steps = 0
@@ -131,7 +136,7 @@ class Runner:
                 episode, _, _, gantt_data = self.rolloutWorker.generate_episode(global_ep_idx)
                 all_gantt_data.extend(gantt_data)
 
-                ep_r = np.sum(episode['r'])
+                ep_r = float(np.sum(episode.get('r', 0)))
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
@@ -139,24 +144,21 @@ class Runner:
                 if hasattr(self.rolloutWorker, "episode_duration"):
                     self.episode_durations.append(self.rolloutWorker.episode_duration)
                 else:
-                    self.episode_durations.append(len(episode['r']))
+                    self.episode_durations.append(len(episode.get('r', [])))
 
-                # Wait time extraction from env info if available
                 if hasattr(self.env, "wait_time_dict"):
                     self.wait_time_records.append(dict(self.env.wait_time_dict))
                 else:
-                    self.wait_time_records.append({0: np.mean(episode['r']) / 20})
+                    self.wait_time_records.append({0: (ep_r / 20.0 if episode.get('r') is not None else 0.0)})
 
-            # Merge batch
-            episode_batch = episodes[0]
-            episodes.pop(0)
-            for ep in episodes:
-                for key in episode_batch.keys():
-                    episode_batch[key] = np.concatenate((episode_batch[key], ep[key]), axis=0)
-
-            # Training updates
+            # === Training updates (Replay-based) ===
             if self.args.alg in ['coma', 'central_v', 'reinforce']:
-                self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
+                if len(episodes) > 0:
+                    episode_batch = episodes[0]
+                    for ep in episodes[1:]:
+                        for key in episode_batch.keys():
+                            episode_batch[key] = np.concatenate((episode_batch[key], ep[key]), axis=0)
+                    self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
             else:
                 if self.buffer is not None:
                     if len(self.buffer) < self.args.batch_size:
@@ -164,13 +166,20 @@ class Runner:
                     else:
                         print(f"\n[DEBUG] Training active (buffer={len(self.buffer)}) – gradient updates...")
                         for _ in range(self.args.train_steps):
-                            mini_batch = self.buffer.sample(self.args.batch_size)
+                            mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.args.n_actions)
                             if mini_batch is None:
                                 break
-                            loss = self.agents.train(mini_batch, train_steps)
+                            result = self.agents.train(mini_batch, train_steps)
                             train_steps += 1
-                            if train_steps % 50 == 0:
-                                print(f"[TRAIN] step={train_steps}, loss={loss:.4f}, buffer={len(self.buffer)}")
+                            if isinstance(result, dict):
+                                loss = result.get("loss", None)
+                                td = result.get("td_error", None)
+                                if (train_steps % 20 == 0) and (loss is not None):
+                                    msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
+                                    if td is not None:
+                                        msg += f", td={td:.4f}"
+                                    msg += f", buffer={len(self.buffer)}"
+                                    print(msg)
 
         # === Save logs ===
         try:

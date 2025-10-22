@@ -36,11 +36,37 @@ class Agents:
             self.policy = Reinforce(args)
         else:
             raise Exception("No such algorithm")
+
         self.args = args
-        print('[Agents] Initialized')
+        print(f"[Agents] Initialized ({args.alg.upper()})")
 
-    # (unchanged choose_action helpers omitted for brevity)
+    # ------------------------------------------------------------------
+    # Step 8A.6.5 – Replay-aware Learning Path
+    # ------------------------------------------------------------------
+    def learn_from_replay(self, batch: dict, train_step: int) -> dict:
+        """
+        New learning path for replay-based MARL (QMIX-style).
+        This directly forwards the sampled batch to the policy's learn() method.
+        """
+        if not hasattr(self.policy, "learn"):
+            raise AttributeError("Current policy does not implement learn() method.")
 
+        # Forward to QMIX or equivalent learner
+        output = self.policy.learn(batch, train_step)
+
+        # Optional debug
+        if output is not None and isinstance(output, dict):
+            loss = output.get("loss", None)
+            td_error = output.get("td_error", None)
+            if loss is not None:
+                print(f"[Agents] Step {train_step} | Loss={loss:.4f} | TD-Error={td_error:.4f}" if td_error else
+                      f"[Agents] Step {train_step} | Loss={loss:.4f}")
+
+        return output
+
+    # ------------------------------------------------------------------
+    # Original episodic learning path (kept for backward compat.)
+    # ------------------------------------------------------------------
     def _get_max_episode_len(self, batch):
         terminated = batch['terminated']
         episode_num = terminated.shape[0]
@@ -55,28 +81,27 @@ class Agents:
 
     def train(self, batch, train_step, epsilon=None):
         """
-        Dual-path training:
-        - If batch looks like replay transitions (has 'state'), call policy.learn_from_transitions()
-        - Else, assume episodic mixer training and call policy.learn()
+        Unified training entry.
+        - For replay-based learners (QMIX), call learn_from_replay().
+        - For episodic learners (VDN, COMA, etc.), use original episodic path.
         """
+        # Replay-aware QMIX path
         if isinstance(batch, dict) and 'state' in batch:
-            # Transition-based update (Step 7B.3)
-            return self.policy.learn_from_transitions(batch, train_step)
-        else:
-            # Episodic training path (original mixers)
-            max_episode_len = self._get_max_episode_len(batch)
-            for key in batch.keys():
-                if key != 'z':
-                    batch[key] = batch[key][:, :max_episode_len]
-            self.policy.learn(batch, max_episode_len, train_step, epsilon)
-            if train_step > 0 and train_step % self.args.save_cycle == 0:
-                print("\nStart saving model", train_step, self.args.save_cycle)
-                self.policy.save_model(train_step)
-            return None
+            return self.learn_from_replay(batch, train_step)
+
+        # Episodic fallback (legacy)
+        max_episode_len = self._get_max_episode_len(batch)
+        for key in batch.keys():
+            if key != 'z':
+                batch[key] = batch[key][:, :max_episode_len]
+        self.policy.learn(batch, max_episode_len, train_step, epsilon)
+        if train_step > 0 and train_step % self.args.save_cycle == 0:
+            print(f"\n[Agents] Saving model checkpoint at step {train_step}")
+            self.policy.save_model(train_step)
+        return None
 
 
 class CommAgents:
-    # unchanged aside from init message
     def __init__(self, args):
         self.n_actions = args.n_actions
         self.n_agents = args.n_agents
@@ -92,6 +117,4 @@ class CommAgents:
         else:
             raise Exception("No such algorithm")
         self.args = args
-        print('[CommAgents] Initialized')
-
-    # rest stays as before
+        print(f"[CommAgents] Initialized ({alg.upper()})")
