@@ -7,10 +7,9 @@ import matplotlib.colors as mcolors
 # Rollout
 from MARL.common.rollout import RolloutWorker
 try:
-    # Optional: if a CommRolloutWorker exists for communication-based algs
     from MARL.common.rollout import CommRolloutWorker  # type: ignore
 except Exception:
-    CommRolloutWorker = RolloutWorker  # safe fallback
+    CommRolloutWorker = RolloutWorker
 
 # Agents / Buffer
 from MARL.agent.agent import Agents, CommAgents
@@ -18,19 +17,11 @@ from MARL.common.replay_buffer import ReplayBuffer
 from MARL.common.terms import t  # unified terminology helper
 
 
-# =========================
-# Gantt plot helper (8A.5.5)
-# =========================
 def plot_gantt(for_gantt_data, filename="gantt.png"):
-    """
-    Step 8A.5.5 Gantt – Machine-level clean layout
-    - Shows Machine, WorkCenter, and Operator labels
-    - Y-axis = JobAgent IDs
-    """
+    """Step 8A.6.6 Gantt – Machine-level layout with WC + Operator labels."""
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
         return False
     if len(for_gantt_data) == 0 or len(for_gantt_data[0]) not in [5, 6]:
-        print("[WARN] Gantt plot skipped: wrong or empty tuple format")
         return False
 
     fig, ax = plt.subplots(figsize=(13, 6))
@@ -45,28 +36,21 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         else:
             start, end, operation, workcenter, jobagent = rec
             operator = "?"
-        ax.barh(jobagent, end - start, left=start, edgecolor="black")
-        ax.text(
-            (start + end) / 2,
-            jobagent,
-            f"M{operation} | WC{workcenter} | O{operator}",
-            va="center", ha="center", fontsize=7, color="black"
-        )
+        ax.barh(jobagent, end - start, left=start, color=color_map.get(operation, "gray"), edgecolor="black")
+        ax.text((start + end) / 2, jobagent, f"M{operation} | WC{workcenter} | O{operator}",
+                va="center", ha="center", fontsize=7, color="black")
         max_end = max(max_end, end)
 
     jobagent_ids = sorted(set([rec[4] for rec in for_gantt_data]))
     ax.set_yticks(jobagent_ids)
     ax.set_yticklabels([str(j) for j in jobagent_ids])
-
     ax.set_xlabel("Simulation Time (SimPy clock)")
     ax.set_ylabel(f"{t('JobAgent')} (ID)")
-    ax.set_title("Step 8A.5.5 – Machine-level Schedule (WC + Operator + Dynamic Arrivals)")
+    ax.set_title("Step 8A.6.6 – Machine-level Schedule (WC + Operator + Dynamic Arrivals)")
     ax.set_xlim(0, max_end + 1)
-
-    handles = [plt.Rectangle((0, 0), 1, 1) for _ in operation_types]
+    handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[op]) for op in operation_types]
     labels = [f"Operation {op}" for op in operation_types]
     ax.legend(handles, labels, title="Operation Types", bbox_to_anchor=(1.05, 1), loc="upper left")
-
     plt.tight_layout()
     plt.savefig(filename, dpi=300)
     plt.close()
@@ -75,11 +59,11 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
 class Runner:
     """
-    Step 8A.6.5 Runner – Replay-based QMIX integration
-    --------------------------------------------------
-    - Works with 11D observations (progress_ratio)
-    - Uses episodic ReplayBuffer sampling for learning
-    - Keeps Gantt plotting & episode/wait logging
+    Step 8A.6.6 Runner – Replay-based QMIX + KPI Logging + Learning Stability
+    -------------------------------------------------------------------------
+    - 11D observations (progress_ratio)
+    - Extended KPI metrics (avg wait, utilization, makespan)
+    - Moving-average loss/TD tracking
     """
 
     def __init__(self, env, args):
@@ -103,8 +87,10 @@ class Runner:
 
         self.save_path = os.path.join(self.args.result_dir, args.alg, args.map)
         os.makedirs(self.save_path, exist_ok=True)
+        self.history_dir = "./my_data_and_graph/historydata/"
+        os.makedirs(self.history_dir, exist_ok=True)
 
-        print(f"[Runner 8A.6.5] Initialized | alg={args.alg} | buffer={getattr(args,'buffer_size','-')} | batch={getattr(args,'batch_size','-')}")
+        print(f"[Runner 8A.6.6] Initialized | alg={args.alg} | buffer={getattr(args,'buffer_size','-')} | batch={getattr(args,'batch_size','-')}")
 
     def run(self, num):
         train_steps = 0
@@ -118,98 +104,113 @@ class Runner:
             sys.stdout.write(f"\rRun {num}, epoch {epoch}, avg rewards {np.mean(avg_rewards):.2f}")
             sys.stdout.flush()
 
-            # Periodic evaluation
+            # === Periodic evaluation ===
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
                 win_rate, ep_reward, global_ep_idx, gantt_eval = self.evaluate(all_gantt_data, global_ep_idx)
                 self.win_rates.append(win_rate)
                 self.episode_rewards.append(ep_reward)
                 print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
                 try:
-                    plot_gantt(gantt_eval, filename=f"./my_data_and_graph/historydata/gantt_epoch{epoch}.png")
+                    plot_gantt(gantt_eval, filename=f"{self.history_dir}/gantt_epoch{epoch}.png")
                 except Exception as e:
                     print("[WARN] Gantt plot failed:", e)
 
-            episodes = []
-            avg_rewards = []
+            episodes, avg_rewards = [], []
 
             for _ in range(self.args.n_episodes):
                 episode, _, _, gantt_data = self.rolloutWorker.generate_episode(global_ep_idx)
                 all_gantt_data.extend(gantt_data)
-
                 ep_r = float(np.sum(episode.get('r', 0)))
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
 
+                # Episode durations
                 if hasattr(self.rolloutWorker, "episode_duration"):
                     self.episode_durations.append(self.rolloutWorker.episode_duration)
                 else:
                     self.episode_durations.append(len(episode.get('r', [])))
 
+                # Wait times
                 if hasattr(self.env, "wait_time_dict"):
                     self.wait_time_records.append(dict(self.env.wait_time_dict))
                 else:
-                    self.wait_time_records.append({0: (ep_r / 20.0 if episode.get('r') is not None else 0.0)})
+                    self.wait_time_records.append({0: ep_r / 20.0})
 
             # === Training updates (Replay-based) ===
-            if self.args.alg in ['coma', 'central_v', 'reinforce']:
-                if len(episodes) > 0:
-                    episode_batch = episodes[0]
-                    for ep in episodes[1:]:
-                        for key in episode_batch.keys():
-                            episode_batch[key] = np.concatenate((episode_batch[key], ep[key]), axis=0)
-                    self.agents.train(episode_batch, train_steps, self.rolloutWorker.epsilon)
-            else:
-                if self.buffer is not None:
-                    if len(self.buffer) < self.args.batch_size:
-                        print(f"\n[DEBUG] Buffer warm-up ({len(self.buffer)}/{self.args.batch_size}) – skipping training")
-                    else:
-                        print(f"\n[DEBUG] Training active (buffer={len(self.buffer)}) – gradient updates...")
-                        for _ in range(self.args.train_steps):
-                            mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.args.n_actions)
-                            if mini_batch is None:
-                                break
-                            result = self.agents.train(mini_batch, train_steps)
-                            train_steps += 1
-                            if isinstance(result, dict):
-                                loss = result.get("loss", None)
-                                td = result.get("td_error", None)
-                                if (train_steps % 20 == 0) and (loss is not None):
-                                    msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
-                                    if td is not None:
-                                        msg += f", td={td:.4f}"
-                                    msg += f", buffer={len(self.buffer)}"
-                                    print(msg)
+            if self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
+                if len(self.buffer) < self.args.batch_size:
+                    print(f"\n[DEBUG] Buffer warm-up ({len(self.buffer)}/{self.args.batch_size}) – skipping training")
+                else:
+                    print(f"\n[DEBUG] Training active (buffer={len(self.buffer)}) – gradient updates...")
+                    for _ in range(self.args.train_steps):
+                        mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.args.n_actions)
+                        if mini_batch is None:
+                            break
+                        result = self.agents.train(mini_batch, train_steps)
+                        train_steps += 1
+                        if isinstance(result, dict):
+                            loss, td = result.get("loss"), result.get("td_error")
+                            if (train_steps % 20 == 0) and (loss is not None):
+                                msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
+                                if td is not None:
+                                    msg += f", td={td:.4f}"
+                                msg += f", buffer={len(self.buffer)}"
+                                print(msg)
 
-        # === Save logs ===
+            # === KPI LOGGING (Step 8A.6.6) ===
+            try:
+                avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)
+                util_m = self.env._util_machines()
+                util_o = self.env._util_ops()
+                makespan = self.env.t
+                with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
+                    f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+            except Exception as e:
+                print(f"[WARN] KPI logging failed: {e}")
+
+        # === Save episode statistics ===
         try:
-            history_dir = "./my_data_and_graph/historydata/"
-            os.makedirs(history_dir, exist_ok=True)
-
-            with open(os.path.join(history_dir, "episode_rewards.txt"), "w") as f_r:
+            with open(os.path.join(self.history_dir, "episode_rewards.txt"), "w") as f_r:
                 for ep_idx, ep_r in enumerate(self.episode_rewards):
                     f_r.write(f"{ep_idx},{ep_r:.2f}\n")
 
-            with open(os.path.join(history_dir, "times.txt"), "w") as f_t:
+            with open(os.path.join(self.history_dir, "times.txt"), "w") as f_t:
                 for ep_idx, dur in enumerate(self.episode_durations):
                     f_t.write(f"{ep_idx},{dur:.2f}\n")
 
-            with open(os.path.join(history_dir, "waittimes.txt"), "w") as f_w:
+            with open(os.path.join(self.history_dir, "waittimes.txt"), "w") as f_w:
                 for ep_idx, waits in enumerate(self.wait_time_records):
                     for job_id, wait_val in waits.items():
                         f_w.write(f"Episode {ep_idx} | JobAgent J{job_id} | Wait {wait_val:.2f}\n")
-
             print("[Runner] Reward/time/wait logs saved for analysis.")
         except Exception as e:
             print("[WARN] Could not save episode stats:", e)
 
         print("\n✅ [Runner] Training completed successfully.")
 
-    def evaluate(self, all_gantt_data, global_ep_idx):
-        win_number = 0
-        episode_rewards = 0
-        gantt_eval = []
+        # === Post-training moving average plot ===
+        try:
+            loss = np.loadtxt(f"{self.history_dir}/loss.txt")
+            td = np.loadtxt(f"{self.history_dir}/td_error.txt")
+            window = 50
+            if len(loss) > window:
+                loss_smooth = np.convolve(loss, np.ones(window)/window, mode='valid')
+                td_smooth = np.convolve(td, np.ones(window)/window, mode='valid')
+                plt.figure()
+                plt.plot(loss_smooth, label="Loss (avg)")
+                plt.plot(td_smooth, label="TD Error (avg)", alpha=0.7)
+                plt.legend(); plt.xlabel("Training Step"); plt.ylabel("Value")
+                plt.title("Step 8A.6.6 – Learning Stability Trends")
+                plt.tight_layout()
+                plt.savefig(f"{self.history_dir}/learning_stability.png", dpi=300)
+                plt.close()
+                print("[Runner] Learning stability plot saved.")
+        except Exception as e:
+            print("[WARN] Could not plot learning stability:", e)
 
+    def evaluate(self, all_gantt_data, global_ep_idx):
+        win_number, episode_rewards, gantt_eval = 0, 0, []
         for _ in range(self.args.evaluate_epoch):
             _, ep_reward, win_tag, gantt_eval = self.rolloutWorker.generate_episode(global_ep_idx, evaluate=True)
             all_gantt_data.extend(gantt_eval)
@@ -217,7 +218,6 @@ class Runner:
             if win_tag:
                 win_number += 1
             global_ep_idx += 1
-
         avg_reward = episode_rewards / self.args.evaluate_epoch
         win_rate = win_number / self.args.evaluate_epoch
         return win_rate, avg_reward, global_ep_idx, gantt_eval

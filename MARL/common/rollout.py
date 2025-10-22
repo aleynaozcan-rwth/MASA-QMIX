@@ -3,12 +3,13 @@ import torch
 
 class RolloutWorker:
     """
-    Step 8A.6.4 – Full learning rollout worker (RNN-safe, replay-aware)
+    Step 8A.6.6 – Full learning rollout worker (RNN-safe, replay-aware, KPI-compatible)
 
     • Resets env and builds replay-ready transitions
     • Epsilon-greedy action selection (with availability masks)
     • Maintains RNN hidden state per agent for eval_rnn()
     • Inserts full episode into ReplayBuffer if provided
+    • Reports episode duration for KPI tracking
     """
 
     def __init__(
@@ -22,7 +23,7 @@ class RolloutWorker:
         epsilon_end=0.05,
         epsilon_anneal_steps=50000,
         device="cpu",
-        log_prefix="8A.6.4",
+        log_prefix="8A.6.6",
     ):
         self.env = env
         self.agents = agents
@@ -44,9 +45,10 @@ class RolloutWorker:
 
         # --- hidden state placeholder ---
         self._reset_hidden_states()
+        self.episode_duration = 0  # new KPI-compatible field
 
         print(
-            f"[INFO] RolloutWorker {self.log_prefix} initialized — RNN-compatible + full learning mode"
+            f"[INFO] RolloutWorker {self.log_prefix} initialized — RNN-compatible + replay-aware"
         )
         print(
             f"  → Episode limit: {self.episode_limit}\n"
@@ -58,6 +60,7 @@ class RolloutWorker:
     #                    MAIN ROLLOUT
     # ============================================================
     def generate_episode(self, global_ep_idx=0, evaluate=False):
+        """Generate one full episode rollout."""
         self._maybe_decay_epsilon(evaluate)
         self._reset_hidden_states()
 
@@ -66,6 +69,8 @@ class RolloutWorker:
         avail = self._get_avail_from_info(info, self.agents.n_actions)
 
         ep_transitions, ep_reward, t = [], 0.0, 0
+        gantt_data = []  # placeholder for future visualization support
+
         while t < self.episode_limit:
             actions, q_vals = self._select_actions(obs_list, avail, evaluate)
             obs_next, reward, done, info_next = self.env.step(actions)
@@ -93,17 +98,21 @@ class RolloutWorker:
             if done:
                 break
 
+        # episode duration tracking for KPI reporting
+        self.episode_duration = len(ep_transitions)
+
         episode = self._pack_episode(ep_transitions)
         if self.buffer is not None:
             self._insert_episode(episode)
 
         print(
-            f"[Rollout] Episode finished in {len(ep_transitions)} steps | total reward={ep_reward:.2f}"
+            f"[Rollout] Episode finished in {self.episode_duration} steps | total reward={ep_reward:.2f}"
         )
         if self.buffer is not None:
             print(f"Episode reward: {ep_reward:.2f}, buffer length: {len(self.buffer)}")
 
-        return episode, ep_reward, bool(ep_transitions[-1]["terminated"]), info_next
+        # Return with gantt_data placeholder (empty list for now)
+        return episode, ep_reward, bool(ep_transitions[-1]["terminated"]), gantt_data
 
     # ============================================================
     #                    ACTION SELECTION
@@ -227,9 +236,7 @@ class RolloutWorker:
             self.epsilon = max(self.epsilon_end, self.epsilon - self._eps_decay)
 
     def _reset_hidden_states(self):
-        """Create RNN hidden state tensor matching policy hidden_dim."""
         n_agents = getattr(self.agents, "n_agents", 1)
-        # try to read hidden_dim from policy.rnn if exists
         hdim = 64
         if hasattr(self.agents.policy, "rnn") and hasattr(self.agents.policy.rnn, "hidden_size"):
             hdim = self.agents.policy.rnn.hidden_size
