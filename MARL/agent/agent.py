@@ -8,7 +8,6 @@ from MARL.policy.central_v import CentralV
 from MARL.policy.qtran_alt import QtranAlt
 from MARL.policy.qtran_base import QtranBase
 from MARL.policy.maven import MAVEN
-from torch.distributions import Categorical
 
 
 class Agents:
@@ -17,104 +16,117 @@ class Agents:
         self.n_agents = args.n_agents
         self.state_shape = args.state_shape
         self.obs_shape = args.obs_shape
+        self.args = args
 
-        if args.alg == 'vdn':
+        # --- Policy selection ---
+        alg = args.alg.lower()
+        if alg == "vdn":
             self.policy = VDN(args)
-        elif args.alg == 'qmix':
+        elif alg == "qmix":
             self.policy = QMIX(args)
-        elif args.alg == 'coma':
+        elif alg == "coma":
             self.policy = COMA(args)
-        elif args.alg == 'qtran_alt':
+        elif alg == "qtran_alt":
             self.policy = QtranAlt(args)
-        elif args.alg == 'qtran_base':
+        elif alg == "qtran_base":
             self.policy = QtranBase(args)
-        elif args.alg == 'maven':
+        elif alg == "maven":
             self.policy = MAVEN(args)
-        elif args.alg == 'central_v':
+        elif alg == "central_v":
             self.policy = CentralV(args)
-        elif args.alg == 'reinforce':
+        elif alg == "reinforce":
             self.policy = Reinforce(args)
         else:
-            raise Exception("No such algorithm")
+            raise Exception(f"Unknown algorithm: {args.alg}")
 
-        self.args = args
         print(f"[Agents] Initialized ({args.alg.upper()})")
 
-    # ------------------------------------------------------------------
-    # Step 8A.6.5 – Replay-aware Learning Path
-    # ------------------------------------------------------------------
+    # ============================================================
+    # Step 8A.7 – Replay-aware learning (QMIX / QTRAN / MAVEN)
+    # ============================================================
     def learn_from_replay(self, batch: dict, train_step: int) -> dict:
-        """
-        New learning path for replay-based MARL (QMIX-style).
-        This directly forwards the sampled batch to the policy's learn() method.
-        """
+        """Replay-based MARL learning path."""
         if not hasattr(self.policy, "learn"):
-            raise AttributeError("Current policy does not implement learn() method.")
+            raise AttributeError("Current policy does not implement learn().")
 
-        # Forward to QMIX or equivalent learner
         output = self.policy.learn(batch, train_step)
 
-        # Optional debug
-        if output is not None and isinstance(output, dict):
-            loss = output.get("loss", None)
-            td_error = output.get("td_error", None)
+        # Optional log
+        if isinstance(output, dict):
+            loss = output.get("loss")
+            td_error = output.get("td_error")
             if loss is not None:
-                print(f"[Agents] Step {train_step} | Loss={loss:.4f} | TD-Error={td_error:.4f}" if td_error else
-                      f"[Agents] Step {train_step} | Loss={loss:.4f}")
-
+                if td_error is not None:
+                    print(f"[Agents] Step {train_step} | Loss={loss:.4f} | TD-Error={td_error:.4f}")
+                else:
+                    print(f"[Agents] Step {train_step} | Loss={loss:.4f}")
         return output
 
-    # ------------------------------------------------------------------
-    # Original episodic learning path (kept for backward compat.)
-    # ------------------------------------------------------------------
+    # ============================================================
+    # Step 8A.5 – Episodic learning (COM A / VDN / Reinforce)
+    # ============================================================
     def _get_max_episode_len(self, batch):
-        terminated = batch['terminated']
+        terminated = batch["terminated"]
         episode_num = terminated.shape[0]
         max_episode_len = 0
-        for episode_idx in range(episode_num):
-            for transition_idx in range(self.args.episode_limit):
-                if terminated[episode_idx, transition_idx, 0] == 1:
-                    if transition_idx + 1 >= max_episode_len:
-                        max_episode_len = transition_idx + 1
+        for e_idx in range(episode_num):
+            for t_idx in range(self.args.episode_limit):
+                if terminated[e_idx, t_idx, 0] == 1:
+                    max_episode_len = max(max_episode_len, t_idx + 1)
                     break
         return max_episode_len
 
     def train(self, batch, train_step, epsilon=None):
         """
-        Unified training entry.
-        - For replay-based learners (QMIX), call learn_from_replay().
-        - For episodic learners (VDN, COMA, etc.), use original episodic path.
+        Unified training entry for all algorithms.
+        Automatically detects replay-based vs episodic learning mode.
         """
-        # Replay-aware QMIX path
-        if isinstance(batch, dict) and 'state' in batch:
+        alg = self.args.alg.lower()
+
+        # --- Replay-based algorithms (QMIX / QTRAN / MAVEN) ---
+        if alg in ["qmix", "qtran_alt", "qtran_base", "maven"]:
             return self.learn_from_replay(batch, train_step)
 
-        # Episodic fallback (legacy)
+        # --- Episodic algorithms (VDN, COMA, CentralV, Reinforce) ---
         max_episode_len = self._get_max_episode_len(batch)
         for key in batch.keys():
-            if key != 'z':
+            if key != "z":
                 batch[key] = batch[key][:, :max_episode_len]
-        self.policy.learn(batch, max_episode_len, train_step, epsilon)
+
+        # Determine learn signature safely
+        learn_args = self.policy.learn.__code__.co_varnames
+        if len(learn_args) >= 4:
+            self.policy.learn(batch, max_episode_len, train_step, epsilon)
+        else:
+            self.policy.learn(batch, train_step)
+
+        # Optional checkpoint
         if train_step > 0 and train_step % self.args.save_cycle == 0:
-            print(f"\n[Agents] Saving model checkpoint at step {train_step}")
-            self.policy.save_model(train_step)
+            if hasattr(self.policy, "save_model"):
+                print(f"\n[Agents] Saving model checkpoint at step {train_step}")
+                self.policy.save_model(train_step)
         return None
 
 
+# ============================================================
+# Communication-based algorithms (COMMNET / G2ANet)
+# ============================================================
 class CommAgents:
     def __init__(self, args):
         self.n_actions = args.n_actions
         self.n_agents = args.n_agents
         self.state_shape = args.state_shape
         self.obs_shape = args.obs_shape
-        alg = args.alg
-        if alg.find('reinforce') > -1:
+        self.args = args
+        alg = args.alg.lower()
+
+        if "reinforce" in alg:
             self.policy = Reinforce(args)
-        elif alg.find('coma') > -1:
+        elif "coma" in alg:
             self.policy = COMA(args)
-        elif alg.find('central_v') > -1:
+        elif "central_v" in alg:
             self.policy = CentralV(args)
         else:
-            raise Exception("No such algorithm")
-        self.args = args
+            raise Exception(f"No CommAgent variant implemented for: {alg}")
+
         print(f"[CommAgents] Initialized ({alg.upper()})")

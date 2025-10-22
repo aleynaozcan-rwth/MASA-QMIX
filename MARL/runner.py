@@ -36,8 +36,10 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         else:
             start, end, operation, workcenter, jobagent = rec
             operator = "?"
-        ax.barh(jobagent, end - start, left=start, color=color_map.get(operation, "gray"), edgecolor="black")
-        ax.text((start + end) / 2, jobagent, f"M{operation} | WC{workcenter} | O{operator}",
+        ax.barh(jobagent, end - start, left=start,
+                color=color_map.get(operation, "gray"), edgecolor="black")
+        ax.text((start + end) / 2, jobagent,
+                f"M{operation} | WC{workcenter} | O{operator}",
                 va="center", ha="center", fontsize=7, color="black")
         max_end = max(max_end, end)
 
@@ -73,12 +75,16 @@ class Runner:
         # Agents & rollout setup
         if args.alg.find('commnet') > -1 or args.alg.find('g2anet') > -1:
             self.agents = CommAgents(args)
-            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) if getattr(args, "learn", True) else None
-            self.rolloutWorker = CommRolloutWorker(env, self.agents, args, buffer=self.buffer)
+            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) \
+                if getattr(args, "learn", True) else None
+            # ✅ DÜZELTİLMİŞ SATIR
+            self.rolloutWorker = CommRolloutWorker(env=env, agents=self.agents, buffer=self.buffer, args=args)
         else:
             self.agents = Agents(args)
-            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) if getattr(args, "learn", True) else None
-            self.rolloutWorker = RolloutWorker(env, self.agents, args, buffer=self.buffer)
+            self.buffer = ReplayBuffer(episode_capacity=args.buffer_size, seed=args.seed) \
+                if getattr(args, "learn", True) else None
+            # ✅ DÜZELTİLMİŞ SATIR
+            self.rolloutWorker = RolloutWorker(env=env, agents=self.agents, buffer=self.buffer, args=args)
 
         self.win_rates = []
         self.episode_rewards = []

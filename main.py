@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import pickle
-from environment import ScheduleEnv
+from environment import MASAEnv
 import sys
 from os.path import dirname, abspath
 
@@ -28,6 +28,19 @@ from utils.PDRs.shortestDistence import SDrules
 def marl_agent_wrapper(args):
     """Standard MARL training loop (supports QMIX, COMA, etc.)."""
 
+    # --- Environment (MASAEnv) ---
+    env = MASAEnv()
+    env.reset()
+    env_info = env.get_env_info()
+
+    # --- Shape bilgilerini environment'tan al ---
+    args.n_actions = env_info["n_actions"]
+    args.n_agents = env_info["n_agents"]
+    args.state_shape = env_info["state_shape"]
+    args.obs_shape = env_info["obs_shape"]
+    args.episode_limit = env_info["episode_limit"]
+
+    # --- Algorithm-specific args (env'den sonra çağrılmalı!) ---
     if args.alg.find("coma") > -1:
         args = get_coma_args(args)
     elif args.alg.find("central_v") > -1:
@@ -42,16 +55,9 @@ def marl_agent_wrapper(args):
     if args.alg.find("g2anet") > -1:
         args = get_g2anet_args(args)
 
-    # --- Environment ---
-    env = ScheduleEnv()
-    env.reset()
-    env_info = env.get_env_info()
-
-    args.n_actions = env_info["n_actions"]
-    args.n_agents = env_info["n_agents"]
-    args.state_shape = env_info["state_shape"]
-    args.obs_shape = env_info["obs_shape"]
-    args.episode_limit = env_info["episode_limit"]
+    # ✅ get_mixer_args env boyutlarını ezdiği için tekrar sabitle
+    args.obs_shape = env_info["obs_shape"]      # 11D observation
+    args.state_shape = env_info["state_shape"]  # 64D global state
 
     # --- Summary printout ---
     print("\n=== Training Setup Summary (Args) ===")
@@ -62,6 +68,8 @@ def marl_agent_wrapper(args):
     print(f"Total epochs: {args.n_epoch}")
     print(f"Episodes per epoch: {args.n_episodes}")
     print(f"Evaluation every {args.evaluate_cycle} epochs")
+    print(f"Observation dim: {args.obs_shape}")
+    print(f"State dim: {args.state_shape}")
     print("====================================")
 
     runner = Runner(env, args)
@@ -79,7 +87,7 @@ def marl_agent_wrapper(args):
 
 def random_agent_wrapper():
     episodes = 10
-    env = ScheduleEnv()
+    env = MASAEnv()
     EATs = []
     schedule_processes = []
 
@@ -88,23 +96,19 @@ def random_agent_wrapper():
         done = False
         while not done:
             actions = []
-            for i in range(len(env.planes)):
-                avail_actions = env.get_avail_agent_actions(i)
-                if isinstance(avail_actions, str):
-                    actions.append(18)
+            for i in range(len(env.jobs)):
+                avail_actions = env._build_avail_actions()[i]
+                valid_actions = [k for k, v in enumerate(avail_actions) if v == 1]
+                if valid_actions:
+                    action = np.random.choice(valid_actions)
                 else:
-                    valid_actions = [k for k, v in enumerate(avail_actions) if v == 1]
-                    if valid_actions:
-                        action = np.random.choice(valid_actions)
-                        env.has_chosen_action(action, i)
-                    else:
-                        action = 18
-                    actions.append(action)
+                    action = np.random.randint(0, env.num_wcs)
+                actions.append(action)
             _, _, done, info = env.step(actions)
 
-        EATs.append(info["time"])
-        schedule_processes.append(env.job_record_for_gant)
-        print(f"[Episode {episode}] Completion time: {info['time']}")
+        EATs.append(env.t)
+        schedule_processes.append(info)
+        print(f"[Episode {episode}] Completion time: {env.t}")
 
     print(f"Average completion time: {sum(EATs) / len(EATs)}")
     with open("./my_data_and_graph/pickles/process.pk", "wb") as f:
@@ -118,32 +122,26 @@ def random_agent_wrapper():
 def SDrules_agent_wrapper():
     EPISODES = 10
     sd_rules = SDrules()
-    env = ScheduleEnv()
-    sites_locations = env.sites_obj.sites_position
+    env = MASAEnv()
 
     for episode in range(EPISODES):
         done = False
         env.reset()
         while not done:
             actions = []
-            agents_id_sequence = sd_rules.FIFO_generate_agents_sequence(8)
+            agents_id_sequence = sd_rules.FIFO_generate_agents_sequence(len(env.jobs))
 
             for agent_id in agents_id_sequence:
-                avail_actions = env.get_avail_agent_actions(agent_id)
-                current_plane_location = env.planes[agent_id].position
-                action = sd_rules.choose_action(agent_id, avail_actions, current_plane_location, sites_locations)
-                actions.append(action)
-                if action < 18:
-                    env.has_chosen_action(action, agent_id)
+                avail_actions = env._build_avail_actions()[agent_id]
+                valid_actions = [k for k, v in enumerate(avail_actions) if v == 1]
+                if valid_actions:
+                    action = sd_rules.choose_action(agent_id, avail_actions, None, None)
+                    actions.append(action)
+                else:
+                    actions.append(0)
 
-            reorder_actions = [-1 for _ in range(8)]
-            for i in range(8):
-                reorder_actions[agents_id_sequence[i]] = actions[i]
-
-            _, done, info = env.step(reorder_actions)
-        print(f"[Episode {episode}] Completion time: {info['time']}")
-
-    print(f"Final schedule: {info['episodes_situation']}")
+            _, _, done, info = env.step(actions)
+        print(f"[Episode {episode}] Completion time: {env.t}")
 
 
 # ============================================================
@@ -154,14 +152,15 @@ def step7b_agent_wrapper(args):
     """Replay-aware QMIX training using dynamic arrivals (Step 7B mode)."""
     print("\n🚀 Starting Step 7B replay-aware QMIX training...")
 
-    args = get_mixer_args(args)
-    env = ScheduleEnv(
-        start_planes=args.start_planes,
-        max_planes=args.max_planes,
-        arrival_prob=args.arrival_prob,
-        variable_ops=args.variable_ops,
+    env = MASAEnv(
+        num_jobs=args.start_planes,
+        job_spawn_baseline=args.arrival_prob,
         seed=args.seed,
     )
+
+    args = get_mixer_args(args)
+    args.obs_shape = 11
+    args.state_shape = 64
 
     runner = Runner(env, args)
 

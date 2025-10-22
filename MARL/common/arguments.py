@@ -1,9 +1,9 @@
 import argparse
 
 """
-Arguments for MASA-QMIX / ScheduleEnv
+Arguments for MASA-QMIX / MASAEnv
+---------------------------------
 Step 7B.3 – Fast Convergence Configuration
-------------------------------------------
 - Slightly faster epsilon decay for earlier exploitation
 - More gradient steps per epoch
 - Stable replay and batch configuration retained
@@ -50,16 +50,18 @@ def get_common_args():
     parser.add_argument('--episode_limit', type=int, default=200)
     parser.add_argument('--n_agents', type=int, default=12)
     parser.add_argument('--n_actions', type=int, default=21)
-    parser.add_argument('--state_shape', type=int, default=10)
-    parser.add_argument('--obs_shape', type=int, default=10)
+
+    # ✅ Updated defaults for MASAEnv (11D obs, 64D state)
+    parser.add_argument('--state_shape', type=int, default=64)
+    parser.add_argument('--obs_shape', type=int, default=11)
 
     # --- Replay Buffer / Training Hyperparameters ---
     parser.add_argument('--buffer_size', type=int, default=3000,
-                        help='max total transitions in replay buffer')
+                        help='Maximum total transitions in replay buffer')
     parser.add_argument('--batch_size', type=int, default=32,
-                        help='minibatch size for training updates')
+                        help='Minibatch size for training updates')
     parser.add_argument('--train_steps', type=int, default=10,
-                        help='number of gradient updates per epoch')   # 🔸 increased
+                        help='Number of gradient updates per epoch')
 
     # --- Training Cadence ---
     parser.add_argument('--n_epoch', type=int, default=200)
@@ -71,7 +73,7 @@ def get_common_args():
     # --- Exploration / Annealing ---
     parser.add_argument('--epsilon', type=float, default=1.0)
     parser.add_argument('--min_epsilon', type=float, default=0.05)
-    parser.add_argument('--anneal_epsilon', type=float, default=0.0005)   # 🔸 faster decay
+    parser.add_argument('--anneal_epsilon', type=float, default=0.0005)
     parser.add_argument('--epsilon_anneal_scale', type=str, default='step')
 
     # --- Gradient / Optimization ---
@@ -91,6 +93,7 @@ def get_common_args():
 # ===============================================================
 
 def get_mixer_args(args):
+    """Default settings for QMIX / Mixer-based algorithms."""
     args.rnn_hidden_dim   = 64
     args.qmix_hidden_dim  = 32
     args.two_hyper_layers = False
@@ -120,73 +123,83 @@ def get_mixer_args(args):
     args.grad_norm_clip = 10
 
     # --- Additional Mixer Settings ---
-    args.noise_dim            = 16
-    args.lambda_mi            = 0.001
-    args.lambda_ql            = 1
-    args.entropy_coefficient  = 0.001
+    args.noise_dim           = 16
+    args.lambda_mi           = 0.001
+    args.lambda_ql           = 1
+    args.entropy_coefficient = 0.001
+
+    # ✅ Preserve MASAEnv observation/state dimensions
+    args.state_shape = getattr(args, "state_shape", 64)
+    args.obs_shape   = getattr(args, "obs_shape", 11)
     return args
 
 
 def get_coma_args(args):
+    """Arguments for COMA algorithm."""
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-    args.epsilon         = 0.5
-    args.anneal_epsilon  = 0.00064
-    args.min_epsilon     = 0.02
+    args.epsilon        = 0.5
+    args.anneal_epsilon = 0.00064
+    args.min_epsilon    = 0.02
     args.epsilon_anneal_scale = 'epoch'
-    args.td_lambda = 0.8
-    args.n_epoch         = 20000
-    args.n_episodes      = 1
-    args.evaluate_cycle  = 100
-    args.save_cycle      = 5000
+    args.td_lambda      = 0.8
+    args.n_epoch        = 20000
+    args.n_episodes     = 1
+    args.evaluate_cycle = 100
+    args.save_cycle     = 5000
     args.target_update_cycle = 200
-    args.grad_norm_clip  = 10
+    args.grad_norm_clip = 10
     return args
 
 
 def get_centralv_args(args):
+    """Arguments for Central-V algorithm."""
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-    args.epsilon         = 0.5
-    args.anneal_epsilon  = 0.00064
-    args.min_epsilon     = 0.02
+    args.epsilon        = 0.5
+    args.anneal_epsilon = 0.00064
+    args.min_epsilon    = 0.02
     args.epsilon_anneal_scale = 'epoch'
-    args.n_epoch         = 20000
-    args.n_episodes      = 1
-    args.evaluate_cycle  = 100
-    args.save_cycle      = 5000
+    args.n_epoch        = 20000
+    args.n_episodes     = 1
+    args.evaluate_cycle = 100
+    args.save_cycle     = 5000
     args.target_update_cycle = 200
-    args.grad_norm_clip  = 10
+    args.grad_norm_clip = 10
     return args
 
 
 def get_reinforce_args(args):
+    """Arguments for REINFORCE algorithm."""
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
     args.lr_critic      = 1e-3
-    args.epsilon         = 0.5
-    args.anneal_epsilon  = 0.00064
-    args.min_epsilon     = 0.02
+    args.epsilon        = 0.5
+    args.anneal_epsilon = 0.00064
+    args.min_epsilon    = 0.02
     args.epsilon_anneal_scale = 'epoch'
-    args.n_epoch         = 20000
-    args.n_episodes      = 1
-    args.evaluate_cycle  = 100
-    args.save_cycle      = 5000
-    args.grad_norm_clip  = 10
+    args.n_epoch        = 20000
+    args.n_episodes     = 1
+    args.evaluate_cycle = 100
+    args.save_cycle     = 5000
+    args.grad_norm_clip = 10
     return args
 
 
 def get_commnet_args(args):
+    """Arguments for CommNet algorithm."""
     args.k = 2 if args.map == '3m' else 3
     return args
 
 
 def get_g2anet_args(args):
+    """Arguments for G2ANet algorithm."""
     args.attention_dim = 32
     args.hard = True
     return args
+# ============================================================

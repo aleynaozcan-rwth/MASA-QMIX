@@ -1,9 +1,8 @@
 # MARL/network/base_net.py
-# Step 8A.6.2 – Learning-Active Base Network
-# ------------------------------------------------
-# Simplified input (10 features per agent) for environment test
-# Fully compatible with rollout 8A.6-QMix version
-# ------------------------------------------------
+# Step 8A.7 – Learning-Active Base Network (MASA-QMIX)
+# ----------------------------------------------------
+# Dynamically adapts to full input (obs + last_action + agent_ID)
+# Fully compatible with replay-aware QMIX rollout (Step 8A.6.6+)
 
 import torch
 import torch.nn as nn
@@ -12,36 +11,43 @@ import torch.nn.functional as F
 
 class RNNAgent(nn.Module):
     """
-    RNN-based agent network for QMIX
-    Step 8A.6.2 version (10-dim obs input)
-    -------------------------------------
-    - Input: observation (size 10)
-    - Hidden: 64 units
-    - Output: Q-values over n_actions
+    RNN-based agent network for QMIX (MASA-QMIX version)
+    ----------------------------------------------------
+    • Input: dynamically determined by QMIX setup
+      (obs_dim + n_actions if last_action=True + n_agents if reuse_network=True)
+    • Hidden: 64 units (args.rnn_hidden_dim)
+    • Output: Q-values over available actions
     """
 
     def __init__(self, input_shape, args):
         super(RNNAgent, self).__init__()
         self.args = args
-        self.fc1 = nn.Linear(10, 64)  # 🔸 CHANGED from 43 → 10
-        self.rnn = nn.GRUCell(64, 64)
-        self.fc2 = nn.Linear(64, args.n_actions)
+
+        # ✅ Fully dynamic input dimension (matches QMIX input builder)
+        self.fc1 = nn.Linear(input_shape, args.rnn_hidden_dim)
+        self.rnn = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)
+        self.fc2 = nn.Linear(args.rnn_hidden_dim, args.n_actions)
 
     def forward(self, obs, hidden_state):
         """
-        obs: (n_agents, obs_shape)
+        obs: (n_agents, input_shape)
         hidden_state: (n_agents, hidden_dim)
         """
         x = F.relu(self.fc1(obs))
-        h_in = hidden_state.reshape(-1, 64)
-        h = self.rnn(x, h_in)
-        q = self.fc2(h)
-        return q, h
+        h_in = hidden_state.reshape(-1, self.args.rnn_hidden_dim)
+        h_out = self.rnn(x, h_in)
+        q = self.fc2(h_out)
+        return q, h_out
+
+    def eval_rnn(self, obs, hidden_state):
+        """Evaluation-only forward (no gradient)."""
+        with torch.no_grad():
+            return self.forward(obs, hidden_state)
 
 
 class BasicCritic(nn.Module):
     """
-    Optional centralized critic (not used in this QMIX test)
+    Optional centralized critic (not used in QMIX baseline)
     """
 
     def __init__(self, input_shape, args):
@@ -56,7 +62,6 @@ class BasicCritic(nn.Module):
         return self.fc3(x)
 
 
-# 🔧 Compatibility aliases for older policies
+# Compatibility aliases
 RNN = RNNAgent
 Critic = BasicCritic
-
