@@ -1,0 +1,71 @@
+ # Example environment configuration for MASA-QMIX
+ # Edit to match your target factory/topology
+
+work_centers:
+  WC1:
+    machines: [M1, M2]
+  WC2:
+    machines: [M3, M4]
+  WC3:
+    machines: [M5]
+
+machines:
+  M1:
+    wc: WC1
+    capable_ops: [Op1, Op3, Op5]
+  M2:
+    wc: WC1
+    capable_ops: [Op2, Op4, Op6]
+  M3:
+    wc: WC2
+    capable_ops: [Op2, Op7]
+  M4:
+    wc: WC2
+    capable_ops: [Op1, Op5, Op8]
+  M5:
+    wc: WC3
+    capable_ops: [Op1, Op3, Op9]
+
+operators:
+  - id: O1
+    qualified_machines: [M1, M4, M5]
+  - id: O2
+    qualified_machines: [M2, M3]
+
+op_type_distribution:
+  # probabilities (sum to 1) used when sampling op types for a new job
+  probs: [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.12]
+
+processing_time_means:
+  # mean processing time per (op type, machine) in arbitrary time units
+  Op1:
+    M1: 4.0
+    M4: 4.0
+    M5: 6.0
+  Op2:
+    M2: 5.0
+    M3: 5.5
+  # ... add others as needed
+
+task_generator:
+  arrival_lambda: 0.05   # base interarrival rate (Exponential) — tune to target load
+  seq_length:
+    min: 1
+    max: 9
+
+reward_params:
+  alpha: 0.01
+  beta: 0.005
+  gamma: 0.02
+  delta: 1.0
+  c_time: 0.001
+
+training_defaults:
+  rnn_hidden: 64
+  lr: 1e-3
+  discount: 0.99
+  batch_size: 32
+  target_update: 200
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 100000
