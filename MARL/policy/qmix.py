@@ -182,5 +182,9 @@ class QMIX:
         self.target_mixer.load_state_dict(self.eval_mixer.state_dict())
 
     def init_hidden(self, episode_num):
-        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim), device=self.device)
-        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim), device=self.device)
+        # GRU expects hidden shape (num_layers * num_directions, batch, hidden_size)
+        # Our RNNAgent.forward packs inputs as (episode_num * n_agents, ...), so batch should be episode_num * n_agents
+        batch_size = int(episode_num * self.n_agents)
+        h_shape = (1, batch_size, int(getattr(self.args, "rnn_hidden_dim", 64)))
+        self.eval_hidden = torch.zeros(h_shape, device=self.device)
+        self.target_hidden = torch.zeros(h_shape, device=self.device)

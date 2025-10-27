@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import pickle
+import os
 from environment import MASAEnv
 import sys
 from os.path import dirname, abspath
@@ -17,8 +18,6 @@ from MARL.common.arguments import (
     get_commnet_args,
     get_g2anet_args,
 )
-
-from utils.PDRs.shortestDistence import SDrules
 
 
 # ============================================================
@@ -56,8 +55,8 @@ def marl_agent_wrapper(args):
         args = get_g2anet_args(args)
 
     # ✅ get_mixer_args env boyutlarını ezdiği için tekrar sabitle
-    args.obs_shape = env_info["obs_shape"]      # 11D observation
-    args.state_shape = env_info["state_shape"]  # 64D global state
+    args.obs_shape = env_info["obs_shape"]
+    args.state_shape = env_info["state_shape"]
 
     # --- Summary printout ---
     print("\n=== Training Setup Summary (Args) ===")
@@ -91,6 +90,10 @@ def random_agent_wrapper():
     EATs = []
     schedule_processes = []
 
+    # ensure output directory exists before writing pickle
+    out_dir = "./my_data_and_graph/pickles"
+    os.makedirs(out_dir, exist_ok=True)
+
     for episode in range(episodes):
         s = env.reset()
         done = False
@@ -111,66 +114,12 @@ def random_agent_wrapper():
         print(f"[Episode {episode}] Completion time: {env.t}")
 
     print(f"Average completion time: {sum(EATs) / len(EATs)}")
-    with open("./my_data_and_graph/pickles/process.pk", "wb") as f:
-        pickle.dump(schedule_processes, f)
-
-
-# ============================================================
-# === Rule-Based Baseline (SDrules) ==========================
-# ============================================================
-
-def SDrules_agent_wrapper():
-    EPISODES = 10
-    sd_rules = SDrules()
-    env = MASAEnv()
-
-    for episode in range(EPISODES):
-        done = False
-        env.reset()
-        while not done:
-            actions = []
-            agents_id_sequence = sd_rules.FIFO_generate_agents_sequence(len(env.jobs))
-
-            for agent_id in agents_id_sequence:
-                avail_actions = env._build_avail_actions()[agent_id]
-                valid_actions = [k for k, v in enumerate(avail_actions) if v == 1]
-                if valid_actions:
-                    action = sd_rules.choose_action(agent_id, avail_actions, None, None)
-                    actions.append(action)
-                else:
-                    actions.append(0)
-
-            _, _, done, info = env.step(actions)
-        print(f"[Episode {episode}] Completion time: {env.t}")
-
-
-# ============================================================
-# === Step 7B Integration Mode ===============================
-# ============================================================
-
-def step7b_agent_wrapper(args):
-    """Replay-aware QMIX training using dynamic arrivals (Step 7B mode)."""
-    print("\n🚀 Starting Step 7B replay-aware QMIX training...")
-
-    env = MASAEnv(
-        num_jobs=args.start_planes,
-        job_spawn_baseline=args.arrival_prob,
-        seed=args.seed,
-    )
-
-    args = get_mixer_args(args)
-    args.obs_shape = 11
-    args.state_shape = 64
-
-    runner = Runner(env, args)
-
-    print("\n[TEST] Running one rollout episode (evaluation mode)...")
-    runner.rolloutWorker.generate_episode(global_ep_idx=0, evaluate=True)
-
-    print("\n[TRAIN] Starting replay-buffer aware training loop...")
-    runner.run(num=1)
-
-    print("\n✅ Step 7B training finished successfully.")
+    out_path = os.path.join(out_dir, "process.pk")
+    try:
+        with open(out_path, "wb") as f:
+            pickle.dump(schedule_processes, f)
+    except Exception as e:
+        print(f"ERROR: failed to write pickle to {out_path}: {e}")
 
 
 # ============================================================
@@ -179,13 +128,14 @@ def step7b_agent_wrapper(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["marl", "random", "rules", "7b"], default="marl",
-                        help="Select which mode to run: marl / random / rules / 7b.")
+    parser.add_argument("--mode", type=str, choices=["marl", "random"], default="marl",
+                        help="Select which mode to run: marl / random.")
     parser.add_argument("--alg", type=str, default="qmix",
                         help="Algorithm type (qmix, coma, reinforce, etc.)")
     parser.add_argument("--seed", type=int, default=123,
                         help="Random seed for reproducibility.")
-    args_main = parser.parse_args()
+    # allow additional training flags to be passed through (they will be parsed by get_common_args)
+    args_main, unknown = parser.parse_known_args()
 
     # Integrate with common args
     args = get_common_args()
@@ -197,9 +147,5 @@ if __name__ == "__main__":
         marl_agent_wrapper(args)
     elif args_main.mode == "random":
         random_agent_wrapper()
-    elif args_main.mode == "rules":
-        SDrules_agent_wrapper()
-    elif args_main.mode == "7b":
-        step7b_agent_wrapper(args)
     else:
         raise ValueError(f"Unknown mode: {args_main.mode}")

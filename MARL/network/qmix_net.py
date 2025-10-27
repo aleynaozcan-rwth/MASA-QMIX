@@ -1,58 +1,104 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
 class QMixNet(nn.Module):
+    """
+    Robust QMIX mixer with safe getattr defaults for missing args.
+    Tolerant to different arg naming (qmix_hidden_dim vs mix_embed_dim, etc.).
+    """
+
     def __init__(self, args):
-        super(QMixNet, self).__init__()
-        self.args = args
-        # 因为生成的hyper_w1需要是一个矩阵，而pytorch神经网络只能输出一个向量，
-        # 所以就先输出长度为需要的 矩阵行*矩阵列 的向量，然后再转化成矩阵
+        super().__init__()
+        # safe/compatible defaults and aliases
+        self.n_agents = int(getattr(args, "n_agents", 1))
+        self.state_dim = int(getattr(args, "state_shape", getattr(args, "state_dim", 64)))
+        self.embed_dim = int(getattr(args, "qmix_hidden_dim", getattr(args, "mix_embed_dim", 32)))
+        self.two_hyper_layers = bool(getattr(args, "two_hyper_layers", False))
 
-        # args.n_agents是使用hyper_w1作为参数的网络的输入维度，args.qmix_hidden_dim是网络隐藏层参数个数
-        # 从而经过hyper_w1得到(经验条数，args.n_agents * args.qmix_hidden_dim)的矩阵
-        if args.two_hyper_layers:
-            self.hyper_w1 = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
-                                          nn.ReLU(),
-                                          nn.Linear(args.hyper_hidden_dim, args.n_agents * args.qmix_hidden_dim))
-            # 经过hyper_w2得到(经验条数, 1)的矩阵
-            self.hyper_w2 = nn.Sequential(nn.Linear(args.state_shape, args.hyper_hidden_dim),
-                                          nn.ReLU(),
-                                          nn.Linear(args.hyper_hidden_dim, args.qmix_hidden_dim))
+        # hypernet embedding size alias
+        hypernet_embed = int(getattr(args, "hyper_hidden_dim", getattr(args, "hypernet_embed", max(self.embed_dim, 64))))
+
+        # first hypernet (state -> weights for first layer)
+        if self.two_hyper_layers:
+            self.hyper_w_1 = nn.Sequential(
+                nn.Linear(self.state_dim, hypernet_embed),
+                nn.ReLU(),
+                nn.Linear(hypernet_embed, self.embed_dim * self.n_agents),
+            )
         else:
-            self.hyper_w1 = nn.Linear(args.state_shape, args.n_agents * args.qmix_hidden_dim)
-            # 经过hyper_w2得到(经验条数, 1)的矩阵
-            self.hyper_w2 = nn.Linear(args.state_shape, args.qmix_hidden_dim * 1)
+            self.hyper_w_1 = nn.Linear(self.state_dim, self.embed_dim * self.n_agents)
 
-        # hyper_w1得到的(经验条数，args.qmix_hidden_dim)矩阵需要同样维度的hyper_b1
-        self.hyper_b1 = nn.Linear(args.state_shape, args.qmix_hidden_dim)
-        # hyper_w2得到的(经验条数，1)的矩阵需要同样维度的hyper_b1
-        self.hyper_b2 =nn.Sequential(nn.Linear(args.state_shape, args.qmix_hidden_dim),
-                                     nn.ReLU(),
-                                     nn.Linear(args.qmix_hidden_dim, 1)
-                                     )
+        # bias for first layer
+        self.hyper_b_1 = nn.Linear(self.state_dim, self.embed_dim)
 
-    def forward(self, q_values, states):  # states的shape为(episode_num, max_episode_len， state_shape)
-        # 传入的q_values是三维的，shape为(episode_num, max_episode_len， n_agents)
-        episode_num = q_values.size(0)
-        q_values = q_values.view(-1, 1, self.args.n_agents)  # (episode_num * max_episode_len, 1, n_agents) = (1920,1,5)
-        states = states.reshape(-1, self.args.state_shape)  # (episode_num * max_episode_len, state_shape)
+        # second hypernet (state -> weights for second layer)
+        if self.two_hyper_layers:
+            self.hyper_w_2 = nn.Sequential(
+                nn.Linear(self.state_dim, hypernet_embed),
+                nn.ReLU(),
+                nn.Linear(hypernet_embed, self.embed_dim),
+            )
+        else:
+            self.hyper_w_2 = nn.Linear(self.state_dim, self.embed_dim)
 
-        w1 = torch.abs(self.hyper_w1(states))  # (1920, 160)
-        b1 = self.hyper_b1(states)  # (1920, 32)
+        # final bias producing scalar
+        self.hyper_b_2 = nn.Sequential(
+            nn.Linear(self.state_dim, self.embed_dim),
+            nn.ReLU(),
+            nn.Linear(self.embed_dim, 1),
+        )
 
-        w1 = w1.view(-1, self.args.n_agents, self.args.qmix_hidden_dim)  # (1920, 5, 32)
-        b1 = b1.view(-1, 1, self.args.qmix_hidden_dim)  # (1920, 1, 32)
+        # small initializer safety
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
-        hidden = F.elu(torch.bmm(q_values, w1) + b1)  # (1920, 1, 32)
+    def forward(self, agent_qs, states):
+        """
+        agent_qs: Tensor shape (B, T, n_agents) or (B, n_agents)
+        states:   Tensor shape (B, T, state_dim) or (B, state_dim)
+        returns:  q_total shape (B, T, 1) or (B, 1)
+        """
+        squeeze_time = False
+        if agent_qs.dim() == 2:
+            agent_qs = agent_qs.unsqueeze(1)
+            states = states.unsqueeze(1)
+            squeeze_time = True
 
-        w2 = torch.abs(self.hyper_w2(states))  # (1920, 32)
-        b2 = self.hyper_b2(states)  # (1920, 1)
+        B, T, N = agent_qs.shape
+        if N != self.n_agents:
+            raise AssertionError(f"QMixNet expected {self.n_agents} agents, got {N}")
 
-        w2 = w2.view(-1, self.args.qmix_hidden_dim, 1)  # (1920, 32, 1)
-        b2 = b2.view(-1, 1, 1)  # (1920, 1， 1)
+        agent_qs_flat = agent_qs.view(B * T, 1, N)
+        states_flat = states.view(B * T, -1)
 
-        q_total = torch.bmm(hidden, w2) + b2  # (1920, 1, 1)
-        q_total = q_total.view(episode_num, -1, 1)  # (32, 60, 1)
+        # first layer
+        w1 = self.hyper_w_1(states_flat)
+        # ensure non-negative mixing weights if desired (common practice)
+        w1 = torch.abs(w1)
+        b1 = self.hyper_b_1(states_flat)
+
+        w1 = w1.view(-1, N, self.embed_dim)
+        b1 = b1.view(-1, 1, self.embed_dim)
+
+        hidden = torch.bmm(agent_qs_flat, w1).squeeze(1) + b1.squeeze(1)
+        hidden = F.elu(hidden)
+
+        # second layer
+        w2 = self.hyper_w_2(states_flat)
+        w2 = torch.abs(w2)
+        b2 = self.hyper_b_2(states_flat)
+
+        if w2.dim() == 1:
+            w2 = w2.unsqueeze(-1)
+        w2 = w2.view(-1, self.embed_dim, 1)
+        b2 = b2.view(-1, 1, 1)
+
+        y = torch.bmm(hidden.unsqueeze(1), w2).squeeze(1) + b2.squeeze(1)
+        q_total = y.view(B, T, 1)
+
+        if squeeze_time:
+            return q_total.squeeze(1)
         return q_total

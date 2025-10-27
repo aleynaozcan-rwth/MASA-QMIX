@@ -1,9 +1,3 @@
-# MARL/network/base_net.py
-# Step 8A.7 – Learning-Active Base Network (MASA-QMIX)
-# ----------------------------------------------------
-# Dynamically adapts to full input (obs + last_action + agent_ID)
-# Fully compatible with replay-aware QMIX rollout (Step 8A.6.6+)
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,55 +5,69 @@ import torch.nn.functional as F
 
 class RNNAgent(nn.Module):
     """
-    RNN-based agent network for QMIX (MASA-QMIX version)
-    ----------------------------------------------------
-    • Input: dynamically determined by QMIX setup
-      (obs_dim + n_actions if last_action=True + n_agents if reuse_network=True)
-    • Hidden: 64 units (args.rnn_hidden_dim)
-    • Output: Q-values over available actions
+    Minimal, robust RNN agent base used by QMIX/others.
+    Uses getattr(args, 'rnn_hidden_dim', 64) when args may not provide it.
+    Accepts input_shape (int) and args (Namespace-like).
     """
 
-    def __init__(self, input_shape, args):
-        super(RNNAgent, self).__init__()
-        self.args = args
+    def __init__(self, input_shape: int, args):
+        super().__init__()
+        hidden_dim = int(getattr(args, "rnn_hidden_dim", 64))
+        self.input_shape = int(input_shape)
+        self.hidden_size = hidden_dim
 
-        # ✅ Fully dynamic input dimension (matches QMIX input builder)
-        self.fc1 = nn.Linear(input_shape, args.rnn_hidden_dim)
-        self.rnn = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)
-        self.fc2 = nn.Linear(args.rnn_hidden_dim, args.n_actions)
+        # small input encoder -> recurrent core
+        self.fc1 = nn.Linear(self.input_shape, hidden_dim)
+        # single-layer GRU for sequence/hidden handling
+        self.rnn = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
 
-    def forward(self, obs, hidden_state):
+        # final action-value head (per-agent)
+        # Output action-values. If args provides n_actions use it, otherwise fall back to hidden_dim
+        out_dim = int(getattr(args, "n_actions", hidden_dim))
+        self.fc_out = nn.Linear(hidden_dim, out_dim)
+
+    def forward(self, x, h_in=None):
         """
-        obs: (n_agents, input_shape)
-        hidden_state: (n_agents, hidden_dim)
+        x: tensor shape (..., input_shape) or (batch, seq, input_shape)
+        h_in: optional hidden state (1, batch, hidden_dim)
+        Returns: (out, h_out)
         """
-        x = F.relu(self.fc1(obs))
-        h_in = hidden_state.reshape(-1, self.args.rnn_hidden_dim)
-        h_out = self.rnn(x, h_in)
-        q = self.fc2(h_out)
-        return q, h_out
+        # normalize shape to (batch, seq, input)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        b, seq, _ = x.shape
+        x_enc = F.relu(self.fc1(x.view(b * seq, -1))).view(b, seq, -1)
 
-    def eval_rnn(self, obs, hidden_state):
-        """Evaluation-only forward (no gradient)."""
-        with torch.no_grad():
-            return self.forward(obs, hidden_state)
+        if h_in is None:
+            h0 = torch.zeros(1, b, self.hidden_size, device=x.device, dtype=x.dtype)
+        else:
+            h0 = h_in
+
+        rnn_out, h_out = self.rnn(x_enc, h0)  # rnn_out: (b, seq, hidden)
+        out = F.relu(self.fc_out(rnn_out))
+        # if original input was 2D, squeeze seq dim
+        if out.shape[1] == 1:
+            return out[:, 0, :], h_out
+        return out, h_out
 
 
 class BasicCritic(nn.Module):
     """
-    Optional centralized critic (not used in QMIX baseline)
+    Simple critic network mapping global state -> scalar value(s).
+    Uses safe defaults if args missing.
     """
 
-    def __init__(self, input_shape, args):
-        super(BasicCritic, self).__init__()
-        self.fc1 = nn.Linear(input_shape, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 1)
+    def __init__(self, state_dim: int, args):
+        super().__init__()
+        hid = int(getattr(args, "critic_hidden_dim", getattr(args, "rnn_hidden_dim", 64)))
+        self.fc1 = nn.Linear(int(state_dim), hid)
+        self.fc2 = nn.Linear(hid, hid)
+        self.out = nn.Linear(hid, 1)
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.out(x)
 
 
 # Compatibility aliases

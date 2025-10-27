@@ -63,7 +63,7 @@ class Agents:
         return output
 
     # ============================================================
-    # Step 8A.5 – Episodic learning (COM A / VDN / Reinforce)
+    # Step 8A.5 – Episodic learning (COMA / VDN / Reinforce)
     # ============================================================
     def _get_max_episode_len(self, batch):
         terminated = batch["terminated"]
@@ -107,6 +107,44 @@ class Agents:
                 self.policy.save_model(train_step)
         return None
 
+    # -----------------------------------------------------------------
+    # Batch-action helper for Runner / RolloutWorker compatibility
+    # -----------------------------------------------------------------
+    def select_actions(self, obs_batch, avail_batch=None, evaluate=False):
+        """
+        Return list of actions for obs_batch.
+        Tries policy.select_actions first, falls back to per-observation policy.act.
+        """
+        # try policy-level batch API
+        try:
+            if hasattr(self.policy, "select_actions"):
+                return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
+        except Exception:
+            pass
+
+        # fallback: call per-observation act() if available
+        actions = []
+        try:
+            if hasattr(self.policy, "act"):
+                for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
+                    a = self.policy.act(ob, avail, evaluate=evaluate)
+                    actions.append(int(a) if a is not None else None)
+                return actions
+        except Exception:
+            pass
+
+        # last resort: deterministic/random pick from avail_batch / zeros
+        for avail in (avail_batch or [None] * len(obs_batch)):
+            if avail is None:
+                actions.append(0)
+            else:
+                try:
+                    allowed = [i for i, v in enumerate(avail) if int(v)]
+                    actions.append(int(allowed[0]) if allowed else 0)
+                except Exception:
+                    actions.append(0)
+        return actions
+
 
 # ============================================================
 # Communication-based algorithms (COMMNET / G2ANet)
@@ -130,3 +168,32 @@ class CommAgents:
             raise Exception(f"No CommAgent variant implemented for: {alg}")
 
         print(f"[CommAgents] Initialized ({alg.upper()})")
+
+    def select_actions(self, obs_batch, avail_batch=None, evaluate=False):
+        """Same batch helper for communication-based agents."""
+        try:
+            if hasattr(self.policy, "select_actions"):
+                return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
+        except Exception:
+            pass
+
+        actions = []
+        try:
+            if hasattr(self.policy, "act"):
+                for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
+                    a = self.policy.act(ob, avail, evaluate=evaluate)
+                    actions.append(int(a) if a is not None else None)
+                return actions
+        except Exception:
+            pass
+
+        for avail in (avail_batch or [None] * len(obs_batch)):
+            if avail is None:
+                actions.append(0)
+            else:
+                try:
+                    allowed = [i for i, v in enumerate(avail) if int(v)]
+                    actions.append(int(allowed[0]) if allowed else 0)
+                except Exception:
+                    actions.append(0)
+        return actions

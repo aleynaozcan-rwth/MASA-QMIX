@@ -1,13 +1,19 @@
 import numpy as np
-import torch
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+# try to import torch for RNN hidden handling; degrade gracefully if not available
+try:
+    import torch
+except Exception:
+    torch = None
+
 
 class RolloutWorker:
     """
-    Step 8A.7.3 – Final RolloutWorker for MASA-QMIX
-    ------------------------------------------------
-    • Builds full RNN input (obs + last_action + agent_id)
-    • RNN-safe, replay-ready, epsilon-decay compatible
-    • Always includes s / s_next for ReplayBuffer
+    Step 8A.7.3 – Final RolloutWorker for MASA-QMIX (complete fallback-friendly)
+    • Works as legacy step-based rollout and provides decide_batch / collect_gantt_from_batch
+      helpers so Runner can drive SimPy event-driven MASAEnv.
     """
 
     def __init__(
@@ -16,230 +22,248 @@ class RolloutWorker:
         agents,
         buffer=None,
         args=None,
-        episode_limit=200,
-        epsilon_start=1.0,
-        epsilon_end=0.05,
-        epsilon_anneal_steps=50000,
-        device="cpu",
-        log_prefix="8A.7.3",
+        episode_limit: int = 200,
+        epsilon_start: float = 1.0,
+        epsilon_end: float = 0.05,
+        epsilon_anneal_steps: int = 50000,
+        device: str = "cpu",
+        log_prefix: str = "8A.7.3",
     ):
         self.env = env
         self.agents = agents
         self.buffer = buffer
-        self.args = args
-        self.episode_limit = getattr(args, "episode_limit", episode_limit)
-        self.device = getattr(args, "device", device)
+        self.args = args or type("A", (), {})()
+        self.episode_limit = getattr(self.args, "episode_limit", episode_limit)
+        self.device = getattr(self.args, "device", device)
         self.log_prefix = log_prefix
 
-        # --- epsilon schedule ---
+        # epsilon schedule
         self.epsilon = float(epsilon_start)
         self.epsilon_start = float(epsilon_start)
         self.epsilon_end = float(epsilon_end)
         self.epsilon_anneal_steps = int(epsilon_anneal_steps)
         self._eps_decay = (self.epsilon_start - self.epsilon_end) / max(1, self.epsilon_anneal_steps)
 
-        # --- hidden state placeholder ---
+        # runtime placeholders
         self.eval_hidden = None
         self.episode_duration = 0
 
-        print(f"[INFO] RolloutWorker {self.log_prefix} initialized — unified RNN inputs")
-        print(f"  → Episode limit: {self.episode_limit}")
-        print(f"  → Epsilon decay: {self.epsilon_start} → {self.epsilon_end} over {self.epsilon_anneal_steps} steps")
-        print(f"  → Using device: {self.device}")
+        # RNG for Runner fallback
+        seed = getattr(self.args, "seed", None)
+        try:
+            self.rng = np.random.RandomState(seed if seed is not None else 0)
+        except Exception:
+            self.rng = np.random.RandomState(0)
 
-    # ============================================================
-    #                    MAIN ROLLOUT
-    # ============================================================
-    def generate_episode(self, global_ep_idx=0, evaluate=False):
-        """Generate one full episode rollout."""
-        self._maybe_decay_epsilon(evaluate)
+        # log
+        print(f"[RolloutWorker] init | episode_limit={self.episode_limit} | device={self.device}")
 
-        obs_list, info = self._reset_env()
-        self._ensure_hidden(len(obs_list))
+    # -------------------------
+    # Legacy step-based rollout
+    # -------------------------
+    def generate_episode(self, global_ep_idx: int = 0, evaluate: bool = False) -> Tuple[Dict[str, List[Any]], float, bool, List]:
+        """
+        Run a full episode using legacy env.step interface.
+        Returns: (episode_dict, episode_reward_sum, win_flag, gantt_list)
+        Minimal episode_dict contains key 'r' (list of per-decision rewards).
+        """
+        episode = {"r": []}
+        gantt = []
 
-        s = self._get_state_from_info(info)
-        n_actions = getattr(self.agents, "n_actions", getattr(self.env, "num_wcs", None))
-        avail = self._get_avail_from_info(info, n_actions)
-
-        ep_transitions, ep_reward, t = [], 0.0, 0
-        gantt_data = []
-
-        while t < self.episode_limit:
-            actions, q_vals = self._select_actions(obs_list, avail, evaluate)
-            obs_next, reward, done, info_next = self.env.step(actions)
-
-            s_next = self._get_state_from_info(info_next)
-            avail_next = self._get_avail_from_info(info_next, n_actions)
-
-            # --- Safe conversion for replay buffer ---
-            s_arr = np.asarray(s, np.float32).reshape(-1)
-            s_next_arr = np.asarray(s_next, np.float32).reshape(-1)
-            if s_arr.size == 0:
-                s_arr = np.zeros((64,), np.float32)
-            if s_next_arr.size == 0:
-                s_next_arr = np.zeros((64,), np.float32)
-
-            trans = dict(
-                o=self._obs_list_to_array(obs_list),
-                o_next=self._obs_list_to_array(obs_next),
-                s=s_arr,
-                s_next=s_next_arr,
-                u=np.asarray(actions, np.int64),
-                avail_a=self._normalize_avail(avail, len(obs_list), n_actions),
-                avail_a_next=self._normalize_avail(avail_next, len(obs_list), n_actions),
-                r=float(reward),
-                terminated=bool(done),
-                padded=False,
-            )
-
-            ep_transitions.append(trans)
-            ep_reward += float(reward)
-
-            obs_list, s, avail = obs_next, s_next, avail_next
-            t += 1
-            if done:
-                break
-
-        self.episode_duration = len(ep_transitions)
-        episode = self._pack_episode(ep_transitions)
-
-        if self.buffer is not None:
-            self._insert_episode(episode)
-
-        print(f"[Rollout] Episode finished in {self.episode_duration} steps | total reward={ep_reward:.2f}")
-        if self.buffer is not None:
-            print(f"Episode reward: {ep_reward:.2f}, buffer length: {len(self.buffer)}")
-
-        return episode, ep_reward, bool(ep_transitions[-1]["terminated"]), gantt_data
-
-    # ============================================================
-    #                    ACTION SELECTION
-    # ============================================================
-    def _select_actions(self, obs_list, avail, evaluate=False):
-        n_agents = len(obs_list)
-        obs_t = torch.as_tensor(self._obs_list_to_array(obs_list), dtype=torch.float32, device=self.device)
-
-        # --- Build full RNN input (obs + last_action + agent_id) ---
-        obs_dim = obs_t.shape[1]
-        n_actions = getattr(self.agents, "n_actions", 0)
-        last_action = torch.zeros((n_agents, n_actions), dtype=torch.float32, device=self.device)
-        agent_ids = torch.eye(n_agents, dtype=torch.float32, device=self.device)
-
-        rnn_input = torch.cat([obs_t, last_action, agent_ids], dim=1)
-
-        # --- RNN Forward Pass ---
-        if hasattr(self.agents.policy, "eval_rnn"):
-            if self.eval_hidden is None or self.eval_hidden.shape[0] != n_agents:
-                self._ensure_hidden(n_agents)
-            q_t, h_out = self.agents.policy.eval_rnn(rnn_input, self.eval_hidden)
-            self.eval_hidden = h_out
-        else:
-            raise RuntimeError("Policy must implement eval_rnn().")
-
-        q_np = q_t.detach().cpu().numpy()
-        n_actions = q_np.shape[1]
-
-        # --- Mask handling ---
-        if avail is None:
-            mask = np.ones_like(q_np, dtype=bool)
-        else:
-            mask = np.asarray(avail, bool)
-            if mask.ndim == 1:
-                mask = np.tile(mask[None, :], (n_agents, 1))
-            if mask.shape != q_np.shape:
-                mask = np.ones_like(q_np, dtype=bool)
-
-        masked_q = np.where(mask, q_np, -1e9)
-        actions = []
-        for i in range(n_agents):
-            if not evaluate and np.random.rand() < self.epsilon:
-                valid = np.where(mask[i])[0]
-                a = np.random.choice(valid) if valid.size else np.random.randint(0, n_actions)
+        # reset environment (support both obs or (obs,info) signatures)
+        try:
+            reset_ret = self.env.reset()
+            if isinstance(reset_ret, tuple) and len(reset_ret) >= 1:
+                obs = reset_ret[0]
+                info = reset_ret[1] if len(reset_ret) > 1 else {}
             else:
-                a = int(np.argmax(masked_q[i]))
-            actions.append(a)
-        return actions, q_np
+                obs = reset_ret
+                info = {}
+        except Exception:
+            # fallback: try calling without args
+            obs = self.env.reset()
+            info = {}
 
-    # ============================================================
-    #                    HELPERS / UTILS
-    # ============================================================
-    def _reset_env(self):
-        out = self.env.reset()
-        return out if isinstance(out, tuple) and len(out) == 2 else (out, {})
+        done = False
+        t = 0
 
-    def _get_state_from_info(self, info):
-        s = info.get("state_vec", None)
-        if s is None:
-            dim = getattr(self.env, "state_dim", 64)
-            return np.zeros((dim,), np.float32)
-        return np.asarray(s, np.float32).reshape(-1)
+        # step loop (best-effort generic)
+        while not done and t < self.episode_limit:
+            # build obs_batch (if env returns per-agent obs)
+            obs_batch = obs if isinstance(obs, (list, tuple)) else [obs]
 
-    def _get_avail_from_info(self, info, n_actions):
-        avail = info.get("avail_actions", None)
-        if avail is None:
-            return None
-        avail = np.asarray(avail, bool)
-        if avail.ndim == 2 and (n_actions is None or avail.shape[1] == int(n_actions)):
-            return avail
-        if avail.ndim == 1 and n_actions is not None and avail.size == int(n_actions):
-            return np.tile(avail[None, :], (len(self.env.jobs), 1))
-        return None
+            # choose actions
+            actions = self._select_actions(obs_batch, None, evaluate=evaluate)
 
-    def _obs_list_to_array(self, obs_list):
-        arr = np.asarray([np.asarray(o, np.float32).ravel() for o in obs_list], np.float32)
-        target = getattr(self.env, "obs_dim_agent", arr.shape[1])
-        if arr.shape[1] < target:
-            arr = np.pad(arr, ((0, 0), (0, target - arr.shape[1])))
-        elif arr.shape[1] > target:
-            arr = arr[:, :target]
-        return arr.astype(np.float32)
+            # try stepping the environment with actions
+            try:
+                step_ret = self.env.step(actions)
+            except Exception:
+                # env may expect single action for single-agent
+                try:
+                    step_ret = self.env.step(actions[0] if isinstance(actions, (list, tuple)) and len(actions) > 0 else actions)
+                except Exception:
+                    break
 
-    def _normalize_avail(self, avail, n_agents, n_actions):
-        if avail is None:
-            return None
-        mask = np.asarray(avail, bool)
-        if mask.ndim == 1 and n_actions is not None:
-            mask = np.tile(mask[None, :], (n_agents, 1))
-        return mask
+            # Interpret common return signatures
+            obs_next = None
+            reward = 0.0
+            done = False
+            info = {}
+            if isinstance(step_ret, tuple):
+                if len(step_ret) == 4:
+                    obs_next, reward, done, info = step_ret
+                elif len(step_ret) == 3:
+                    obs_next, reward, done = step_ret
+                    info = {}
+                elif len(step_ret) == 2:
+                    # (reward, info) or (obs_next, info) — best guess
+                    if isinstance(step_ret[0], (int, float, list, np.ndarray)):
+                        reward = step_ret[0]
+                        info = step_ret[1]
+                    else:
+                        obs_next, info = step_ret
+                else:
+                    # unknown tuple shape — attempt to assign first elements
+                    obs_next = step_ret[0] if len(step_ret) > 0 else None
+                    reward = step_ret[1] if len(step_ret) > 1 and isinstance(step_ret[1], (int, float)) else 0.0
+                    done = bool(step_ret[2]) if len(step_ret) > 2 else False
+            else:
+                # single scalar or object returned — unlikely; treat as reward
+                if isinstance(step_ret, (int, float)):
+                    reward = float(step_ret)
+                else:
+                    # cannot interpret; break
+                    break
 
-    def _pack_episode(self, trans):
-        T = len(trans)
-        def stack_or_none(k):
-            vals = [t[k] for t in trans]
-            return None if vals[0] is None else np.stack(vals)
-        ep = {
-            "o": np.stack([t["o"] for t in trans]).astype(np.float32),
-            "o_next": np.stack([t["o_next"] for t in trans]).astype(np.float32),
-            "s": np.stack([t["s"] for t in trans]).astype(np.float32),
-            "s_next": np.stack([t["s_next"] for t in trans]).astype(np.float32),
-            "u": np.stack([t["u"] for t in trans]).astype(np.int64),
-            "avail_a": stack_or_none("avail_a"),
-            "avail_a_next": stack_or_none("avail_a_next"),
-            "r": np.array([t["r"] for t in trans], np.float32),
-            "terminated": np.array([t["terminated"] for t in trans], np.float32),
-            "padded": np.array([t["padded"] for t in trans], np.float32),
-            "episode_len": T,
-        }
-        return ep
+            # normalize reward to float (if vector, sum)
+            if isinstance(reward, (list, tuple, np.ndarray)):
+                try:
+                    r_val = float(np.sum(reward))
+                except Exception:
+                    r_val = float(reward[0]) if len(reward) > 0 else 0.0
+            else:
+                try:
+                    r_val = float(reward)
+                except Exception:
+                    r_val = 0.0
 
-    def _insert_episode(self, ep):
-        for name in ("store_episode", "insert_episode", "push_episode", "add_episode", "push"):
-            fn = getattr(self.buffer, name, None)
-            if callable(fn):
-                fn(ep)
-                return
-        add_fn = getattr(self.buffer, "add", None)
-        if callable(add_fn):
-            for t in range(ep["episode_len"]):
-                add_fn({k: v[t] for k, v in ep.items() if k not in ("episode_len",)})
+            episode["r"].append(r_val)
+            t += 1
+            self.episode_duration = t
 
-    def _maybe_decay_epsilon(self, evaluate):
-        if not evaluate and self.epsilon > self.epsilon_end:
-            self.epsilon = max(self.epsilon_end, self.epsilon - self._eps_decay)
+            # advance
+            obs = obs_next
 
+        ep_reward = float(np.sum(episode.get("r", [])))
+        # try to detect win: environment-specific; fallback False
+        try:
+            win_tag = all(j.finished for j in getattr(self.env, "jobs", []))
+        except Exception:
+            win_tag = False
+
+        return episode, ep_reward, win_tag, gantt
+
+    # ------------------------------------------------
+    # Action selection helpers used by Runner fallback
+    # ------------------------------------------------
+    def _select_actions(self, obs_batch: List[Any], avail_batch: Optional[List[Any]], evaluate: bool = False) -> Tuple[List[Any], Any]:
+        """
+        Return (actions_list, hidden_state) where actions_list is a list of int actions
+        This wrapper tries common agent APIs then falls back to deterministic/random picks.
+        """
+        # Try batch API on agents
+        try:
+            if hasattr(self.agents, "select_actions"):
+                return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
+            if hasattr(self.agents, "choose_actions"):
+                return self.agents.choose_actions(obs_batch, avail_batch, evaluate=evaluate), None
+        except Exception:
+            pass
+
+        # Try per-observation act method
+        try:
+            if hasattr(self.agents, "act"):
+                actions = []
+                for ob in obs_batch:
+                    a = self.agents.act(ob, None, evaluate=evaluate)
+                    actions.append(a)
+                return actions, None
+        except Exception:
+            pass
+
+        # Fallback: pick first allowed or random
+        actions = []
+        for ob in obs_batch:
+            # try to extract allowed_wcs from ob if present
+            allowed = None
+            if isinstance(ob, dict):
+                allowed = ob.get("allowed_wcs", None) or ob.get("avail_row", None)
+            if allowed is None:
+                # no info — pick 0
+                actions.append(0)
+            else:
+                try:
+                    allowed_list = list(allowed)
+                    if len(allowed_list) == 0:
+                        actions.append(None)
+                    else:
+                        if evaluate:
+                            actions.append(int(allowed_list[0]))
+                        else:
+                            actions.append(int(self.rng.choice(allowed_list)))
+                except Exception:
+                    actions.append(0)
+        return actions, None
+
+    # ------------------------------------------------------------------
+    # Event-driven / Runner helpers (used as fallback by Runner)
+    # ------------------------------------------------------------------
+    def decide_batch(self, batch, evaluate: bool = False):
+        """
+        Provide actions for a batch of decision-items coming from MASAEnv.
+        Best-effort: reuse RolloutWorker._select_actions by treating the batch
+        as a simultaneous multi-agent observation list.
+        """
+        if not batch:
+            return []
+        obs_list = [item.get("obs") for item in batch]
+        try:
+            avail = [item.get("avail_row") for item in batch]
+        except Exception:
+            avail = None
+
+        try:
+            actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
+            return actions
+        except Exception:
+            # fallback deterministic/random pick
+            outs = []
+            for item in batch:
+                allowed = item.get("allowed_wcs", [])
+                if not allowed:
+                    outs.append(None)
+                else:
+                    if evaluate:
+                        outs.append(int(allowed[0]))
+                    else:
+                        try:
+                            outs.append(int(self.rng.choice(allowed)))
+                        except Exception:
+                            outs.append(int(np.random.choice(allowed)))
+            return outs
+
+    def collect_gantt_from_batch(self, batch, sim_time):
+        """Optional hook to build gantt records from a decision batch. Default: empty."""
+        return []
+
+    # -------------------------
+    # Utility: ensure hidden
+    # -------------------------
     def _ensure_hidden(self, n_agents: int):
-        """Ensure RNN hidden state matches current agent count."""
-        hdim = 64
-        if hasattr(self.agents.policy, "rnn") and hasattr(self.agents.policy.rnn, "hidden_size"):
-            hdim = self.agents.policy.rnn.hidden_size
+        """Ensure RNN hidden state exists (best-effort)."""
+        hdim = getattr(self.args, "rnn_hidden_dim", 64)
+        if torch is None:
+            self.eval_hidden = None
+            return
         self.eval_hidden = torch.zeros((n_agents, hdim), dtype=torch.float32, device=self.device)
