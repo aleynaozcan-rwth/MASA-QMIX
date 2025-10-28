@@ -8,6 +8,13 @@ try:
 except Exception:
     torch = None
 
+# mask utilities
+try:
+    from MARL.common.mask_utils import build_index_map, build_mask_for_job
+except Exception:
+    build_index_map = None
+    build_mask_for_job = None
+
 
 class RolloutWorker:
     """
@@ -234,6 +241,113 @@ class RolloutWorker:
             avail = None
 
         try:
+            # Best-effort: compute detailed avail masks and attach to batch entries
+            if build_index_map is not None and hasattr(self.env, 'num_ops'):
+                # determine if we're using machine-level actions (global machine list)
+                machine_list = getattr(self.env.workcenters_meta, 'machine_list', None)
+                if bool(getattr(self.args, 'use_machine_actions', False)) and machine_list is not None:
+                    num_m = int(len(machine_list))
+                    # op_to_m maps operator -> list of machine indices
+                    op_to_m = {p: [] for p in range(int(self.env.num_ops))}
+                    try:
+                        # build by scanning machine_registry capabilities
+                        mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
+                        mindex = getattr(self.env.workcenters_meta, 'machine_index', {})
+                        for mname, mdata in mreg.items():
+                            caps = list(mdata.get('capabilities', []))
+                            for p in caps:
+                                op_to_m.setdefault(int(p), []).append(int(mindex.get(mname, 0)))
+                    except Exception:
+                        op_to_m = {p: [] for p in range(int(self.env.num_ops))}
+                    # machine resource free state: map each machine to its WC resource
+                    machine_free = []
+                    try:
+                        mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
+                        for mname in machine_list:
+                            try:
+                                wc_i = int(mreg.get(mname, {}).get('workcenter', 0))
+                                machine_free.append(self.env._resource_free(self.env.wc_resources[wc_i]))
+                            except Exception:
+                                machine_free.append(True)
+                    except Exception:
+                        machine_free = [True] * num_m
+                    try:
+                        operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(int(self.env.num_ops))]
+                    except Exception:
+                        operator_free = [True] * int(self.env.num_ops)
+                    num_p = int(self.env.num_ops)
+                    idx_map = build_index_map(num_m, num_p)
+                else:
+                    # fallback: use workcenter-level mapping as before
+                    num_m = int(self.env.num_wcs)
+                    num_p = int(self.env.num_ops)
+                    idx_map = build_index_map(num_m, num_p)
+                    # build operator->workcenter mapping
+                    op_to_m = {p: [] for p in range(num_p)}
+                    try:
+                        groups_map = getattr(self.env.workcenters_meta, 'eligible_operator_groups_by_wc', {})
+                        for wc_idx, groups in groups_map.items():
+                            for g in groups:
+                                if g in op_to_m:
+                                    op_to_m[g].append(int(wc_idx))
+                    except Exception:
+                        # fallback to config mapping
+                        if getattr(self.env, 'config', None):
+                            ops_cfg = self.env.config.get('operators', [])
+                            for p_idx, opconf in enumerate(ops_cfg):
+                                q = opconf.get('qualified_machines', [])
+                                mapped = []
+                                for mname in q:
+                                    for mid in getattr(self.env.workcenters_meta, 'machine_registry', {}).keys():
+                                        if mname in mid or mname == mid:
+                                            try:
+                                                wc_i = int(self.env.workcenters_meta.machine_registry[mid]['workcenter'])
+                                                mapped.append(wc_i)
+                                            except Exception:
+                                                continue
+                                op_to_m[p_idx] = mapped
+
+                    machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
+                    try:
+                        operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(num_p)]
+                    except Exception:
+                        operator_free = [True] * num_p
+            else:
+                idx_map = None
+                op_to_m = {}
+                machine_free = []
+                operator_free = []
+
+            for item in batch:
+                allowed = item.get('allowed_wcs', [])
+                try:
+                    if idx_map is not None:
+                        mask = build_mask_for_job(idx_map, allowed, op_to_m, machine_free, operator_free)
+                        # attach granular (machine×op) mask
+                        item['avail_mask'] = mask.tolist()
+                        # also attach per-machine availability (n_actions) by OR-ing operators
+                        num_ops = int(self.env.num_ops) if hasattr(self.env, 'num_ops') else 0
+                        # determine num_m: if machine_list present and using machine actions, use that
+                        if getattr(self.args, 'use_machine_actions', False) and getattr(self.env.workcenters_meta, 'machine_list', None) is not None:
+                            num_m = int(len(self.env.workcenters_meta.machine_list))
+                        else:
+                            num_m = int(getattr(self.env, 'num_wcs', 0))
+                        per_machine = []
+                        for m in range(num_m):
+                            start = m * num_ops
+                            end = start + num_ops
+                            try:
+                                per_machine.append(int(bool(mask[start:end].any())))
+                            except Exception:
+                                per_machine.append(0)
+                        # prefer to set 'avail_row' so Runner will pick it up for storing into replay
+                        item['avail_row'] = per_machine
+                    else:
+                        item['avail_mask'] = None
+                except Exception:
+                    item['avail_mask'] = None
+                    # leave avail_row untouched if we can't compute mask
+
             actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
             return actions
         except Exception:

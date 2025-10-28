@@ -8,7 +8,7 @@ and the thesis terminology used in the Job-centric FJSSP environment.
 Usage:
     from MARL.common.terms import t
 
-Then use t("plane"), t("site"), etc. anywhere text labels appear.
+Then use t("JobAgent"), t("WorkCenter"), etc. anywhere text labels appear.
 This helps maintain consistent naming across logs, plots, and printouts
 without changing variable names or internal logic yet.
 """

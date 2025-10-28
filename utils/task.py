@@ -1,8 +1,8 @@
 """
 This file defines the Task (TaskGenerator) class.
-Step 4B originally added per-plane randomized job sequences.
-Now unified under Step 8A terminology:
-Each JobAgent (agent) follows a unique workflow made of existing Job IDs.
+Legacy note: Step 4B originally added per-JobAgent randomized job sequences.
+Now unified under Step 8A terminology: Each JobAgent follows a unique
+workflow made of existing Job IDs.
 """
 
 import random

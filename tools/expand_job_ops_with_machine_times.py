@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 from pathlib import Path
-from utils.site import Sites
+from utils.workcenter import WorkCenters
 
 history = Path("my_data_and_graph/historydata")
 js = history / 'job_ops_summary.json'
@@ -10,15 +10,15 @@ if not js.exists():
     raise SystemExit(1)
 
 jobs = json.loads(js.read_text())
-sites = Sites()
+workcenters = WorkCenters()
 
 # build machine registry mapping: wc -> speed_factor and eligible operator groups
 machine_info = {}
-for mid, mdata in sites.machine_registry.items():
+for mid, mdata in workcenters.machine_registry.items():
     wc = int(mdata['workcenter'])
     speed = float(mdata.get('speed_factor', 1.0))
-    # groups eligible for this site
-    groups = sites.eligible_operator_groups_by_site.get(wc, [])
+    # groups eligible for this WorkCenter
+    groups = workcenters.eligible_operator_groups_by_wc.get(wc, [])
     machine_info[wc] = {'machine_id': mid, 'speed_factor': speed, 'operator_groups': groups}
 
 # Build detailed per-job structure

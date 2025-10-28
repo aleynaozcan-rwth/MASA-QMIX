@@ -1,5 +1,4 @@
- # Example environment configuration for MASA-QMIX
- # Edit to match your target factory/topology
+# MASA-QMIX environment configuration (canonical 3 WC / 5 machine topology)
 
 work_centers:
   WC1:
@@ -10,42 +9,73 @@ work_centers:
     machines: [M5]
 
 machines:
+  # Machine entries name the machine and the WorkCenter they belong to.
+  # 'capable_ops' lists operation types (Op0..Op8) that the machine can process.
   M1:
     wc: WC1
-    capable_ops: [Op1, Op3, Op5]
+    capable_ops: [Op1, Op2, Op3, Op5, Op9]
+    speed_factor: 1.0
   M2:
     wc: WC1
-    capable_ops: [Op2, Op4, Op6]
+    capable_ops: [Op4, Op5, Op8]
+    speed_factor: 1.0
   M3:
     wc: WC2
-    capable_ops: [Op2, Op7]
+    capable_ops: [Op1, Op2, Op4, Op6, Op9]
+    speed_factor: 1.0
   M4:
     wc: WC2
-    capable_ops: [Op1, Op5, Op8]
+    capable_ops: [Op1, Op3, Op7, Op8]
+    speed_factor: 1.0
   M5:
     wc: WC3
-    capable_ops: [Op1, Op3, Op9]
+    capable_ops: [Op1, Op3, Op4, Op6, Op8, Op9]
+    speed_factor: 1.0
 
 operators:
   - id: O1
     qualified_machines: [M1, M4, M5]
   - id: O2
-    qualified_machines: [M2, M3]
+    qualified_machines: [M2, M3, M5]
 
 op_type_distribution:
-  # probabilities (sum to 1) used when sampling op types for a new job
+  # probabilities (sum to 1) used when sampling op types for new jobs (op types 0..8)
   probs: [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.12]
 
 processing_time_means:
-  # mean processing time per (op type, machine) in arbitrary time units
+  # mean processing time per (op type, machine). Use Op1..Op9 to map to indices 0..8
   Op1:
-    M1: 4.0
+    M1: 3.5
+    M3: 4.5
     M4: 4.0
-    M5: 6.0
+    M5: 3.0
   Op2:
+    M1: 3.0
+    M3: 5.0
+  Op3:
+    M1: 4.5
+    M4: 5.0
+    M5: 5.5
+  Op4:
+    M2: 4.5
+    M3: 4.8
+    M5: 6.0
+  Op5:
     M2: 5.0
-    M3: 5.5
-  # ... add others as needed
+    M1: 6.5
+  Op6:
+    M3: 6.0
+    M5: 8.0
+  Op7:
+    M4: 5.2
+  Op8:
+    M5: 4.5
+    M4: 7.5
+    M2: 8.5
+  Op9:
+    M5: 5.5
+    M1: 8.5
+    M3: 9.0
 
 task_generator:
   arrival_lambda: 0.05   # base interarrival rate (Exponential) — tune to target load

@@ -16,7 +16,7 @@ args = parser.parse_args()
 # import environment and helpers
 from environment import MASAEnv
 from utils.operator import Operators
-from utils.site import Sites
+from utils.workcenter import WorkCenters
 
 history = Path('my_data_and_graph/historydata')
 history.mkdir(parents=True, exist_ok=True)
@@ -64,13 +64,13 @@ for jid, info in job_op_sequences.items():
             wcd = rec.setdefault(wc, {'durations': [], 'operator_groups': set(), 'machine_ids': set()})
             wcd['durations'].append(est)
 
-sites = Sites()
+workcenters = WorkCenters()
 for op_type, wcs in op_catalog.items():
     for wc, info in list(wcs.items()):
-        # operator groups from sites
-        mids = [m for m, md in sites.machine_registry.items() if int(md['workcenter']) == wc]
+        # operator groups from workcenters
+        mids = [m for m, md in workcenters.machine_registry.items() if int(md['workcenter']) == wc]
         info['machine_ids'] = mids
-        groups = sites.eligible_operator_groups_by_site.get(wc, [])
+        groups = workcenters.eligible_operator_groups_by_wc.get(wc, [])
         info['operator_groups'] = groups
         durs = info.pop('durations')
         info['min_duration'] = min(durs) if durs else 0.0
@@ -78,7 +78,7 @@ for op_type, wcs in op_catalog.items():
         info['avg_duration'] = sum(durs)/len(durs) if durs else 0.0
 
 # operator mappings
-ops_obj = Operators(sites)
+ops_obj = Operators(workcenters)
 operator_mappings = {}
 for op in ops_obj.operators_object_list:
     operator_mappings[op.operator_id] = {

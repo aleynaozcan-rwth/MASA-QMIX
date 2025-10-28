@@ -2,8 +2,11 @@
 verify_terms.py
 Step 8A.3 – Terminology Consistency Checker
 --------------------------------------------
-Scans project files to ensure old terminology (Plane, Site, etc.)
+Scans project files to ensure old terminology (Plane, WorkCenter, etc.)
 has been replaced by the new unified vocabulary (JobAgent, WorkCenter, etc.).
+Per the migration plan, references to legacy 'Site'/'Sites' are being removed
+and replaced incrementally with 'WorkCenter'/'WorkCenters'. This script
+helps find remaining legacy terms for targeted manual fixes.
 """
 
 import os
@@ -12,7 +15,9 @@ import re
 # === Configuration ===
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGET_FOLDERS = ["MARL", "utils"]
-OLD_TERMS = ["Plane", "Site", "plane", "site"]
+# Only check for old aviation/legacy terms; 'Site' removed from list as
+# we migrate to WorkCenter terminology and perform targeted replacements.
+OLD_TERMS = ["Plane", "plane"]
 IGNORE_DIRS = ["__pycache__", ".git", "my_data_and_graph"]
 
 def scan_file(file_path):

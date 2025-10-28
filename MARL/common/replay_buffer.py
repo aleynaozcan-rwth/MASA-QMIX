@@ -77,10 +77,27 @@ class ReplayBuffer:
 
         n_agents, obs_dim = _infer_agents_obs(episodes)
 
+        # Pre-scan episodes to find the maximum availability vector length so
+        # we can allocate a consistent avail_u tensor even when some
+        # transitions contain flattened operator-level masks and others
+        # contain per-machine rows. This avoids broadcasting errors when
+        # episode transitions have variable avail lengths.
+        max_avail_len = 0
+        for ep in episodes:
+            for tr in ep:
+                if "avail_a" in tr:
+                    try:
+                        _len = int(np.asarray(tr["avail_a"]).shape[-1])
+                        if _len > max_avail_len:
+                            max_avail_len = _len
+                    except Exception:
+                        continue
+
         # Allocate tensors
         o      = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
         o_next = np.zeros((B, T, n_agents, obs_dim), dtype=np.float32)
         u      = np.zeros((B, T, n_agents, 1), dtype=np.int64)
+        u_machine = np.full((B, T, n_agents, 1), -1, dtype=np.int64)
         r      = np.zeros((B, T, 1), dtype=np.float32)
         terminated = np.zeros((B, T, 1), dtype=np.float32)
         filled     = np.zeros((B, T, 1), dtype=np.float32)
@@ -88,6 +105,14 @@ class ReplayBuffer:
         # Optional blocks
         have_avail = have_state = have_u_onehot = False
         avail_u = avail_u_next = state = state_next = u_onehot = None
+
+        # If we pre-detected avail vectors across episodes, pre-allocate
+        # the avail arrays to the maximum observed length. This avoids
+        # reallocating during the main loop and keeps shapes consistent.
+        if max_avail_len > 0:
+            have_avail = True
+            avail_u = np.zeros((B, T, n_agents, max_avail_len), dtype=np.float32)
+            avail_u_next = np.zeros((B, T, n_agents, max_avail_len), dtype=np.float32)
 
         for b, ep in enumerate(episodes):
             t_limit = min(T, len(ep))
@@ -106,6 +131,12 @@ class ReplayBuffer:
                     if ut.shape[0] != n_agents:
                         ut = np.repeat(ut[:1, :], n_agents, axis=0)
                     u[b, t] = ut
+                # Machine-level action id (optional)
+                if "u_machine" in tr:
+                    utm = np.asarray(tr["u_machine"], dtype=np.int64).reshape(-1, 1)
+                    if utm.shape[0] != n_agents:
+                        utm = np.repeat(utm[:1, :], n_agents, axis=0)
+                    u_machine[b, t] = utm
 
                 # Rewards
                 if "r" in tr:
@@ -117,14 +148,26 @@ class ReplayBuffer:
 
                 # Avail masks
                 if "avail_a" in tr:
-                    if not have_avail:
-                        _na = int(np.asarray(tr["avail_a"]).shape[-1])
-                        avail_u = np.zeros((B, T, n_agents, _na), dtype=np.float32)
-                        avail_u_next = np.zeros((B, T, n_agents, _na), dtype=np.float32)
-                        have_avail = True
-                    avail_u[b, t] = np.asarray(tr["avail_a"], dtype=np.float32)
+                    try:
+                        mask = _as_agents_mask(tr["avail_a"], n_agents)
+                        # mask shape: (n_agents, current_len)
+                        curr_len = mask.shape[1]
+                        if avail_u is None:
+                            # allocate conservative buffer if not pre-allocated
+                            avail_u = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
+                            avail_u_next = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
+                            have_avail = True
+                        # copy into the pre-allocated buffer (pad/truncate as needed)
+                        avail_u[b, t, :curr_len] = mask
+                    except Exception:
+                        pass
                 if "avail_a_next" in tr and have_avail:
-                    avail_u_next[b, t] = np.asarray(tr["avail_a_next"], dtype=np.float32)
+                    try:
+                        maskn = _as_agents_mask(tr["avail_a_next"], n_agents)
+                        curr_len_n = maskn.shape[1]
+                        avail_u_next[b, t, :curr_len_n] = maskn
+                    except Exception:
+                        pass
 
                 # State vectors (global state)
                 if "s" in tr:
@@ -166,6 +209,11 @@ class ReplayBuffer:
             "terminated": terminated,
             "filled": filled,
         }
+        # include machine mapping per action if present
+        try:
+            batch["u_machine"] = u_machine
+        except Exception:
+            pass
         if have_state:
             batch["state"] = state
             batch["state_next"] = state_next
@@ -212,6 +260,28 @@ def _as_agents_obs(x: Union[np.ndarray, Sequence[np.ndarray]], ensure_shape: Opt
     return arr
 
 
+def _as_agents_mask(x: Any, n_agents: int) -> np.ndarray:
+    """Convert availability masks into (n_agents, n_actions) float32.
+
+    Pads with zeros or trims extra rows so the returned array has exactly
+    n_agents rows. Accepts 1D vectors, 2D arrays, or lists.
+    """
+    a = np.asarray(x, dtype=np.float32)
+    if a.ndim == 1:
+        a = a.reshape(1, -1)
+    if a.ndim == 0:
+        a = a.reshape(1, -1)
+    # ensure at least 2D
+    if a.ndim == 1:
+        a = a.reshape(1, -1)
+    if a.shape[0] < n_agents:
+        pad = np.zeros((n_agents - a.shape[0], a.shape[1]), dtype=np.float32)
+        a = np.concatenate([a, pad], axis=0)
+    elif a.shape[0] > n_agents:
+        a = a[:n_agents]
+    return a
+
+
 def _infer_time_len_from_dict(d: Dict[str, np.ndarray]) -> int:
     """Infer T from first array key; rollout packs time on axis 0."""
     for _, v in d.items():
@@ -228,15 +298,40 @@ def _take_step(arr: Any, t: int) -> Any:
 
 
 def _infer_agents_obs(episodes: List[Episode]) -> Tuple[int, int]:
-    """Infer (n_agents, obs_dim) by inspecting first available 'o'."""
+    """Infer (n_agents, obs_dim) by inspecting episode transitions.
+
+    Robustly consider multiple possible keys that indicate agent-count
+    (for example: 'o', 'avail_a', 'u') and return the maximum agent count
+    observed across the episode pool. This avoids shape-mismatch when the
+    environment emits variable-sized decision batches across timesteps.
+    """
+    max_agents = 1
+    obs_dim = 11
     for ep in episodes:
         for tr in ep:
+            # observations
             if "o" in tr:
                 o = np.asarray(tr["o"], dtype=np.float32)
                 if o.ndim == 1:
-                    return 1, int(o.shape[0])
-                if o.ndim == 2:
-                    return int(o.shape[0]), int(o.shape[1])
-                if o.ndim == 3 and o.shape[0] == 1:  # (1, n_agents, obs_dim)
-                    return int(o.shape[1]), int(o.shape[2])
-    return 1, 11  # safe fallback
+                    max_agents = max(max_agents, 1)
+                    obs_dim = max(obs_dim, int(o.shape[0]))
+                elif o.ndim == 2:
+                    max_agents = max(max_agents, int(o.shape[0]))
+                    obs_dim = max(obs_dim, int(o.shape[1]))
+                elif o.ndim == 3 and o.shape[0] == 1:
+                    max_agents = max(max_agents, int(o.shape[1]))
+                    obs_dim = max(obs_dim, int(o.shape[2]))
+
+            # availability masks (per-agent × n_actions)
+            if "avail_a" in tr:
+                a = np.asarray(tr["avail_a"])
+                if a.ndim >= 2:
+                    max_agents = max(max_agents, int(a.shape[0]))
+
+            # actions vector (may be 1D per-agent)
+            if "u" in tr:
+                u = np.asarray(tr["u"])
+                if u.ndim >= 1:
+                    max_agents = max(max_agents, int(u.shape[0]))
+
+    return int(max_agents), int(obs_dim)

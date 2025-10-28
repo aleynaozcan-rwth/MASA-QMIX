@@ -16,7 +16,7 @@ This file defines the Job class, i.e., the abstract resource assurance class
 #   - Job "Power"    ↔ Generator
 #   - Job "Weapon mounting" ↔ Weapon team
 #
-# Therefore, in other parts of the code (e.g. restrict_dict in Sites),
+# Therefore, in other parts of the code (e.g. restrict_dict in WorkCenters),
 # job IDs are reused as "resource IDs". In other words:
 #   JOB TYPE == REQUIRED RESOURCE TYPE
 # -------------------------------------------------------------------------

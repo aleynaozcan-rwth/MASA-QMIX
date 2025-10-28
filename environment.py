@@ -18,19 +18,23 @@
 # Not: Mevcut reset(), get_env_info() ve builder fonksiyonları korunur.
 
 from __future__ import annotations
+import logging
 import numpy as np
 from collections import deque
 import random
 import simpy
 from typing import List, Dict, Optional, Tuple
+from pathlib import Path
 
 try:
-    from utils.site import Sites
+    from utils.workcenter import WorkCenters
 except Exception:
-    class Sites:
+    class WorkCenters:
         def __init__(self):
-            self.sites_object_list = list(range(18))
-            self.machine_registry = {f"M_{i}_0": {"speed_factor": 1.0} for i in range(18)}
+            # minimal fallback for environments without utils.workcenter
+            # Keep empty lists/dicts rather than legacy defaults.
+            self.workcenters_list = []
+            self.machine_registry = {}
 
 
 # ============================================================
@@ -62,15 +66,20 @@ class MASAEnv:
         self,
         num_jobs: int = 10,
         num_operators: int = 4,
-        num_wcs: int = 18,
+        num_wcs: Optional[int] = None,
         episode_limit: int = 200,
         obs_dim_agent: int = 11,
         state_dim: int = 64,
         seed: int = 42,
         reward_weights: Optional[Dict[str, float]] = None,
+        config_path: Optional[str] = None,
+        strict_mode: bool = True,
     ):
         self.num_jobs = num_jobs
         self.num_ops = num_operators
+        # default to None so that a provided config can deterministically set
+        # the authoritative number of WorkCenters; fallbacks below ensure a
+        # sensible positive value when no config is present.
         self.num_wcs = num_wcs
         self.obs_dim_agent = obs_dim_agent
         self.state_dim = state_dim
@@ -78,17 +87,219 @@ class MASAEnv:
 
         self._np_rng = np.random.RandomState(seed)
         self._py_rng = random.Random(seed)
+        # strict_mode: when True, generation will raise on config gaps instead
+        # of silently falling back to a default WC. Default True to fail-fast
+        # and make configuration issues explicit. Set to False to restore the
+        # old tolerant/deterministic fallback behavior.
+        self.strict_mode = bool(strict_mode)
 
-        self.sites = Sites()
+        # configure module logger
+        self.logger = logging.getLogger(__name__)
+        if not self.logger.handlers:
+            # basic config only if not already configured by application
+            logging.basicConfig(level=logging.INFO)
+
+    # Load optional YAML config to override WorkCenters/machine/operator definitions
+        self.config = None
+        # If no explicit config_path was provided, look for a default configs/env_config.yaml
+        cfg_path = config_path
+        if cfg_path is None:
+            default_cfg = Path("configs/env_config.yaml")
+            if default_cfg.exists():
+                cfg_path = str(default_cfg)
+
+        if cfg_path:
+            try:
+                from utils.config_loader import load_config
+                self.config = load_config(cfg_path)
+                self.config_path = cfg_path
+            except Exception as e:
+                print(f"[WARN] Could not load config {cfg_path}: {e}")
+                # preserve original config_path arg if provided
+                self.config_path = config_path
+        else:
+            # no config found / specified
+            self.config_path = config_path
+
+        # Initialize WorkCenters (will be overridden by config if provided)
+        # runtime API: `workcenters_meta` holds the WorkCenters/WorkCenter registry
+        # (keeps separate from `self.workcenters` which are simpy.Resource objects)
+        self.workcenters_meta = WorkCenters()
+
+        # If a config is provided, construct a simplified machine registry
+        # that is compatible with existing code (keys like 'M_<wc>_0').
+        if self.config is not None:
+            try:
+                machines_cfg = self.config.get('machines', {})
+                # Determine workcenter ordering: prefer explicit work_centers section if present
+                wc_cfg = self.config.get('work_centers', {})
+                if wc_cfg:
+                    wc_names = list(wc_cfg.keys())
+                else:
+                    # derive unique wc names from machine definitions preserving insertion order
+                    seen = {}
+                    for mname, mconf in machines_cfg.items():
+                        wcn = mconf.get('wc')
+                        if wcn and wcn not in seen:
+                            seen[wcn] = True
+                    wc_names = list(seen.keys())
+
+                wc_name_to_idx = {name: idx for idx, name in enumerate(wc_names)}
+
+                # Build machine_registry keyed by original machine names and group by wc
+                machine_registry = {}
+                wc_to_machines = {idx: [] for idx in range(len(wc_names))}
+                for mname, mconf in machines_cfg.items():
+                    # get declared wc name, fall back to machine name index if missing
+                    wcn = mconf.get('wc')
+                    if wcn is None:
+                        # place into a new wc bucket per-machine
+                        wci = len(wc_name_to_idx)
+                        wc_name_to_idx[mname] = wci
+                        wc_names.append(mname)
+                        wc_to_machines[wci] = []
+                    wci = wc_name_to_idx.get(wcn, wc_name_to_idx.get(mname))
+
+                    caps = mconf.get('capable_ops', [])
+                    caps_idx = []
+                    for c in caps:
+                        try:
+                            if isinstance(c, str) and c.lower().startswith('op'):
+                                caps_idx.append(int(c[2:]) - 1)
+                            else:
+                                caps_idx.append(int(c))
+                        except Exception:
+                            pass
+
+                    machine_registry[mname] = {
+                        'workcenter': int(wci),
+                        'capabilities': caps_idx,
+                        'speed_factor': float(mconf.get('speed_factor', 1.0)),
+                    }
+                    wc_to_machines[int(wci)].append(mname)
+
+                # build eligible operator groups per wc index from operators config
+                eligible = {}
+                ops_cfg = self.config.get('operators', [])
+                for idx in range(len(wc_names)):
+                    eligible[idx] = []
+                    for op_idx, opconf in enumerate(ops_cfg):
+                        q = opconf.get('qualified_machines', [])
+                        # if any machine in this wc is listed as qualified for the operator,
+                        # mark that operator as eligible for the whole WorkCenter
+                        for mname in wc_to_machines.get(idx, []):
+                            if mname in q:
+                                eligible[idx].append(op_idx)
+                                break
+
+                # override WorkCenters registries
+                self.workcenters_meta.machine_registry = machine_registry
+                # maintain a stable machine list order for global machine-level actions
+                try:
+                    self.workcenters_meta.machine_list = list(machine_registry.keys())
+                    self.workcenters_meta.machine_index = {m: i for i, m in enumerate(self.workcenters_meta.machine_list)}
+                except Exception:
+                    self.workcenters_meta.machine_list = list(machine_registry.keys())
+                    self.workcenters_meta.machine_index = {m: i for i, m in enumerate(self.workcenters_meta.machine_list)}
+                # populate workcenters_list from the grouped wc_to_machines
+                try:
+                    from utils.workcenter import WorkCenter
+                    wc_list = []
+                    for wc_idx in range(len(wc_names)):
+                        # aggregate capabilities for the WorkCenter from its machines
+                        machine_names = wc_to_machines.get(wc_idx, [])
+                        caps_set = set()
+                        for mname in machine_names:
+                            caps_set.update(machine_registry.get(mname, {}).get('capabilities', []))
+                        caps = list(sorted(caps_set))
+                        wc_obj = WorkCenter(wc_idx, caps)
+                        # replace default single-machine mapping with the actual machines
+                        wc_obj.machines = {}
+                        for mi, mname in enumerate(machine_names):
+                            wc_obj.machines[mname] = machine_registry.get(mname, {}).copy()
+                        wc_list.append(wc_obj)
+                    self.workcenters_meta.workcenters_list = wc_list
+                except Exception:
+                    pass
+
+                # set both modern and legacy attributes for compatibility
+                try:
+                    self.workcenters_meta.eligible_operator_groups_by_wc = eligible
+                except Exception:
+                    pass
+                # update sizes
+                # num_wcs should reflect the number of configured WorkCenters
+                # (wc_names) rather than the number of machines. Use wc_names
+                # length as the authoritative source.
+                try:
+                    self.num_wcs = max(1, len(wc_names))
+                except Exception:
+                    self.num_wcs = max(1, len(machines_cfg))
+                self.num_ops = max(1, len(ops_cfg))
+                try:
+                    self.logger.info("Applied config %s: num_wcs=%d num_ops=%d machines=%d", self.config_path, int(self.num_wcs), int(self.num_ops), len(machines_cfg))
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[WARN] Could not apply config to WorkCenters: {e}")
 
         # --- SimPy environment & resources ---
         self.env = simpy.Environment()
-        self.workcenters = [simpy.Resource(self.env, capacity=1) for _ in range(num_wcs)]
-        self.operator_groups = [simpy.Resource(self.env, capacity=1) for _ in range(num_operators)]
+        # simpy.Resource list for runtime scheduling (distinct from the WorkCenters metadata)
+        # If num_wcs is still None (no config provided and no explicit arg),
+        # fall back to 1 WorkCenter to keep the environment runnable.
+        if self.num_wcs is None or int(self.num_wcs) <= 0:
+            self.num_wcs = 1
+        self.workcenters = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
+        self.operator_groups = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_ops)]
+
+        # Migration aliases (phase: provide backwards-compatible names while
+        # moving to a clearer API):
+        #  - `wc_resources` will refer to the simpy.Resource list (runtime)
+        #  - `workcenters` will be exposed as the WorkCenters metadata object
+        # First, keep a reference to the runtime resource list under the new name
+        self.wc_resources = self.workcenters
+        # Now expose the WorkCenters metadata as the high-level `workcenters` API
+        # so callers can use `env.workcenters` to access metadata. Existing code
+        # that used `self.workcenters` for resources should be updated to use
+        # `self.wc_resources` but will continue to work during the transition
+        # because we kept the alias.
+        self.workcenters = self.workcenters_meta
 
         # Jobs
         self.jobs: List[JobAgent] = []
         self._generate_initial_jobs()
+
+        # If an Operators manager exists, create it and pass the WorkCenters metadata
+        try:
+            from utils.operator import Operators
+            # pass the WorkCenters reference so Operators can consult WC capabilities
+            self.operators = Operators(self.workcenters_meta)
+        except Exception:
+            # fallback: no Operators wrapper available; keep attribute for callers
+            self.operators = None
+
+        # If a TaskGenerator and arrival rate are provided in config, start a
+        # SimPy arrival process that injects newly generated jobs into the env.
+        try:
+            if self.config and isinstance(self.config.get('task_generator', {}), dict):
+                tg_cfg = self.config.get('task_generator', {})
+                lam = float(tg_cfg.get('arrival_lambda', 0.0))
+                if lam > 0.0:
+                    # create task generator instance bound to the same config
+                    try:
+                        from utils.task_generator import TaskGenerator
+                        self._task_generator = TaskGenerator(config_path=self.config_path)
+                    except Exception:
+                        self._task_generator = None
+                    # spawn arrival loop
+                    if self._task_generator is not None:
+                        try:
+                            self.env.process(self._dynamic_arrival_loop(lam))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
         # Bookkeeping
         self.t = 0.0
@@ -119,6 +330,11 @@ class MASAEnv:
         self.workcenters = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_wcs)]
         self.operator_groups = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_ops)]
 
+        # Maintain migration aliases after reset
+        self.wc_resources = self.workcenters
+        # ensure metadata remains accessible at env.workcenters
+        self.workcenters = getattr(self, 'workcenters_meta', self.workcenters)
+
         self.t = 0.0
         self.completed_jobs = 0
         self.total_wait_time = 0.0
@@ -147,14 +363,25 @@ class MASAEnv:
         }
         return obs, info
 
-    # Eski step() API’sini koruyoruz ama 9A’da Runner event-driven kullanacak.
-    # Step tabanlı çağrılırsa 1 zaman birimi çalıştırır (geriye uyumluluk).
-    def step(self, actions):
-        # 9A modunda step kullanılmaz; ama çağrılırsa "karar yoksa" küçük bir zaman akışı sağlar.
-        self.env.run(until=self.env.now + 1.0)
-        self.t = self.env.now
-        reward = self.pop_decision_reward()
-        reward = np.clip(reward / 10.0, -10.0, 10.0)
+    # Backwards-compatible step API (kept simple for non-event-driven callers)
+    def step(self, action=None):
+        """Compatibility step: advance sim by a small time quantum and return (obs, reward, done, info).
+        Note: the preferred Runner API is the event-driven `wait_for_decisions()` loop.
+        """
+        # advance a small time slice
+        try:
+            self.env.run(until=self.env.now + 1.0)
+        except Exception:
+            # if env is not initialized or already finished, ignore
+            pass
+        self.t = getattr(self, 'env', simpy.Environment()).now if hasattr(self, 'env') else 0.0
+        reward = 0.0
+        try:
+            reward = float(self.pop_decision_reward())
+            reward = np.clip(reward / 10.0, -10.0, 10.0)
+        except Exception:
+            reward = 0.0
+
         obs_next = self._build_all_agent_obs()
         info = {
             "state_vec": self._build_state_vector(),
@@ -164,8 +391,6 @@ class MASAEnv:
         done = (self.t >= self.episode_limit) or all(j.finished for j in self.jobs)
         self.done = self.done or done
         return obs_next, float(reward), bool(done), info
-
-    # ---------------------- 9A Decision Loop API -----------------------
     def wait_for_decisions(self):
         """Run the sim until at least one decision is pending or the episode is done.
         Uses small run-steps for responsiveness and prints debug info when waiting.
@@ -261,12 +486,96 @@ class MASAEnv:
             # Karar talebi oluştur (Runner bu çağrıya karar verecek)
             resume_evt = simpy.Event(self.env)
 
-            def _resume_with(wc_choice: int, _resume_evt=resume_evt):
-                # Runner’ın verdiği WC seçimini doğrula ve süreci devam ettir
-                if wc_choice not in allowed_wcs:
-                    _resume_evt.succeed(None)  # invalid → no-op (minik skip)
+            # compute eligible machines for this operation (global machine-level actions)
+            allowed_machines = []
+            allowed_machine_indices = []
+            per_machine_durations = {}
+            try:
+                # determine operation index to lookup processing_time_means
+                op_idx_local = int(op_type) if (op_type is not None) else int(getattr(job, 'current_op_idx', 0))
+                # iterate over global machine registry to find machines capable of op_idx
+                mlist = list(getattr(self.workcenters_meta, 'machine_list', []))
+                mindex = getattr(self.workcenters_meta, 'machine_index', {})
+                for mname in mlist:
+                    try:
+                        mreg = self.workcenters_meta.machine_registry.get(mname, {})
+                        caps = mreg.get('capabilities', [])
+                        if op_idx_local in caps:
+                            allowed_machines.append(mname)
+                            allowed_machine_indices.append(int(mindex.get(mname, len(allowed_machine_indices))))
+                    except Exception:
+                        continue
+                # build per-machine durations from config processing_time_means when available
+                if getattr(self, 'config', None):
+                    try:
+                        proc_means = self.config.get('processing_time_means', {})
+                        op_name = f"Op{op_idx_local+1}"
+                        op_means = proc_means.get(op_name, {}) if isinstance(proc_means, dict) else {}
+                        for m in allowed_machines:
+                            if m in op_means:
+                                per_machine_durations[int(mindex.get(m))] = float(op_means.get(m))
+                    except Exception:
+                        pass
+                # fallback: estimate per-machine duration using base and speed_factor
+                for m in allowed_machines:
+                    mi = int(mindex.get(m, 0))
+                    if mi in per_machine_durations:
+                        continue
+                    try:
+                        speed = float(self.workcenters_meta.machine_registry.get(m, {}).get('speed_factor', 1.0))
+                        per_machine_durations[mi] = round(float(base_duration_val) / max(1e-6, speed), 6)
+                    except Exception:
+                        per_machine_durations[mi] = float(base_duration_val)
+            except Exception:
+                allowed_machines = []
+                allowed_machine_indices = []
+                per_machine_durations = {}
+
+            def _resume_with(wc_choice, _resume_evt=resume_evt):
+                """
+                Accept either a WorkCenter index (legacy), a machine name (str),
+                or a global machine index (int referring into workcenters_meta.machine_list).
+                Map the incoming choice to the authoritative WorkCenter index and
+                resume the waiting process. If the mapping is invalid, succeed with
+                None so the job process can perform a small timeout and avoid deadlock.
+                """
+                try:
+                    # choice may be a string machine name
+                    if isinstance(wc_choice, str):
+                        mname = wc_choice
+                        mreg = getattr(self.workcenters_meta, 'machine_registry', {})
+                        if mname not in mreg:
+                            _resume_evt.succeed(None)
+                            return
+                        wc_choice_mapped = int(mreg.get(mname, {}).get('workcenter', -1))
+                    else:
+                        # numeric choice: could be a WorkCenter index or a machine index
+                        try:
+                            c = int(wc_choice)
+                        except Exception:
+                            _resume_evt.succeed(None)
+                            return
+                        # if it's directly one of the allowed_wcs, accept it
+                        if c in allowed_wcs:
+                            wc_choice_mapped = c
+                        else:
+                            # try interpreting as machine index into machine_list
+                            mlist = getattr(self.workcenters_meta, 'machine_list', [])
+                            if 0 <= c < len(mlist):
+                                mname = mlist[c]
+                                wc_choice_mapped = int(self.workcenters_meta.machine_registry.get(mname, {}).get('workcenter', -1))
+                            else:
+                                _resume_evt.succeed(None)
+                                return
+
+                    # final validation: mapped WorkCenter must be among allowed_wcs
+                    if wc_choice_mapped not in allowed_wcs:
+                        _resume_evt.succeed(None)
+                        return
+                    _resume_evt.succeed(int(wc_choice_mapped))
+                except Exception:
+                    _resume_evt.succeed(None)
                     return
-                _resume_evt.succeed(int(wc_choice))
 
             # compute a numeric base_duration for the Runner: prefer explicit base_dur,
             # otherwise use the mean of per-WC durations when available, else 0.0
@@ -289,9 +598,14 @@ class MASAEnv:
                 "obs": self._build_agent_obs(job),
                 "avail_row": self._avail_row_for_job(job),
                 "allowed_wcs": list(allowed_wcs),
+                # machine-level action support
+                "allowed_machines": list(allowed_machines),
+                "allowed_machine_indices": list(allowed_machine_indices),
+                "per_machine_durations": dict(per_machine_durations),
                 "base_duration": float(base_duration_val),
                 "resume": _resume_with,
-                "grp_by_wc": {wc: self._group_for_wc(wc) for wc in allowed_wcs},
+                # authoritative eligible operator groups per WC
+                "eligible_ops_by_wc": {wc: self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), []) for wc in allowed_wcs},
             }
             self.pending_decisions.append(decision_item)
             if not self.decisions_ready.triggered:
@@ -304,7 +618,23 @@ class MASAEnv:
                 yield self.env.timeout(1e-9)
                 continue
 
-            grp = self._group_for_wc(chosen_wc)
+            # determine eligible operator groups for the chosen WorkCenter
+            eligible_ops = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(chosen_wc), [])
+            # pick a specific operator-group index to request: prefer a free one
+            selected_grp = None
+            try:
+                for g in eligible_ops:
+                    if self._resource_free(self.operator_groups[g]):
+                        selected_grp = int(g)
+                        break
+            except Exception:
+                selected_grp = None
+            # fallback: if none free or no eligible_ops defined, choose the first eligible or 0
+            if selected_grp is None:
+                try:
+                    selected_grp = int(eligible_ops[0]) if eligible_ops else 0
+                except Exception:
+                    selected_grp = 0
             # determine duration for chosen WC
             if per_wc_durations is not None:
                 try:
@@ -323,7 +653,7 @@ class MASAEnv:
                 dur = 0.0
 
             start_wait = self.env.now
-            with self.operator_groups[grp].request() as op_req, self.workcenters[chosen_wc].request() as mc_req:
+            with self.operator_groups[selected_grp].request() as op_req, self.wc_resources[chosen_wc].request() as mc_req:
                 yield op_req; yield mc_req
                 # bekleme süreleri
                 wait_dur = self.env.now - start_wait
@@ -335,17 +665,32 @@ class MASAEnv:
                 # record start time of the operation
                 op_start = float(self.env.now)
                 job.remaining_time = dur
-                yield self.env.timeout(dur)
-                # record end time and append to gantt_records
-                op_end = float(self.env.now)
-                op_idx = int(job.current_op_idx)
+                # If we have an Operators manager, attempt to assign a specific operator
+                assigned_op = None
                 try:
-                    # prefer op_type (explicit type); fallback to sequence index
-                    op_tag = op_type if (op_type is not None) else op_idx
-                    # store record as (start, end, operation_type, workcenter, job_id, operator_group)
-                    self.gantt_records.append((op_start, op_end, int(op_tag), int(chosen_wc), int(job.id), int(grp)))
+                    if getattr(self, 'operators', None) is not None:
+                        assigned_op = self.operators.find_free_operator(job.id, chosen_wc)
+                        if assigned_op is not None:
+                            assigned_op.assign_job(job.id, chosen_wc, start_time=self.env.now)
                 except Exception:
-                    pass
+                    assigned_op = None
+                try:
+                    yield self.env.timeout(dur)
+                finally:
+                    # ensure operator release even if timeout interrupted
+                    if assigned_op is not None:
+                        try:
+                            assigned_op.release(end_time=self.env.now)
+                        except Exception:
+                            pass
+                    # record gantt data (start, end, operation_type, wc, job, operator_group)
+                    op_end = float(self.env.now)
+                    # prefer explicit op_type if present, otherwise use current op index
+                    try:
+                        op_tag = int(op_type) if (op_type is not None) else int(job.current_op_idx)
+                    except Exception:
+                        op_tag = int(getattr(job, 'current_op_idx', 0))
+                    self.gantt_records.append((op_start, op_end, int(op_tag), int(chosen_wc), int(job.id), int(selected_grp)))
                 job.current_op_idx += 1
                 job.remaining_time = 0.0
                 if job.current_op_idx >= len(job.operations):
@@ -420,8 +765,18 @@ class MASAEnv:
             except Exception:
                 allowed_wcs = []
         for wc in allowed_wcs:
-            grp = self._group_for_wc(wc)
-            if self._resource_free(self.workcenters[wc]) and self._resource_free(self.operator_groups[grp]):
+            eligible = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+            # require both a free machine resource and at least one free operator group
+            machine_free = self._resource_free(self.wc_resources[wc])
+            op_free = False
+            try:
+                for g in eligible:
+                    if self._resource_free(self.operator_groups[g]):
+                        op_free = True
+                        break
+            except Exception:
+                op_free = False
+            if machine_free and op_free:
                 row[wc] = 1
         return row
 
@@ -432,21 +787,18 @@ class MASAEnv:
         # Define a fixed set of operation types (e.g., 9 types)
         op_types = list(range(9))
         self.jobs = []
-        # build capability map: op_type -> allowed WCs by inspecting Sites.machine_registry
-        # here we assume op_type indexes map to capability ids in machine capabilities (0..8)
-        # machine_registry entries: {'M_<wc>_0': {'workcenter': wc, 'capabilities':[...], 'speed_factor':...}}
-        capability_map = {op: [] for op in op_types}
+        # Build mapping workcenter -> machine list from the registry so we can
+        # decide which WorkCenters actually contain machines that can perform
+        # each operation type. This prevents assigning operations to WCs that
+        # don't have any capable machine (avoids the "fully flexible" problem).
+        wc_to_machines = {}
         try:
-            for mid, mdata in getattr(self.sites, 'machine_registry', {}).items():
+            for mname, mdata in getattr(self.workcenters_meta, 'machine_registry', {}).items():
                 wc = int(mdata.get('workcenter', 0))
-                caps = list(mdata.get('capabilities', []))
-                for c in caps:
-                    if c in capability_map:
-                        capability_map[c].append(wc)
+                wc_to_machines.setdefault(wc, []).append(mname)
         except Exception:
-            # fallback: spread using modulo assignment
-            for op in op_types:
-                capability_map[op] = [wc for wc in range(self.num_wcs) if (wc % len(op_types)) == (op % len(op_types))]
+            # fallback: distribute machines evenly by index if registry not available
+            wc_to_machines = {wc: [] for wc in range(max(1, self.num_wcs))}
 
         for jid in range(self.num_jobs):
             # number of operations per job: bounded by args-like defaults (2..4)
@@ -460,28 +812,126 @@ class MASAEnv:
             chosen_ops = list(self._np_rng.choice(op_types, size=num_ops, replace=False))
             ops = []
             for op_type in chosen_ops:
-                # allowed WCs derived from capability map
-                allowed_wcs = list(sorted(set(capability_map.get(int(op_type), []))))
+                op_idx = int(op_type)
+                # Determine allowed workcenters by checking if any machine in the
+                # workcenter declares the operation in its capabilities.
+                allowed_wcs = []
+                for wc_idx, machine_names in wc_to_machines.items():
+                    for mname in machine_names:
+                        try:
+                            caps = list(self.workcenters_meta.machine_registry.get(mname, {}).get('capabilities', []))
+                        except Exception:
+                            caps = []
+                        if op_idx in caps:
+                            allowed_wcs.append(int(wc_idx))
+                            break
+
+                # If no workcenter is found (config gap), fall back to a deterministic
+                # workcenter (WC 0) to keep the environment deterministic and avoid
+                # introducing stochasticity at generation time. Emit a clear warning
+                # so the user can fix the configuration (missing capability mapping).
                 if not allowed_wcs:
-                    allowed_wcs = [int(self._np_rng.randint(0, self.num_wcs))]
+                    if self.strict_mode:
+                        # In strict mode we raise so the user can fix the config
+                        raise RuntimeError(f"No eligible WorkCenter found for Op{op_idx+1}; please check 'machines.capable_ops' and 'processing_time_means' in config")
+                    # deterministic fallback instead of random choice for backward-compat
+                    allowed_wcs = [0]
+                    try:
+                        self.logger.warning(
+                            "No eligible WorkCenter found for %s; defaulting allowed_wcs=%s (check config processing_time_means / capable_ops)",
+                            f"Op{op_idx+1}", allowed_wcs,
+                        )
+                    except Exception:
+                        pass
+
                 # base duration in [1.0, 9.0] (base for op_type)
                 base = float(self._np_rng.uniform(1.0, 9.0))
-                # per-WC duration: assume duration scales inversely with machine speed
+
+                # per-WC duration: estimate based on capable machines' speed_factors
                 per_wc_durations = {}
                 for wc in allowed_wcs:
-                    # get speed_factor from Sites registry
-                    mid = f"M_{wc}_0"
-                    speed = getattr(self.sites.machine_registry.get(mid, {}), 'get', None)
+                    machine_names = wc_to_machines.get(int(wc), [])
+                    candidate_speeds = []
+                    for mname in machine_names:
+                        try:
+                            mreg = self.workcenters_meta.machine_registry.get(mname, {})
+                            caps = mreg.get('capabilities', [])
+                            if op_idx in caps:
+                                candidate_speeds.append(float(mreg.get('speed_factor', 1.0)))
+                        except Exception:
+                            continue
+
+                    # Prefer explicit per-machine mean processing times from config
+                    # when available. The config uses keys like 'Op1'..'Op9'. If a
+                    # mean is provided for one or more capable machines in this
+                    # WC, use the fastest (minimum) mean as the WC-level estimate.
+                    used_mean = None
                     try:
-                        speed_factor = float(self.sites.machine_registry.get(mid, {}).get('speed_factor', 1.0))
+                        if getattr(self, 'config', None):
+                            proc_means = self.config.get('processing_time_means', {})
+                            op_name = f"Op{op_idx+1}"
+                            op_means = proc_means.get(op_name, {}) if isinstance(proc_means, dict) else {}
+                            found_means = []
+                            for mname in machine_names:
+                                if mname in op_means:
+                                    try:
+                                        found_means.append(float(op_means.get(mname)))
+                                    except Exception:
+                                        pass
+                            if found_means:
+                                used_mean = float(min(found_means))
                     except Exception:
-                        speed_factor = 1.0
-                    # duration = base / speed_factor
-                    est = float(base) / max(1e-6, speed_factor)
-                    per_wc_durations[int(wc)] = round(est, 6)
+                        used_mean = None
+
+                    if used_mean is not None:
+                        per_wc_durations[int(wc)] = round(float(used_mean), 6)
+                    else:
+                        # fallback to speed-factor based estimate (legacy behavior)
+                        if candidate_speeds:
+                            speed_factor = max(candidate_speeds)
+                        else:
+                            try:
+                                speeds = [float(self.workcenters_meta.machine_registry.get(m, {}).get('speed_factor', 1.0)) for m in machine_names]
+                                speed_factor = max(speeds) if speeds else 1.0
+                            except Exception:
+                                speed_factor = 1.0
+                        est = float(base) / max(1e-6, speed_factor)
+                        per_wc_durations[int(wc)] = round(est, 6)
+
+                # NOTE: Restrict per_wc_durations output to eligible WorkCenters only.
+                # Previously the code could initialize durations for all WCs; this
+                # ensures we only include entries for WCs that were identified as
+                # `allowed_wcs` for this operation.
+                try:
+                    per_wc_durations = {int(k): float(v) for k, v in per_wc_durations.items() if int(k) in allowed_wcs}
+                except Exception:
+                    # defensive: keep as-is if something unexpected happens
+                    pass
                 # store op as canonical (op_type, allowed_wcs, per_wc_durations)
                 ops.append((int(op_type), list(allowed_wcs), per_wc_durations))
             self.jobs.append(JobAgent(jid, ops))
+
+    # Small helper to format operation type indices into YAML-friendly names
+    def _op_name(self, op_idx: int) -> str:
+        try:
+            return f"Op{int(op_idx) + 1}"
+        except Exception:
+            return str(op_idx)
+
+    def print_jobs_human_readable(self):
+        """Print job list with friendly op names and per-WC durations.
+
+        Example line:
+          Job 3 Op0 -> Op7 allowed_wcs=[1] per_wc={1: 5.2}
+        """
+        for job in self.jobs:
+            for i, op in enumerate(job.operations):
+                try:
+                    op_type, allowed_wcs, per_wc = op
+                    op_label = self._op_name(op_type) if op_type is not None else 'None'
+                    print(f"Job {job.id} Op{i} -> {op_label} allowed_wcs={allowed_wcs} per_wc={per_wc}")
+                except Exception:
+                    print(f"Job {job.id} Op{i} -> {op}")
 
     def _total_remaining_work(self):
         total = 0.0
@@ -512,24 +962,18 @@ class MASAEnv:
     def _wip(self):
         return sum(1 for j in self.jobs if not j.finished)
 
-    @staticmethod
-    def _group_for_wc(wc: int) -> int:
-        if 0 <= wc <= 5:
-            return 0
-        if 6 <= wc <= 9:
-            return 1
-        if 10 <= wc <= 13:
-            return 2
-        return 3
+    # NOTE: _group_for_wc has been removed. Use
+    # `workcenters_meta.eligible_operator_groups_by_wc[wc]` to get the authoritative
+    # list of eligible operator-group ids for a given workcenter index.
 
     def _speed_factor_for_wc(self, wc: int):
         m_id = f"M_{wc}_0"
-        reg = getattr(self.sites, "machine_registry", {})
+        reg = getattr(self.workcenters_meta, "machine_registry", {})
         return reg.get(m_id, {}).get("speed_factor", 1.0)
 
     def _util_machines(self):
-        busy = sum(len(wc.users) for wc in self.workcenters)
-        return busy / max(1, len(self.workcenters))
+        busy = sum(len(wc.users) for wc in self.wc_resources)
+        return busy / max(1, len(self.wc_resources))
 
     def _util_ops(self):
         busy = sum(len(g.users) for g in self.operator_groups)
@@ -539,6 +983,79 @@ class MASAEnv:
         return len(res.users) < res.capacity
 
     # --------------------------------------------------------
+    # Dynamic job injection API
+    def add_job(self, ops_sequence: list):
+        """Add a new JobAgent to the environment at current sim time.
+
+        ops_sequence: list of operation tuples expected by JobAgent/_job_process
+                      (either (op_type, allowed_wcs, per_wc_durations) or
+                       legacy (allowed_wcs, base_dur)).
+        """
+        jid = len(self.jobs)
+        job = JobAgent(jid, ops_sequence)
+        self.jobs.append(job)
+        # start the job process so it participates in the SimPy world
+        try:
+            self.env.process(self._job_process(job))
+        except Exception:
+            # if env is not yet fully initialized, keep the job and it will be
+            # started on reset()/init sequence
+            pass
+        print(f"[Env] Dynamically added Job {jid} with {len(ops_sequence)} op(s) at t={self.env.now}")
+        return job
+
+    def _dynamic_arrival_loop(self, arrival_lambda: float):
+        """SimPy process: sample inter-arrival times (exponential) and inject
+        new jobs generated by TaskGenerator into the env.
+        """
+        # defensive: if no task generator, just exit
+        if getattr(self, '_task_generator', None) is None:
+            return
+        lam = float(arrival_lambda)
+        # scale parameter for numpy exponential is 1/lambda
+        scale = 1.0 / max(1e-12, lam)
+        while self.env.now < self.episode_limit and not self.done:
+            ia = float(self._np_rng.exponential(scale))
+            # wait for next arrival
+            yield self.env.timeout(ia)
+            # generate ops for a single JobAgent
+            try:
+                ops_objs = self._task_generator.generate_constrained_task(jobagent_id=len(self.jobs))
+            except Exception as e:
+                print(f"[TaskGen] generation failed: {e}")
+                continue
+            # convert the returned job objects into the op tuples expected by _job_process
+            converted_ops = []
+            # build capability map: op_type -> allowed WCs
+            capability_map = {op: [] for op in range(0, 32)}
+            try:
+                for mid, mdata in getattr(self.workcenters_meta, 'machine_registry', {}).items():
+                    wc = int(mdata.get('workcenter', 0))
+                    caps = list(mdata.get('capabilities', []))
+                    for c in caps:
+                        capability_map.setdefault(int(c), []).append(int(wc))
+            except Exception:
+                pass
+
+            for jobobj in ops_objs:
+                # jobobj expected to be a Jobs.Job-like object with index_id and time_span
+                op_type = int(getattr(jobobj, 'index_id', 0))
+                allowed_wcs = list(sorted(set(capability_map.get(op_type, []))))
+                if not allowed_wcs:
+                    allowed_wcs = [int(self._np_rng.randint(0, max(1, self.num_wcs)))]
+                # per-wc durations: use jobobj.time_span as base and derive per-wc durations
+                per_wc = {}
+                for wc in allowed_wcs:
+                    speed = self._speed_factor_for_wc(wc)
+                    per_wc[int(wc)] = round(float(getattr(jobobj, 'time_span', 1.0)) / max(1e-6, speed), 6)
+                converted_ops.append((op_type, allowed_wcs, per_wc))
+
+            # finally add the job to the environment
+            try:
+                self.add_job(converted_ops)
+            except Exception as e:
+                print(f"[Env] Failed to add dynamic job: {e}")
+
     def get_env_info(self):
         return {
             "n_actions": self.num_wcs,

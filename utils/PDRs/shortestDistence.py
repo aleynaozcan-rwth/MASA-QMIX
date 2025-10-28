@@ -9,7 +9,7 @@ class SDrules:
     def __init__(self):
         pass
 
-    # avail: [1,2,...], current: (1,2), sites: [(1,2), (2,3),...]
+    # avail: [1,2,...], current: (1,2), workcenters: [(1,2), (2,3),...]
     # 这个函数直接按照可行动作中距离最短的进行选择动作
     def choose_action(self, agent_id, avail_actions, current_plane_location, sites_loactions_fixed):
         avail_ids = []
@@ -19,7 +19,12 @@ class SDrules:
         if avail_ids == []:
             for i, eve in enumerate(avail_actions[-3:]):
                 if eve == 1:
-                    return i + 18
+                    # Legacy code used an offset of 18 when WorkCenters were
+                    # represented as 'sites' (18-site topology). Return the
+                    # local index now; any caller that expects a global offset
+                    # should be updated instead. This avoids producing indices
+                    # outside the current WorkCenter range.
+                    return i
             raise Exception("available actions error!", avail_actions)
         # 否则avail_ids不为空
         distances = []

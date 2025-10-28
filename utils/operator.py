@@ -10,11 +10,12 @@ Operators now:
 """
 
 class Operator:
-    """Single operator who can work at specific WorkCenters."""
+    """Single operator who can work on specific machine names."""
 
-    def __init__(self, operator_id, qualified_workcenters, workcenters_ref):
+    def __init__(self, operator_id, qualified_machines, workcenters_ref):
         self.operator_id = operator_id
-        self.qualified_workcenters = qualified_workcenters
+        # qualified_machines: list of machine name strings (e.g., 'M_0_0')
+        self.qualified_machines = list(qualified_machines)
         self.workcenters_ref = workcenters_ref  # Reference to WorkCenters() environment object
         self.is_busy = False
         self.current_job = None
@@ -29,10 +30,36 @@ class Operator:
         """
         Return True if operator can work at the given WorkCenter and that WorkCenter allows this job.
         """
-        if workcenter_id not in self.qualified_workcenters:
+        # Operator must be able to operate at least one machine inside the workcenter.
+        # Prefer direct registry-based lookup for speed and clarity.
+        try:
+            registry = getattr(self.workcenters_ref, 'machine_registry', {}) or {}
+            # collect machines in this workcenter
+            machines_in_wc = [m for m, md in registry.items() if int(md.get('workcenter', -1)) == int(workcenter_id)]
+            # intersect with operator-qualified machines
+            candidate_machines = [m for m in machines_in_wc if m in self.qualified_machines]
+            if not candidate_machines:
+                return False
+            # check capabilities via registry
+            for m in candidate_machines:
+                caps = registry.get(m, {}).get('capabilities', [])
+                if int(job_id) in caps:
+                    return True
             return False
-        allowed_jobs = self.workcenters_ref.sites_object_list[workcenter_id].resource_ids_list
-        return job_id in allowed_jobs
+        except Exception:
+            # conservative fallback: try older WorkCenter object path
+            try:
+                wc_obj = self.workcenters_ref.workcenters_list[workcenter_id]
+                candidate_machines = [m for m in wc_obj.machines.keys() if m in self.qualified_machines]
+                if not candidate_machines:
+                    return False
+                for m in candidate_machines:
+                    caps = wc_obj.machines.get(m, {}).get('capabilities', [])
+                    if int(job_id) in caps:
+                        return True
+                return False
+            except Exception:
+                return False
 
     # ============================================================
     # === Assignment / Release ===================================
@@ -67,23 +94,139 @@ class Operator:
 
     def __repr__(self):
         status = "BUSY" if self.is_busy else "FREE"
-        return f"Operator(id={self.operator_id}, workcenters={self.qualified_workcenters}, status={status})"
+        return f"Operator(id={self.operator_id}, machines={self.qualified_machines}, status={status})"
 
 
 class Operators:
     """Manages all Operator objects."""
 
     def __init__(self, workcenters_ref):
+        # Default operator qualification mapping (user-specified topology):
+        # Operator 1 can work on machine numbers [1,4,5]
+        # Operator 2 can work on machine numbers [2,3,5]
+        # Map machine numbers to machine names using WorkCenters helper
+        # Determine canonical ordered registry keys for machines (1..N) in a
+        # way that respects YAML overrides. Preferred strategies in order:
+        #  1) If machine_registry keys look like 'M1'..'M5', sort by integer
+        #  2) Else, if workcenters_ref.machine_order contains keys present in
+        #     machine_registry, use that order
+        #  3) Else, build order by iterating workcenters_list and their machines
+        registry = getattr(workcenters_ref, 'machine_registry', {}) or {}
+        machine_order = []
+        if registry:
+            # attempt strategy 1: keys like 'M1','M2',... -> sort by digit
+            import re
+            keys = list(registry.keys())
+            numeric_keys = []
+            for k in keys:
+                m = re.match(r'^M(\d+)$', k)
+                if m:
+                    numeric_keys.append((int(m.group(1)), k))
+            if numeric_keys:
+                numeric_keys.sort()
+                machine_order = [k for (_, k) in numeric_keys]
+
+            # strategy 2: use workcenters_ref.machine_order if it maps into registry
+            if not machine_order:
+                possible = getattr(workcenters_ref, 'machine_order', []) or []
+                if all(p in registry for p in possible):
+                    machine_order = list(possible)
+
+            # strategy 3: flatten by iterating workcenters_list
+            if not machine_order:
+                mo = []
+                for wc in getattr(workcenters_ref, 'workcenters_list', []):
+                    for mname in wc.machines.keys():
+                        if mname in registry:
+                            mo.append(mname)
+                # dedupe while preserving order
+                seen = set()
+                machine_order = [x for x in mo if not (x in seen or seen.add(x))]
+
+        # Now pick machine names for numbers 1..5 safely
+        def machine_for_num(n, fallback=None):
+            try:
+                return machine_order[n - 1]
+            except Exception:
+                return fallback
+
+        # fallback default names if we couldn't build an order
+        fallback_names = ["M_0_0", "M_0_1", "M_1_0", "M_1_1", "M_2_0"]
+        m1 = machine_for_num(1, fallback_names[0])
+        m2 = machine_for_num(2, fallback_names[1])
+        m3 = machine_for_num(3, fallback_names[2])
+        m4 = machine_for_num(4, fallback_names[3])
+        m5 = machine_for_num(5, fallback_names[4])
+
+        # operator-machine mapping (preserve machine-level constraints)
+        op1_machines = [m1, m4, m5]
+        op2_machines = [m2, m3, m5]
+
         self.operators_object_list = [
-            Operator(0, [0, 1, 2, 3, 4, 5], workcenters_ref),
-            Operator(1, [6, 7, 8, 9], workcenters_ref),
-            Operator(2, [10, 11, 12, 13], workcenters_ref),
-            Operator(3, [14, 15, 16, 17], workcenters_ref)
+            Operator(1, op1_machines, workcenters_ref),
+            Operator(2, op2_machines, workcenters_ref),
         ]
 
-        print("\n[Init] Operators created:")
+        # Compute and attach qualified_workcenters for convenience: map each
+        # operator's qualified machine names to their WorkCenter indices using
+        # the provided WorkCenters metadata object.
+        try:
+            # Build a helper to resolve various machine-name formats to the
+            # canonical keys used in workcenters_ref.machine_registry.
+            registry = getattr(workcenters_ref, 'machine_registry', {}) or {}
+            order = getattr(workcenters_ref, 'machine_order', []) or []
+
+            def resolve_registry_key(mname: str):
+                # 1) direct key match
+                if mname in registry:
+                    return mname
+                # 2) try using machine_order index -> registry key convention
+                try:
+                    idx = order.index(mname)
+                    candidate = f'M{idx+1}'
+                    if candidate in registry:
+                        return candidate
+                except ValueError:
+                    pass
+                # 3) try a loose normalization: drop underscores and attempt to
+                # match keys like 'M1'.. by comparing digits
+                import re
+                digits = re.findall(r"\d+", mname)
+                if digits:
+                    # try the first number as ordinal
+                    candidate = f'M{int(digits[0]) + 1}' if len(order) == len(registry) else f'M{digits[0]}'
+                    if candidate in registry:
+                        return candidate
+                # nothing matched
+                return None
+
+            for op in self.operators_object_list:
+                qualified_wcs = set()
+                for mname in op.qualified_machines:
+                    try:
+                        key = resolve_registry_key(mname)
+                        if not key:
+                            continue
+                        entry = registry.get(key)
+                        if not entry:
+                            continue
+                        wc_idx = entry.get('workcenter')
+                        if wc_idx is None:
+                            continue
+                        qualified_wcs.add(int(wc_idx))
+                    except Exception:
+                        # be resilient: skip any machine we can't resolve
+                        continue
+                # attach a stable sorted list for downstream tools
+                op.qualified_workcenters = sorted(list(qualified_wcs))
+        except Exception:
+            # if anything fails, leave attribute absent for backward compatibility
+            pass
+
+        print("\n[Init] Operators created (derived from WorkCenters):")
         for op in self.operators_object_list:
-            print(f"   - Operator {op.operator_id} → WorkCenters {op.qualified_workcenters}")
+            qwcs = getattr(op, 'qualified_workcenters', None)
+            print(f"   - Operator {op.operator_id} → Machines {op.qualified_machines} qualified_workcenters={qwcs}")
 
     # ============================================================
     # === Lookup / Utility =======================================

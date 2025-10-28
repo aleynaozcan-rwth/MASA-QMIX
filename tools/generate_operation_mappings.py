@@ -51,9 +51,9 @@ for op_type, wcs in op_catalog.items():
 # operator mappings via utils.operator
 try:
     from utils.operator import Operators
-    from utils.site import Sites
-    sites = Sites()
-    ops_obj = Operators(sites)
+    from utils.workcenter import WorkCenters
+    workcenters = WorkCenters()
+    ops_obj = Operators(workcenters)
     operator_mappings = {}
     for op in ops_obj.operators_object_list:
         operator_mappings[op.operator_id] = {
@@ -68,7 +68,7 @@ try:
                 operator_mappings[op.operator_id]['can_do_op_types'].append(op_type)
 
 except Exception as e:
-    print('Could not import Operators or Sites:', e)
+    print('Could not import Operators or WorkCenters:', e)
     operator_mappings = {}
 
 # job_op_sequences simplified
