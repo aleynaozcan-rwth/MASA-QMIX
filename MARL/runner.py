@@ -11,6 +11,10 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patheffects as patheffects
+from matplotlib.ticker import MultipleLocator, MaxNLocator
+from matplotlib.patches import Patch
+# Line2D was previously used for arrival legend; no longer needed
 
 # Rollout
 from MARL.common.rollout import RolloutWorker
@@ -29,40 +33,152 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     """Step 8A.6.6 Gantt – Machine-level layout with WC + Operator labels."""
     if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)):
         return False
-    if len(for_gantt_data) == 0 or len(for_gantt_data[0]) not in [5, 6]:
+    # allow empty; handle gracefully
+    if len(for_gantt_data) == 0:
         return False
 
-    fig, ax = plt.subplots(figsize=(13, 6))
-    operation_types = sorted(set([rec[2] for rec in for_gantt_data]))
-    colors = list(mcolors.TABLEAU_COLORS.values())
-    color_map = {op: colors[i % len(colors)] for i, op in enumerate(operation_types)}
+    # allow legacy 5/6-tuple records and the new 8-tuple format
+    # default size; may be increased vertically for many jobs below
+    fig, ax = plt.subplots(figsize=(14, 6))
+    # choose color palette keyed by operation type for readability
+    # collect unique operation identifiers (int or str) and job ids
+    op_vals = []
+    job_ids = []
+    for rec in for_gantt_data:
+        if not isinstance(rec, (list, tuple)):
+            continue
+        if len(rec) >= 5:
+            try:
+                op_vals.append(rec[2])
+                job_ids.append(int(rec[4]))
+            except Exception:
+                continue
+    op_vals = sorted(list({int(v) if isinstance(v, (int, float)) and float(v).is_integer() else v for v in op_vals}))
+    job_ids = sorted(list(set(job_ids)))
+    # colors per operation type
+    palette = list(mcolors.TABLEAU_COLORS.values()) + list(mcolors.CSS4_COLORS.values())
+    op_color_map = {}
+    for i, op in enumerate(op_vals):
+        op_color_map[op] = palette[i % len(palette)]
 
     max_end = 0
+    plotted_ops = []
     for rec in for_gantt_data:
-        if len(rec) == 6:
-            start, end, operation, workcenter, jobagent, operator = rec
-        else:
-            start, end, operation, workcenter, jobagent = rec
-            operator = "?"
-        ax.barh(jobagent, end - start, left=start,
-                color=color_map.get(operation, "gray"), edgecolor="black")
-        ax.text((start + end) / 2, jobagent,
-                f"M{operation} | WC{workcenter} | O{operator}",
-                va="center", ha="center", fontsize=7, color="black")
-        max_end = max(max_end, end)
+        # robust unpack: support (s,e,op,wc,job[,op_grp]) and extended (s,e,op,wc,job,op_grp,arrival,duration)
+        try:
+            if not isinstance(rec, (list, tuple)):
+                continue
+            if len(rec) >= 8:
+                start, end, operation, workcenter, jobagent, operator, arrival, duration = rec[:8]
+            elif len(rec) == 6:
+                start, end, operation, workcenter, jobagent, operator = rec
+                arrival = None
+                duration = None
+            elif len(rec) == 5:
+                start, end, operation, workcenter, jobagent = rec
+                operator = None
+                arrival = None
+                duration = None
+            else:
+                continue
+            jid = int(jobagent)
+            # color by operation type
+            op_key = operation
+            try:
+                # if numeric operation index, convert to integer for mapping
+                if isinstance(operation, (float, int)) and float(operation).is_integer():
+                    op_key = int(operation)
+            except Exception:
+                pass
+            color = op_color_map.get(op_key, "gray")
+            # place bars as full-unit rows with bottom at job id so center is job_id+0.5
+            width = max(0.0, float(end) - float(start))
+            # draw vertical start/end guide lines (subtle)
+            try:
+                ax.axvline(float(start), linestyle=':', alpha=0.35, color='gray', zorder=1)
+                ax.axvline(float(end), linestyle=':', alpha=0.25, color='gray', zorder=1)
+            except Exception:
+                pass
+            # choose bar style: default linewidth/alpha and edge; narrow bars get slightly thicker edge
+            bar_kwargs = dict(left=float(start), color=color, edgecolor='black', linewidth=0.5, alpha=0.95)
+            if width < 0.6:
+                bar_kwargs.update(dict(linewidth=0.6))
+            # draw bar with align='edge' so it occupies approximately the job row
+            # reduce height so bars are slightly smaller than the full ID interval
+            ax.barh(jid, width, align='edge', height=0.7, zorder=3, **bar_kwargs)
+            # label text simplified: M<machine_id> | O<operator_id>
+            label_text = f"M{workcenter} | O{operator if operator is not None else '?'}"
+            # Adaptive font size: skip or minimal label for very narrow bars
+            try:
+                # width computed above
+                pass
+            except Exception:
+                width = 0.0
+            # choose fontsize by thresholds
+            # label visibility & size rules per user request
+            if width < 0.5:
+                draw_label = False
+            else:
+                draw_label = True
+                fontsize = 7 if width < 0.8 else 9
 
-    jobagent_ids = sorted(set([rec[4] for rec in for_gantt_data]))
-    ax.set_yticks(jobagent_ids)
-    ax.set_yticklabels([str(j) for j in jobagent_ids])
+            if draw_label:
+                ax.text((float(start) + float(end)) / 2, jid + 0.5, label_text,
+                        va='center', ha='center', fontsize=fontsize, color='black', zorder=4)
+            max_end = max(max_end, float(end))
+            plotted_ops.append(op_key)
+            # arrival timestamps are kept for CSV only; no on-plot markers
+        except Exception:
+            continue
+
+    jobagent_ids = job_ids
+    # set y-ticks to job ids (centered at job_id + 0.5) and increase spacing if many jobs
+    if job_ids:
+        try:
+            min_j = min(job_ids)
+            max_j = max(job_ids)
+            y_centers = [j + 0.5 for j in range(min_j, max_j + 1)]
+            ax.set_yticks(y_centers)
+            ax.set_yticklabels([str(j) for j in range(min_j, max_j + 1)])
+            # add a small vertical margin so bars don't touch plot edges
+            ax.set_ylim(min_j - 0.1, max_j + 1 + 0.1)
+        except Exception:
+            y_centers = [j + 0.5 for j in jobagent_ids]
+            ax.set_yticks(y_centers)
+            ax.set_yticklabels([str(j) for j in jobagent_ids])
     ax.set_xlabel("Simulation Time (SimPy clock)")
     ax.set_ylabel(f"{t('JobAgent')} (ID)")
     ax.set_title("Step 8A.6.6 – Machine-level Schedule (WC + Operator + Dynamic Arrivals)")
     ax.set_xlim(0, max_end + 1)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[op]) for op in operation_types]
-    labels = [f"Operation {op}" for op in operation_types]
-    ax.legend(handles, labels, title="Operation Types", bbox_to_anchor=(1.05, 1), loc="upper left")
+    # build legend keyed by operation types (Op1..OpN) — use Patch handles
+    op_handles = []
+    op_labels = []
+    for op in op_vals:
+        lab = f"Op{int(op)+1}" if isinstance(op, (int, float)) and float(op).is_integer() else str(op)
+        # ensure legend patch matches bar edge/linewidth
+        op_handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', linewidth=0.5, label=lab))
+        op_labels.append(lab)
+    if op_handles:
+        legend_ops = ax.legend(op_handles, op_labels, title="Operation Types", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+        ax.add_artist(legend_ops)
+
+    # arrival markers removed by user request; arrivals remain in CSV only
+
+    # x-axis ticks: major=1.0, minor=0.5 with grid styling
+    try:
+        major = MultipleLocator(1.0)
+        minor = MultipleLocator(0.5)
+        ax.xaxis.set_major_locator(major)
+        ax.xaxis.set_minor_locator(minor)
+        ax.tick_params(axis='x', which='major', labelsize=9)
+        ax.grid(True, which='major', linestyle='--', alpha=0.35)
+        ax.grid(True, which='minor', linestyle='--', alpha=0.15)
+    except Exception:
+        pass
+    # adjust bottom margin and save with friendly dpi
+    plt.subplots_adjust(bottom=0.12)
     plt.tight_layout()
-    plt.savefig(filename, dpi=300)
+    plt.savefig(filename, dpi=150)
     plt.close()
     return True
 
@@ -419,10 +535,36 @@ class Runner:
                     if getattr(self.args, 'gantt_csv', False):
                         csv_path = os.path.join(self.history_dir, f"gantt_epoch{epoch}.csv")
                         with open(csv_path, 'w') as cf:
-                            cf.write('start,end,op_idx,wc,job_id,operator_grp\n')
+                            # include op_name column (e.g., Op1..OpN) plus arrival/duration
+                            cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
                             for r in combined:
                                 try:
-                                    cf.write(','.join([str(x) for x in r]) + '\n')
+                                    if not isinstance(r, (list, tuple)):
+                                        continue
+                                    # robustly extract fields and compute op_name
+                                    if len(r) >= 8:
+                                        start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                                    elif len(r) == 6:
+                                        start, end, op_idx, wc, job_id, op_grp = r
+                                        arrival = ''
+                                        duration = ''
+                                    elif len(r) == 5:
+                                        start, end, op_idx, wc, job_id = r
+                                        op_grp = ''
+                                        arrival = ''
+                                        duration = ''
+                                    else:
+                                        continue
+                                    # op_name mapping (if numeric index, shift to 1-based label)
+                                    try:
+                                        if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
+                                            op_name = f"Op{int(op_idx) + 1}"
+                                        else:
+                                            op_name = str(op_idx)
+                                    except Exception:
+                                        op_name = str(op_idx)
+                                    vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
+                                    cf.write(','.join([str(x) for x in vals]) + '\n')
                                 except Exception:
                                     pass
                 except Exception as e:
@@ -511,21 +653,46 @@ class Runner:
                                     if getattr(self.args, 'gantt_csv', False):
                                         csv_path = os.path.join(self.history_dir, f"gantt_snapshot_step{train_steps}.csv")
                                         with open(csv_path, 'w') as cf:
-                                            cf.write('start,end,op_idx,wc,job_id,operator_grp\n')
+                                            cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
                                             for r in snapshot_gantt:
                                                 try:
-                                                    cf.write(','.join([str(x) for x in r]) + '\n')
+                                                    if not isinstance(r, (list, tuple)):
+                                                        continue
+                                                    if len(r) >= 8:
+                                                        start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                                                    elif len(r) == 6:
+                                                        start, end, op_idx, wc, job_id, op_grp = r
+                                                        arrival = ''
+                                                        duration = ''
+                                                    elif len(r) == 5:
+                                                        start, end, op_idx, wc, job_id = r
+                                                        op_grp = ''
+                                                        arrival = ''
+                                                        duration = ''
+                                                    else:
+                                                        continue
+                                                    try:
+                                                        if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
+                                                            op_name = f"Op{int(op_idx) + 1}"
+                                                        else:
+                                                            op_name = str(op_idx)
+                                                    except Exception:
+                                                        op_name = str(op_idx)
+                                                    vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
+                                                    cf.write(','.join([str(x) for x in vals]) + '\n')
                                                 except Exception:
                                                     pass
                                         # also write a human-readable summary for easier inspection
                                         def _unpack_rec(rec):
-                                            # robustly unpack records of length 6 or 5
+                                            # robustly unpack records of length 8, 6 or 5
                                             if not isinstance(rec, (list, tuple)):
                                                 raise ValueError('invalid rec')
-                                            if len(rec) >= 6:
-                                                return rec[0], rec[1], rec[2], rec[3], rec[4], rec[5]
+                                            if len(rec) >= 8:
+                                                return rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6], rec[7]
+                                            if len(rec) == 6:
+                                                return rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], None, None
                                             if len(rec) == 5:
-                                                return rec[0], rec[1], rec[2], rec[3], rec[4], None
+                                                return rec[0], rec[1], rec[2], rec[3], rec[4], None, None, None
                                             raise ValueError('unsupported rec len')
 
                                         try:
@@ -535,14 +702,15 @@ class Runner:
                                                 jobs_map = {}
                                                 for rec in snapshot_gantt:
                                                     try:
-                                                        s, e, op_idx, wc, job_id, op_grp = _unpack_rec(rec)
-                                                        jobs_map.setdefault(int(job_id), []).append((s, e, int(op_idx), int(wc), op_grp))
+                                                        s, e, op_idx, wc, job_id, op_grp, arrival, duration = _unpack_rec(rec)
+                                                        jobs_map.setdefault(int(job_id), []).append((s, e, int(op_idx), int(wc), op_grp, arrival, duration))
                                                     except Exception:
                                                         continue
                                                 for jid in sorted(jobs_map.keys()):
                                                     tf.write(f"Job {jid}:\n")
-                                                    for (s, e, op_idx, wc, op_grp) in sorted(jobs_map[jid], key=lambda x: x[0]):
-                                                        tf.write(f"  Op {op_idx} @ WC{wc} (OpGrp {op_grp}) — start={s:.3f}, end={e:.3f}\n")
+                                                    for (s, e, op_idx, wc, op_grp, arrival, duration) in sorted(jobs_map[jid], key=lambda x: x[0]):
+                                                        dur_str = f"dur={duration:.3f}" if duration is not None else "dur=?"
+                                                        tf.write(f"  Op {op_idx} @ WC{wc} (OpGrp {op_grp}) — start={s:.3f}, end={e:.3f} | arrival={arrival} {dur_str}\n")
                                                     tf.write('\n')
                                         except Exception:
                                             pass
@@ -650,6 +818,189 @@ class Runner:
 
         print("\n✅ [Runner] Training completed successfully.")
 
+        # === Write detailed scheduling trace and per-job timeline CSVs ===
+        try:
+            # combine collected gantt data and env records if any
+            combined = list(all_gantt_data)
+            try:
+                if hasattr(self.env, 'gantt_records'):
+                    combined.extend(list(self.env.gantt_records))
+            except Exception:
+                pass
+
+            sched_path = os.path.join(self.history_dir, 'scheduling_trace.csv')
+            jt_path = os.path.join(self.history_dir, 'job_timeline.csv')
+
+            # Write scheduling trace CSV with robust parsing of records
+            with open(sched_path, 'w') as sf:
+                sf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
+                for r in combined:
+                    try:
+                        if not isinstance(r, (list, tuple)):
+                            continue
+                        if len(r) >= 8:
+                            start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                        elif len(r) == 6:
+                            start, end, op_idx, wc, job_id, op_grp = r
+                            arrival = ''
+                            duration = ''
+                        elif len(r) == 5:
+                            start, end, op_idx, wc, job_id = r
+                            op_grp = ''
+                            arrival = ''
+                            duration = ''
+                        else:
+                            continue
+                        try:
+                            if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
+                                op_name = f"Op{int(op_idx) + 1}"
+                            else:
+                                op_name = str(op_idx)
+                        except Exception:
+                            op_name = str(op_idx)
+                        vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
+                        sf.write(','.join([str(x) for x in vals]) + '\n')
+                    except Exception:
+                        pass
+
+            # Build a per-job timeline summary from combined gantt data
+            try:
+                jobs_map = {}
+                for rec in combined:
+                    try:
+                        if not isinstance(rec, (list, tuple)):
+                            continue
+                        if len(rec) >= 8:
+                            s, e, op_idx, wc, job_id, op_grp, arrival, duration = rec[:8]
+                        elif len(rec) == 6:
+                            s, e, op_idx, wc, job_id, op_grp = rec
+                            arrival = None
+                            duration = None
+                        elif len(rec) == 5:
+                            s, e, op_idx, wc, job_id = rec
+                            op_grp = None
+                            arrival = None
+                            duration = None
+                        else:
+                            continue
+                        jid = int(job_id)
+                        jobs_map.setdefault(jid, []).append({'start': float(s), 'end': float(e), 'op_idx': int(op_idx) if isinstance(op_idx, (int, float)) and float(op_idx).is_integer() else op_idx, 'wc': wc, 'op_grp': op_grp, 'arrival': arrival, 'duration': duration})
+                    except Exception:
+                        continue
+
+                # write job_timeline.csv with one row per job (jobs sorted by id)
+                import json
+                with open(jt_path, 'w') as jf:
+                    jf.write('job_id,arrival_time,operations_count,operations_json\n')
+                    for jid in sorted(jobs_map.keys()):
+                        ops = sorted(jobs_map[jid], key=lambda x: x.get('start', 0.0))
+                        arrival = ops[0].get('arrival') if ops and ops[0].get('arrival') is not None else ''
+                        jf.write(f"{jid},{arrival},{len(ops)},{json.dumps(ops)}\n")
+            except Exception:
+                pass
+            print(f"[Runner] Scheduling trace and job timelines written to {self.history_dir}")
+        except Exception as e:
+            print("[WARN] Could not write scheduling/job timeline files:", e)
+
+        # === Create run_summary.json with last-10 averages and utilization stats ===
+        try:
+            import json
+            summary = {}
+
+            # last 10 episode rewards
+            try:
+                rewards_path = os.path.join(self.history_dir, 'episode_rewards.txt')
+                rewards = []
+                if os.path.exists(rewards_path):
+                    with open(rewards_path, 'r') as rf:
+                        for ln in rf:
+                            try:
+                                parts = ln.strip().split(',')
+                                if len(parts) >= 2:
+                                    rewards.append(float(parts[1]))
+                            except Exception:
+                                continue
+                # fallback to learning_metrics.csv if needed
+                if not rewards:
+                    lm_path = os.path.join(self.history_dir, 'learning_metrics.csv')
+                    if os.path.exists(lm_path):
+                        with open(lm_path, 'r') as lf:
+                            lines = [l.strip() for l in lf.readlines() if l.strip()]
+                            if len(lines) > 1:
+                                for ln in lines[1:]:
+                                    parts = ln.split(',')
+                                    try:
+                                        rewards.append(float(parts[2]))
+                                    except Exception:
+                                        continue
+                summary['last_10_avg_reward'] = float(sum(rewards[-10:]) / max(1, len(rewards[-10:]))) if rewards else None
+            except Exception:
+                summary['last_10_avg_reward'] = None
+
+            # average loss and td over last 10 entries
+            try:
+                def _read_last_floats(path, n=10):
+                    vals = []
+                    if os.path.exists(path):
+                        with open(path, 'r') as f:
+                            for ln in f:
+                                try:
+                                    v = float(ln.strip())
+                                    vals.append(v)
+                                except Exception:
+                                    continue
+                    return vals[-n:]
+
+                loss_vals = _read_last_floats(os.path.join(self.history_dir, 'loss.txt'), 10)
+                td_vals = _read_last_floats(os.path.join(self.history_dir, 'td_error.txt'), 10)
+                summary['last_10_avg_loss'] = float(sum(loss_vals) / max(1, len(loss_vals))) if loss_vals else None
+                summary['last_10_avg_td'] = float(sum(td_vals) / max(1, len(td_vals))) if td_vals else None
+            except Exception:
+                summary['last_10_avg_loss'] = None
+                summary['last_10_avg_td'] = None
+
+            # machine and operator utilization: read kpi_log.txt if present
+            try:
+                util_m_vals = []
+                util_o_vals = []
+                kpi_path = os.path.join(self.history_dir, 'kpi_log.txt')
+                if os.path.exists(kpi_path):
+                    with open(kpi_path, 'r') as kf:
+                        for ln in kf:
+                            parts = ln.strip().split(',')
+                            if len(parts) >= 4:
+                                try:
+                                    util_m_vals.append(float(parts[2]))
+                                    util_o_vals.append(float(parts[3]))
+                                except Exception:
+                                    continue
+                # fallback to env util functions if kpi not available
+                if not util_m_vals or not util_o_vals:
+                    try:
+                        util_m = float(self.env._util_machines())
+                        util_o = float(self.env._util_ops())
+                        util_m_vals.append(util_m); util_o_vals.append(util_o)
+                    except Exception:
+                        pass
+
+                summary['avg_machine_utilization'] = float(sum(util_m_vals) / max(1, len(util_m_vals))) if util_m_vals else None
+                summary['avg_operator_utilization'] = float(sum(util_o_vals) / max(1, len(util_o_vals))) if util_o_vals else None
+            except Exception:
+                summary['avg_machine_utilization'] = None
+                summary['avg_operator_utilization'] = None
+
+            # write summary
+            try:
+                summary_path = os.path.join(self.history_dir, 'run_summary.json')
+                with open(summary_path, 'w') as sf:
+                    json.dump(summary, sf, indent=2)
+                print(f"[Runner] run_summary.json written to {summary_path}")
+                print("system fully functional")
+            except Exception as e:
+                print("[WARN] Could not write run_summary.json:", e)
+        except Exception as e:
+            print("[WARN] Exception while creating run_summary:", e)
+
         # === Post-training moving average plot ===
         try:
             loss = np.loadtxt(f"{self.history_dir}/loss.txt")
@@ -669,6 +1020,66 @@ class Runner:
                 print("[Runner] Learning stability plot saved.")
         except Exception as e:
             print("[WARN] Could not plot learning stability:", e)
+
+        # === Save standalone PNGs for loss, td_error and episode rewards ===
+        try:
+            import csv
+            import matplotlib.pyplot as _plt
+
+            # Loss raw plot
+            try:
+                loss_vals = np.loadtxt(os.path.join(self.history_dir, 'loss.txt'))
+                _plt.figure()
+                _plt.plot(loss_vals, label='Loss', color='tab:blue')
+                _plt.xlabel('Train Step'); _plt.ylabel('Loss')
+                _plt.title('Training Loss')
+                _plt.legend(); _plt.tight_layout()
+                _plt.savefig(os.path.join(self.history_dir, 'loss.png'), dpi=150)
+                _plt.close()
+            except Exception:
+                pass
+
+            # TD error raw plot
+            try:
+                td_vals = np.loadtxt(os.path.join(self.history_dir, 'td_error.txt'))
+                _plt.figure()
+                _plt.plot(td_vals, label='TD Error', color='tab:orange')
+                _plt.xlabel('Train Step'); _plt.ylabel('TD Error')
+                _plt.title('TD Error')
+                _plt.legend(); _plt.tight_layout()
+                _plt.savefig(os.path.join(self.history_dir, 'td_error.png'), dpi=150)
+                _plt.close()
+            except Exception:
+                pass
+
+            # Episode reward plot from learning_metrics.csv
+            try:
+                lm_path = os.path.join(self.history_dir, 'learning_metrics.csv')
+                episodes = []
+                rewards = []
+                if os.path.exists(lm_path):
+                    with open(lm_path, 'r') as lf:
+                        reader = csv.DictReader(lf)
+                        for row in reader:
+                            try:
+                                episodes.append(int(row.get('episode', len(episodes))))
+                                rewards.append(float(row.get('episode_reward', 0.0)))
+                            except Exception:
+                                continue
+                if rewards:
+                    _plt.figure()
+                    _plt.plot(rewards, label='Episode Reward', color='tab:green')
+                    _plt.xlabel('Episode'); _plt.ylabel('Reward')
+                    _plt.title('Episode Reward over Time')
+                    _plt.legend(); _plt.tight_layout()
+                    _plt.savefig(os.path.join(self.history_dir, 'episode_rewards.png'), dpi=150)
+                    _plt.close()
+            except Exception:
+                pass
+
+            print('[Runner] Loss/TD/Reward PNGs saved.')
+        except Exception as e:
+            print('[WARN] Could not create loss/reward PNGs:', e)
 
     def evaluate(self, all_gantt_data, global_ep_idx):
         win_number, episode_rewards, gantt_eval = 0, 0, []
@@ -928,6 +1339,57 @@ class Runner:
                 except Exception:
                     pass
 
+                # --- Append a per-decision scheduling trace row (robust best-effort) ---
+                try:
+                    os.makedirs(self.history_dir, exist_ok=True)
+                    sched_path = os.path.join(self.history_dir, 'scheduling_trace.csv')
+                    # prepare fields
+                    job_id = item.get('job_id')
+                    allowed_wcs = item.get('allowed_wcs') or item.get('allowed_machine_indices') or []
+                    # avail mask may be granular or per-machine
+                    avail_mask = item.get('avail_mask') if item.get('avail_mask') is not None else item.get('avail_row')
+                    chosen_idx = None
+                    try:
+                        chosen_idx = int(chosen) if chosen is not None else None
+                    except Exception:
+                        chosen_idx = None
+
+                    chosen_name = chosen_machine_name
+
+                    # determine reason: check avail_mask if available and granular
+                    reason = ''
+                    try:
+                        if avail_mask is not None and chosen_idx is not None:
+                            import numpy as _np
+                            arr = _np.asarray(avail_mask)
+                            # if flattened per-(machine×op) mask, try to infer ops
+                            if arr.size > 0:
+                                # attempt to infer ops by dividing by num_wcs when possible
+                                if hasattr(self.env, 'num_wcs') and hasattr(self.env, 'num_ops'):
+                                    ops = int(self.env.num_ops)
+                                    mcnt = int(self.env.num_wcs)
+                                    if arr.size >= mcnt * ops:
+                                        start = chosen_idx * ops
+                                        end = start + ops
+                                        if end <= arr.size and not bool(arr[start:end].any()):
+                                            reason = 'no_operator_free'
+                                else:
+                                    # if avail_mask length equals num_wcs, interpret per-machine
+                                    if hasattr(self.env, 'num_wcs') and arr.size == int(self.env.num_wcs):
+                                        if int(arr[chosen_idx]) == 0:
+                                            reason = 'machine_not_available'
+                    except Exception:
+                        reason = reason or ''
+
+                    # Append line (header if needed)
+                    header_needed = not os.path.exists(sched_path)
+                    with open(sched_path, 'a') as sf:
+                        if header_needed:
+                            sf.write('time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason\n')
+                        sf.write(f"{sim_time},{job_id},{allowed_wcs},{avail_mask},{chosen_idx},{repr(chosen_name)},{reason}\n")
+                except Exception:
+                    pass
+
                 processed_actions.append(chosen)
                 processed_machine_names.append(chosen_machine_name)
 
@@ -1004,12 +1466,21 @@ class Runner:
                 except Exception:
                     op_to_m = {}
 
-                num_m = int(getattr(self.env, 'num_wcs', 0))
+                # number of machines (prefer machine_list when available)
+                try:
+                    num_m = int(len(getattr(self.env.workcenters_meta, 'machine_list', []) or []))
+                    if num_m == 0:
+                        num_m = int(getattr(self.env, 'num_wcs', 0))
+                except Exception:
+                    num_m = int(getattr(self.env, 'num_wcs', 0))
                 num_p = int(getattr(self.env, 'num_ops', 0))
 
                 # Precompute resource free states (machine/operator) at this time
                 try:
-                    machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
+                    if getattr(self.env, 'machine_resources', None):
+                        machine_free = [self.env._resource_free(self.env.machine_resources[m]) for m in range(num_m)]
+                    else:
+                        machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
                 except Exception:
                     machine_free = [True] * num_m
                 try:

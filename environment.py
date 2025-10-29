@@ -48,6 +48,8 @@ class JobAgent:
         self.remaining_time = 0.0
         self.wait_time = 0.0
         self.finished = False
+        # record arrival time (defaults to 0.0 for initial jobs)
+        self.arrival_time = 0.0
 
     def current_op(self):
         if self.finished or self.current_op_idx >= len(self.operations):
@@ -250,21 +252,37 @@ class MASAEnv:
         # fall back to 1 WorkCenter to keep the environment runnable.
         if self.num_wcs is None or int(self.num_wcs) <= 0:
             self.num_wcs = 1
-        self.workcenters = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
+        # Create per-machine resources where possible. Fall back to per-WC resources
+        # for legacy configs that don't expose a machine_list.
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        if mlist:
+            # create a SimPy Resource per machine (capacity=1)
+            self.machine_resources = [simpy.Resource(self.env, capacity=1) for _ in range(len(mlist))]
+            # legacy alias kept for backward compatibility
+            self.wc_resources = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
+        else:
+            # no machine registry available: fall back to per-WC resources as before
+            self.machine_resources = []
+            self.wc_resources = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
+
+        # operator groups remain per-operator-group resources
         self.operator_groups = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_ops)]
 
         # Migration aliases (phase: provide backwards-compatible names while
         # moving to a clearer API):
         #  - `wc_resources` will refer to the simpy.Resource list (runtime)
         #  - `workcenters` will be exposed as the WorkCenters metadata object
-        # First, keep a reference to the runtime resource list under the new name
-        self.wc_resources = self.workcenters
-        # Now expose the WorkCenters metadata as the high-level `workcenters` API
-        # so callers can use `env.workcenters` to access metadata. Existing code
-        # that used `self.workcenters` for resources should be updated to use
-        # `self.wc_resources` but will continue to work during the transition
-        # because we kept the alias.
+        # expose metadata and keep legacy aliases
         self.workcenters = self.workcenters_meta
+        # ensure there is always a machine_list attribute for downstream code
+        if not getattr(self.workcenters_meta, 'machine_list', None):
+            # synthesize simple machine names per WC when registry absent
+            try:
+                self.workcenters_meta.machine_list = [f"M_{i}_0" for i in range(int(self.num_wcs))]
+                self.workcenters_meta.machine_index = {m: i for i, m in enumerate(self.workcenters_meta.machine_list)}
+            except Exception:
+                self.workcenters_meta.machine_list = []
+                self.workcenters_meta.machine_index = {}
 
         # Jobs
         self.jobs: List[JobAgent] = []
@@ -310,15 +328,69 @@ class MASAEnv:
         self._recent_rewards = deque(maxlen=5)
         self.done = False
 
-        # Reward weights (unchanged)
-        self.rw = {"complete": 10.0, "progress": 2, "wait": 0.05, "wip": 0.02, "idle": 0.05}
+        # default coefficients for shaped reward (maps to alpha, beta, gamma, delta)
+        # reward_t = (+alpha * completed_jobs_delta) - beta * avg_wait - gamma * WIP - delta * idle_ops
+        self.alpha = 1.0
+        self.beta = 0.5
+        self.gamma = 0.2
+        self.delta = 0.1
+        # default cost-per-time parameter (present in configs/env_config.yaml as c_time)
+        self.c_time = 0.0
+        # If a YAML config provides reward_params, apply them as authoritative defaults
+        try:
+            if getattr(self, 'config', None) and isinstance(self.config, dict):
+                rp = self.config.get('reward_params', {}) or {}
+                if rp:
+                    try:
+                        self.alpha = float(rp.get('alpha', self.alpha))
+                    except Exception:
+                        pass
+                    try:
+                        self.beta = float(rp.get('beta', self.beta))
+                    except Exception:
+                        pass
+                    try:
+                        self.gamma = float(rp.get('gamma', self.gamma))
+                    except Exception:
+                        pass
+                    try:
+                        self.delta = float(rp.get('delta', self.delta))
+                    except Exception:
+                        pass
+                    try:
+                        self.c_time = float(rp.get('c_time', self.c_time))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # allow programmatic override via reward_weights dict
         if reward_weights:
-            self.rw.update(reward_weights)
+            try:
+                self.alpha = float(reward_weights.get('alpha', self.alpha))
+                self.beta = float(reward_weights.get('beta', self.beta))
+                self.gamma = float(reward_weights.get('gamma', self.gamma))
+                self.delta = float(reward_weights.get('delta', self.delta))
+            except Exception:
+                pass
+        # allow environment variable overrides for quick experiments
+        try:
+            import os
+            if os.environ.get('EXP_ALPHA') is not None:
+                self.alpha = float(os.environ.get('EXP_ALPHA'))
+            if os.environ.get('EXP_BETA') is not None:
+                self.beta = float(os.environ.get('EXP_BETA'))
+            if os.environ.get('EXP_GAMMA') is not None:
+                self.gamma = float(os.environ.get('EXP_GAMMA'))
+            if os.environ.get('EXP_DELTA') is not None:
+                self.delta = float(os.environ.get('EXP_DELTA'))
+        except Exception:
+            pass
 
-        # 9A decision batching
+    # 9A decision batching
         self.pending_decisions: List[Dict] = []
         self.decisions_ready = simpy.Event(self.env)
-        # lightweight gantt/event records: (start, end, operation, wc, job_id, operator_grp)
+    # lightweight gantt/event records:
+    # (start, end, operation, wc, job_id, operator_grp, arrival_time, duration)
         self.gantt_records = []
 
     # --------------------------------------------------------
@@ -327,7 +399,14 @@ class MASAEnv:
     def reset(self):
         # Reset SimPy world
         self.env = simpy.Environment()
-        self.workcenters = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_wcs)]
+        # recreate machine and WC resources consistently with initialization
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        if mlist:
+            self.machine_resources = [simpy.Resource(self.env, capacity=1) for _ in range(len(mlist))]
+            self.wc_resources = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
+        else:
+            self.machine_resources = []
+            self.wc_resources = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
         self.operator_groups = [simpy.Resource(self.env, capacity=1) for _ in range(self.num_ops)]
 
         # Maintain migration aliases after reset
@@ -377,8 +456,8 @@ class MASAEnv:
         self.t = getattr(self, 'env', simpy.Environment()).now if hasattr(self, 'env') else 0.0
         reward = 0.0
         try:
+            # return shaped reward directly (no extra normalization here)
             reward = float(self.pop_decision_reward())
-            reward = np.clip(reward / 10.0, -10.0, 10.0)
         except Exception:
             reward = 0.0
 
@@ -427,24 +506,57 @@ class MASAEnv:
 
     def pop_decision_reward(self) -> float:
         """Son karar sınırından bu yana biriken shaped ödülü döndür."""
-        completed = float(self._completed_now_cache)
+        # Compute shaped reward as per specification:
+        # reward_t = (+1.0 * completed_jobs_delta)
+        #            - 0.5 * avg_wait_time_t
+        #            - 0.2 * WIP_t
+        #            - 0.1 * idle_operators_t
+        try:
+            completed = float(self._completed_now_cache)
+        except Exception:
+            completed = 0.0
+        # reset completed cache after reading
         self._completed_now_cache = 0
-        total_rem = self._total_remaining_work()
-        progress_delta = max(0.0, self.prev_total_remaining - total_rem)
-        self.prev_total_remaining = total_rem
 
-        avg_wait = self.total_wait_time / max(1, self.env.now) if self.env.now > 0 else 0.0
+        # average wait time (total_wait_time / sim_time)
+        sim_t = float(self.env.now) if hasattr(self, 'env') else 1.0
+        avg_wait = float(self.total_wait_time) / max(1.0, sim_t)
+
         wip = float(self._wip())
-        idle_ratio = 1.0 - 0.5 * (self._util_ops() + self._util_machines())
 
-        r_complete = self.rw["complete"] * completed
-        r_progress = self.rw["progress"] * progress_delta
-        r_wait = self.rw["wait"] * avg_wait
-        r_wip = self.rw["wip"] * wip
-        r_idle = self.rw["idle"] * idle_ratio
+        # idle_operators_t: count of operator_groups that are currently free
+        try:
+            idle_ops = 0
+            for g in getattr(self, 'operator_groups', []):
+                if self._resource_free(g):
+                    idle_ops += 1
+        except Exception:
+            idle_ops = 0
 
-        reward = r_complete + r_progress - r_wait - r_wip - r_idle
-        self._recent_rewards.append(reward)
+        # use configurable coefficients (alpha, beta, gamma, delta)
+        try:
+            a = float(getattr(self, 'alpha', 1.0))
+        except Exception:
+            a = 1.0
+        try:
+            b = float(getattr(self, 'beta', 0.5))
+        except Exception:
+            b = 0.5
+        try:
+            c = float(getattr(self, 'gamma', 0.2))
+        except Exception:
+            c = 0.2
+        try:
+            d = float(getattr(self, 'delta', 0.1))
+        except Exception:
+            d = 0.1
+
+        reward = (a * completed) - (b * avg_wait) - (c * wip) - (d * float(idle_ops))
+        # keep a recent history for observations
+        try:
+            self._recent_rewards.append(reward)
+        except Exception:
+            pass
         return float(reward)
 
     # ------------------------- SimPy Processes -------------------------
@@ -531,48 +643,60 @@ class MASAEnv:
                 allowed_machine_indices = []
                 per_machine_durations = {}
 
-            def _resume_with(wc_choice, _resume_evt=resume_evt):
+            def _resume_with(choice, _resume_evt=resume_evt):
                 """
-                Accept either a WorkCenter index (legacy), a machine name (str),
-                or a global machine index (int referring into workcenters_meta.machine_list).
-                Map the incoming choice to the authoritative WorkCenter index and
-                resume the waiting process. If the mapping is invalid, succeed with
-                None so the job process can perform a small timeout and avoid deadlock.
+                Accept either a machine name (str), a global machine index (int),
+                or legacy WorkCenter index. For modern operation we prefer returning
+                a machine index (int) into workcenters_meta.machine_list. If mapping
+                fails or the chosen machine is not allowed for this operation, we
+                succeed with None to let the job process time out briefly.
                 """
                 try:
-                    # choice may be a string machine name
-                    if isinstance(wc_choice, str):
-                        mname = wc_choice
-                        mreg = getattr(self.workcenters_meta, 'machine_registry', {})
-                        if mname not in mreg:
+                    # machine registry lookup
+                    mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+                    mreg = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+                    # string machine name
+                    if isinstance(choice, str):
+                        if choice not in mreg:
                             _resume_evt.succeed(None)
                             return
-                        wc_choice_mapped = int(mreg.get(mname, {}).get('workcenter', -1))
+                        mi = int(self.workcenters_meta.machine_index.get(choice, -1))
                     else:
-                        # numeric choice: could be a WorkCenter index or a machine index
+                        # numeric choice: could be machine index or legacy WC index
                         try:
-                            c = int(wc_choice)
+                            c = int(choice)
                         except Exception:
                             _resume_evt.succeed(None)
                             return
-                        # if it's directly one of the allowed_wcs, accept it
-                        if c in allowed_wcs:
-                            wc_choice_mapped = c
+                        # if it's a valid machine index
+                        if mlist and 0 <= c < len(mlist):
+                            mi = int(c)
                         else:
-                            # try interpreting as machine index into machine_list
-                            mlist = getattr(self.workcenters_meta, 'machine_list', [])
-                            if 0 <= c < len(mlist):
-                                mname = mlist[c]
-                                wc_choice_mapped = int(self.workcenters_meta.machine_registry.get(mname, {}).get('workcenter', -1))
+                            # legacy: interpret as WorkCenter index -> pick a default machine
+                            if c in allowed_wcs:
+                                # pick the first machine in that WC that is allowed for this op
+                                mi = None
+                                for mname, md in (mreg or {}).items():
+                                    try:
+                                        if int(md.get('workcenter', -1)) == int(c):
+                                            mi_candidate = int(self.workcenters_meta.machine_index.get(mname, -1))
+                                            mi = mi_candidate
+                                            break
+                                    except Exception:
+                                        continue
+                                if mi is None:
+                                    _resume_evt.succeed(None)
+                                    return
                             else:
                                 _resume_evt.succeed(None)
                                 return
 
-                    # final validation: mapped WorkCenter must be among allowed_wcs
-                    if wc_choice_mapped not in allowed_wcs:
+                    # final validation: machine must be among allowed_machines for this op
+                    allowed_machine_indices = decision_item.get('allowed_machine_indices', [])
+                    if allowed_machine_indices and (mi not in allowed_machine_indices):
                         _resume_evt.succeed(None)
                         return
-                    _resume_evt.succeed(int(wc_choice_mapped))
+                    _resume_evt.succeed(int(mi))
                 except Exception:
                     _resume_evt.succeed(None)
                     return
@@ -611,15 +735,25 @@ class MASAEnv:
             if not self.decisions_ready.triggered:
                 self.decisions_ready.succeed()
 
-            chosen_wc = (yield resume_evt)
+            chosen_machine_idx = (yield resume_evt)
 
-            if chosen_wc is None:
-                # No-op: küçük bir zaman sıçraması ile deadlock önle
+            if chosen_machine_idx is None:
+                # No-op: small timeout to avoid deadlock
                 yield self.env.timeout(1e-9)
                 continue
 
-            # determine eligible operator groups for the chosen WorkCenter
-            eligible_ops = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(chosen_wc), [])
+            # map machine index to machine name and workcenter
+            try:
+                mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+                mname = mlist[int(chosen_machine_idx)]
+                mreg = self.workcenters_meta.machine_registry.get(mname, {})
+                chosen_wc = int(mreg.get('workcenter', -1))
+            except Exception:
+                mname = None
+                chosen_wc = None
+
+            # determine eligible operator groups for the chosen machine's WorkCenter
+            eligible_ops = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(chosen_wc), []) if chosen_wc is not None else []
             # pick a specific operator-group index to request: prefer a free one
             selected_grp = None
             try:
@@ -635,25 +769,42 @@ class MASAEnv:
                     selected_grp = int(eligible_ops[0]) if eligible_ops else 0
                 except Exception:
                     selected_grp = 0
-            # determine duration for chosen WC
-            if per_wc_durations is not None:
-                try:
-                    dur = float(per_wc_durations.get(int(chosen_wc), 0.0))
-                except Exception:
-                    dur = 0.0
-            elif base_dur is not None:
-                # interpret machine speed as speed factor (>1 faster), so duration = base / speed
-                speed = self._speed_factor_for_wc(chosen_wc)
-                try:
-                    dur = float(base_dur) / max(1e-6, float(speed))
-                except Exception:
-                    dur = float(base_dur)
-            else:
-                # fallback small timeout
+
+            # determine duration for chosen machine: prefer per-machine durations
+            try:
+                if int(chosen_machine_idx) in decision_item.get('per_machine_durations', {}):
+                    dur = float(decision_item.get('per_machine_durations', {}).get(int(chosen_machine_idx), 0.0))
+                else:
+                    # fall back to per-WC duration mapping if present
+                    if per_wc_durations is not None and chosen_wc is not None:
+                        dur = float(per_wc_durations.get(int(chosen_wc), 0.0))
+                    elif base_dur is not None:
+                        speed = self._speed_factor_for_wc(chosen_wc) if chosen_wc is not None else 1.0
+                        try:
+                            dur = float(base_dur) / max(1e-6, float(speed))
+                        except Exception:
+                            dur = float(base_dur)
+                    else:
+                        dur = 0.0
+            except Exception:
                 dur = 0.0
 
             start_wait = self.env.now
-            with self.operator_groups[selected_grp].request() as op_req, self.wc_resources[chosen_wc].request() as mc_req:
+            # request operator-group and the chosen machine resource
+            mr = None
+            try:
+                mr = self.machine_resources[int(chosen_machine_idx)]
+            except Exception:
+                # fallback to WC resource if machine_resources not available
+                try:
+                    mr = self.wc_resources[int(chosen_wc)]
+                except Exception:
+                    mr = None
+            if mr is None:
+                # nothing to acquire -> small timeout
+                yield self.env.timeout(1e-9)
+                continue
+            with self.operator_groups[selected_grp].request() as op_req, mr.request() as mc_req:
                 yield op_req; yield mc_req
                 # bekleme süreleri
                 wait_dur = self.env.now - start_wait
@@ -669,9 +820,21 @@ class MASAEnv:
                 assigned_op = None
                 try:
                     if getattr(self, 'operators', None) is not None:
-                        assigned_op = self.operators.find_free_operator(job.id, chosen_wc)
-                        if assigned_op is not None:
-                            assigned_op.assign_job(job.id, chosen_wc, start_time=self.env.now)
+                        # prefer machine-level operator selection when possible
+                        try:
+                            op_idx_local = int(op_type) if (op_type is not None) else int(getattr(job, 'current_op_idx', 0))
+                        except Exception:
+                            op_idx_local = int(getattr(job, 'current_op_idx', 0))
+                        if mname is not None:
+                            # machine-level operator lookup
+                            assigned_op = self.operators.find_free_operator_for_machine(op_idx_local, mname)
+                            if assigned_op is not None:
+                                assigned_op.assign_job(job.id, chosen_wc, start_time=self.env.now)
+                        else:
+                            # fallback to legacy workcenter-level lookup
+                            assigned_op = self.operators.find_free_operator(job.id, chosen_wc)
+                            if assigned_op is not None:
+                                assigned_op.assign_job(job.id, chosen_wc, start_time=self.env.now)
                 except Exception:
                     assigned_op = None
                 try:
@@ -683,14 +846,23 @@ class MASAEnv:
                             assigned_op.release(end_time=self.env.now)
                         except Exception:
                             pass
-                    # record gantt data (start, end, operation_type, wc, job, operator_group)
+                    # record gantt data (start, end, operation_type, wc, job, operator_group,
+                    # arrival_time, duration)
                     op_end = float(self.env.now)
                     # prefer explicit op_type if present, otherwise use current op index
                     try:
                         op_tag = int(op_type) if (op_type is not None) else int(job.current_op_idx)
                     except Exception:
                         op_tag = int(getattr(job, 'current_op_idx', 0))
-                    self.gantt_records.append((op_start, op_end, int(op_tag), int(chosen_wc), int(job.id), int(selected_grp)))
+                    try:
+                        arrival = float(getattr(job, 'arrival_time', 0.0))
+                    except Exception:
+                        arrival = 0.0
+                    try:
+                        dur_val = float(dur)
+                    except Exception:
+                        dur_val = float(op_end - op_start)
+                    self.gantt_records.append((op_start, op_end, int(op_tag), int(chosen_wc), int(job.id), int(selected_grp), arrival, dur_val))
                 job.current_op_idx += 1
                 job.remaining_time = 0.0
                 if job.current_op_idx >= len(job.operations):
@@ -743,16 +915,30 @@ class MASAEnv:
         return core[:self.state_dim]
 
     def _build_avail_actions(self):
-        avail = np.zeros((self.num_jobs, self.num_wcs), dtype=np.int32)
+        # Build machine-level availability mask if machine registry exists.
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        n_m = len(mlist) if mlist else int(self.num_wcs)
+        avail = np.zeros((self.num_jobs, n_m), dtype=np.int32)
         for j_idx, job in enumerate(self.jobs):
             if job.finished:
                 continue
             row = self._avail_row_for_job(job)
-            avail[j_idx, :] = row
+            # _avail_row_for_job now returns machine-level row when possible
+            if row.shape[0] == n_m:
+                avail[j_idx, :] = row
+            else:
+                # backward compatible: row may be per-WC; keep zeros
+                pass
         return avail
 
     def _avail_row_for_job(self, job: JobAgent):
-        row = np.zeros((self.num_wcs,), dtype=np.int32)
+        # If we have machine registry, return per-machine mask, else per-WC mask
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        if mlist:
+            n_m = len(mlist)
+            row = np.zeros((n_m,), dtype=np.int32)
+        else:
+            row = np.zeros((self.num_wcs,), dtype=np.int32)
         op = job.current_op()
         if op is None:
             return row
@@ -764,20 +950,55 @@ class MASAEnv:
                 _, allowed_wcs, _ = op
             except Exception:
                 allowed_wcs = []
-        for wc in allowed_wcs:
-            eligible = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
-            # require both a free machine resource and at least one free operator group
-            machine_free = self._resource_free(self.wc_resources[wc])
-            op_free = False
+        # If machine registry exists, test per-machine constraints
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        mindex = getattr(self.workcenters_meta, 'machine_index', {}) or {}
+        if mlist:
             try:
-                for g in eligible:
-                    if self._resource_free(self.operator_groups[g]):
-                        op_free = True
-                        break
+                op_idx_local = int(op[0]) if (isinstance(op, (list, tuple)) and len(op) >= 1) else int(getattr(job, 'current_op_idx', 0))
             except Exception:
+                op_idx_local = int(getattr(job, 'current_op_idx', 0))
+            for mi, mname in enumerate(mlist):
+                try:
+                    mreg = self.workcenters_meta.machine_registry.get(mname, {})
+                    caps = mreg.get('capabilities', [])
+                    if op_idx_local not in caps:
+                        continue
+                    # machine free?
+                    machine_free = self._resource_free(self.machine_resources[mi]) if getattr(self, 'machine_resources', None) else False
+                    # operator free for this machine: check any operator object qualified for this machine and free
+                    op_free = False
+                    try:
+                        # derive workcenter for operator-group lookup
+                        wc = int(mreg.get('workcenter', -1))
+                        eligible = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                        for g in eligible:
+                            if self._resource_free(self.operator_groups[g]):
+                                op_free = True
+                                break
+                    except Exception:
+                        op_free = False
+                    if machine_free and op_free:
+                        row[mi] = 1
+                except Exception:
+                    continue
+            return row
+        else:
+            for wc in allowed_wcs:
+                eligible = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                # require both a free machine resource and at least one free operator group
+                machine_free = self._resource_free(self.wc_resources[wc])
                 op_free = False
-            if machine_free and op_free:
-                row[wc] = 1
+                try:
+                    for g in eligible:
+                        if self._resource_free(self.operator_groups[g]):
+                            op_free = True
+                            break
+                except Exception:
+                    op_free = False
+                if machine_free and op_free:
+                    row[wc] = 1
+            return row
         return row
 
     # --------------------------------------------------------
@@ -972,6 +1193,10 @@ class MASAEnv:
         return reg.get(m_id, {}).get("speed_factor", 1.0)
 
     def _util_machines(self):
+        # prefer per-machine resource utilization when available
+        if getattr(self, 'machine_resources', None):
+            busy = sum(len(m.users) for m in self.machine_resources)
+            return busy / max(1, len(self.machine_resources))
         busy = sum(len(wc.users) for wc in self.wc_resources)
         return busy / max(1, len(self.wc_resources))
 
@@ -993,6 +1218,11 @@ class MASAEnv:
         """
         jid = len(self.jobs)
         job = JobAgent(jid, ops_sequence)
+        # record arrival time at the moment of insertion into the env
+        try:
+            job.arrival_time = float(self.env.now)
+        except Exception:
+            job.arrival_time = 0.0
         self.jobs.append(job)
         # start the job process so it participates in the SimPy world
         try:
@@ -1057,8 +1287,11 @@ class MASAEnv:
                 print(f"[Env] Failed to add dynamic job: {e}")
 
     def get_env_info(self):
+        # prefer machine-level action space when available
+        num_machines = len(getattr(self.workcenters_meta, 'machine_list', []) or [])
+        n_actions = int(num_machines) if num_machines > 0 else int(self.num_wcs)
         return {
-            "n_actions": self.num_wcs,
+            "n_actions": n_actions,
             "n_agents": self.num_jobs,
             "state_shape": self.state_dim,
             "obs_shape": self.obs_dim_agent,

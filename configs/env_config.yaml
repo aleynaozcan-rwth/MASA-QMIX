@@ -45,43 +45,43 @@ op_type_distribution:
 processing_time_means:
   # mean processing time per (op type, machine). Use Op1..Op9 to map to indices 0..8
   Op1:
-    M1: 3.5
-    M3: 4.5
-    M4: 4.0
-    M5: 3.0
+    M1: 1.225
+    M3: 1.575
+    M4: 1.4
+    M5: 1.05
   Op2:
-    M1: 3.0
-    M3: 5.0
+    M1: 1.05
+    M3: 1.75
   Op3:
-    M1: 4.5
-    M4: 5.0
-    M5: 5.5
+    M1: 1.575
+    M4: 1.75
+    M5: 1.925
   Op4:
-    M2: 4.5
-    M3: 4.8
-    M5: 6.0
+    M2: 1.575
+    M3: 1.68
+    M5: 2.1
   Op5:
-    M2: 5.0
-    M1: 6.5
+    M2: 1.75
+    M1: 2.275
   Op6:
-    M3: 6.0
-    M5: 8.0
+    M3: 2.1
+    M5: 2.8
   Op7:
-    M4: 5.2
+    M4: 1.82
   Op8:
-    M5: 4.5
-    M4: 7.5
-    M2: 8.5
+    M5: 1.575
+    M4: 2.625
+    M2: 2.975
   Op9:
-    M5: 5.5
-    M1: 8.5
-    M3: 9.0
+    M5: 1.925
+    M1: 2.975
+    M3: 3.15
 
 task_generator:
   arrival_lambda: 0.05   # base interarrival rate (Exponential) — tune to target load
   seq_length:
     min: 1
-    max: 9
+    max: 5
 
 reward_params:
   alpha: 0.01

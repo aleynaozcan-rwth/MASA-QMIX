@@ -239,6 +239,31 @@ class Operators:
                 return op
         return None
 
+    def find_free_operator_for_machine(self, op_idx, machine_name):
+        """
+        Return the first free operator who is qualified for the given machine
+        and who can perform operation `op_idx` on that machine. This is a
+        machine-level lookup used when decisions are made at machine granularity.
+        """
+        try:
+            registry = getattr(self.operators_object_list[0].workcenters_ref, 'machine_registry', {}) or {}
+        except Exception:
+            registry = {}
+        for op in self.operators_object_list:
+            try:
+                if op.is_busy:
+                    continue
+                # must be qualified for the machine by name
+                if machine_name not in op.qualified_machines:
+                    continue
+                # check machine capabilities
+                caps = registry.get(machine_name, {}).get('capabilities', [])
+                if int(op_idx) in caps:
+                    return op
+            except Exception:
+                continue
+        return None
+
     def release_all(self):
         """Free all operators (for environment resets)."""
         for op in self.operators_object_list:

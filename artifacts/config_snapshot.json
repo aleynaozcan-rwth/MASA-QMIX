@@ -1,0 +1,218 @@
+{
+  "loaded_config": {
+    "work_centers": {
+      "WC1": {
+        "machines": [
+          "M1",
+          "M2"
+        ]
+      },
+      "WC2": {
+        "machines": [
+          "M3",
+          "M4"
+        ]
+      },
+      "WC3": {
+        "machines": [
+          "M5"
+        ]
+      }
+    },
+    "machines": {
+      "M1": {
+        "wc": "WC1",
+        "capable_ops": [
+          "Op1",
+          "Op2",
+          "Op3",
+          "Op5",
+          "Op9"
+        ],
+        "speed_factor": 1.0
+      },
+      "M2": {
+        "wc": "WC1",
+        "capable_ops": [
+          "Op4",
+          "Op5",
+          "Op8"
+        ],
+        "speed_factor": 1.0
+      },
+      "M3": {
+        "wc": "WC2",
+        "capable_ops": [
+          "Op1",
+          "Op2",
+          "Op4",
+          "Op6",
+          "Op9"
+        ],
+        "speed_factor": 1.0
+      },
+      "M4": {
+        "wc": "WC2",
+        "capable_ops": [
+          "Op1",
+          "Op3",
+          "Op7",
+          "Op8"
+        ],
+        "speed_factor": 1.0
+      },
+      "M5": {
+        "wc": "WC3",
+        "capable_ops": [
+          "Op1",
+          "Op3",
+          "Op4",
+          "Op6",
+          "Op8",
+          "Op9"
+        ],
+        "speed_factor": 1.0
+      }
+    },
+    "operators": [
+      {
+        "id": "O1",
+        "qualified_machines": [
+          "M1",
+          "M4",
+          "M5"
+        ]
+      },
+      {
+        "id": "O2",
+        "qualified_machines": [
+          "M2",
+          "M3",
+          "M5"
+        ]
+      }
+    ],
+    "op_type_distribution": {
+      "probs": [
+        0.11,
+        0.11,
+        0.11,
+        0.11,
+        0.11,
+        0.11,
+        0.11,
+        0.11,
+        0.12
+      ]
+    },
+    "processing_time_means": {
+      "Op1": {
+        "M1": 1.225,
+        "M3": 1.575,
+        "M4": 1.4,
+        "M5": 1.05
+      },
+      "Op2": {
+        "M1": 1.05,
+        "M3": 1.75
+      },
+      "Op3": {
+        "M1": 1.575,
+        "M4": 1.75,
+        "M5": 1.925
+      },
+      "Op4": {
+        "M2": 1.575,
+        "M3": 1.68,
+        "M5": 2.1
+      },
+      "Op5": {
+        "M2": 1.75,
+        "M1": 2.275
+      },
+      "Op6": {
+        "M3": 2.1,
+        "M5": 2.8
+      },
+      "Op7": {
+        "M4": 1.82
+      },
+      "Op8": {
+        "M5": 1.575,
+        "M4": 2.625,
+        "M2": 2.975
+      },
+      "Op9": {
+        "M5": 1.925,
+        "M1": 2.975,
+        "M3": 3.15
+      }
+    },
+    "task_generator": {
+      "arrival_lambda": 0.05,
+      "seq_length": {
+        "min": 1,
+        "max": 5
+      }
+    },
+    "reward_params": {
+      "alpha": 0.01,
+      "beta": 0.005,
+      "gamma": 0.02,
+      "delta": 1.0,
+      "c_time": 0.001
+    },
+    "training_defaults": {
+      "rnn_hidden": 64,
+      "lr": "1e-3",
+      "discount": 0.99,
+      "batch_size": 32,
+      "target_update": 200,
+      "epsilon_start": 1.0,
+      "epsilon_end": 0.05,
+      "epsilon_decay_steps": 100000
+    }
+  },
+  "env_config_path": "configs/env_config.yaml",
+  "defaults": {
+    "num_jobs_default": 10,
+    "num_ops_default": 2,
+    "num_wcs_default": 3,
+    "episode_limit": 200
+  },
+  "machine_list": [
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5"
+  ],
+  "machine_registry_count": 5,
+  "eligible_operator_groups_by_wc": {
+    "0": [
+      0,
+      1
+    ],
+    "1": [
+      0,
+      1
+    ],
+    "2": [
+      0,
+      1
+    ]
+  },
+  "reward_weights": {
+    "alpha": 1.0,
+    "beta": 0.5,
+    "gamma": 0.2,
+    "delta": 0.1
+  },
+  "task_generator": {
+    "arrival_lambda": 0.05,
+    "seq_length": {
+      "min": 1,
+      "max": 5
+    }
+  }
+}

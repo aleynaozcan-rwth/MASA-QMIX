@@ -259,16 +259,25 @@ class RolloutWorker:
                                 op_to_m.setdefault(int(p), []).append(int(mindex.get(mname, 0)))
                     except Exception:
                         op_to_m = {p: [] for p in range(int(self.env.num_ops))}
-                    # machine resource free state: map each machine to its WC resource
+                    # machine resource free state: prefer per-machine resources
                     machine_free = []
                     try:
-                        mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
-                        for mname in machine_list:
-                            try:
-                                wc_i = int(mreg.get(mname, {}).get('workcenter', 0))
-                                machine_free.append(self.env._resource_free(self.env.wc_resources[wc_i]))
-                            except Exception:
-                                machine_free.append(True)
+                        if getattr(self.env, 'machine_resources', None):
+                            mindex = getattr(self.env.workcenters_meta, 'machine_index', {})
+                            for mname in machine_list:
+                                try:
+                                    mi = int(mindex.get(mname, 0))
+                                    machine_free.append(self.env._resource_free(self.env.machine_resources[mi]))
+                                except Exception:
+                                    machine_free.append(True)
+                        else:
+                            mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
+                            for mname in machine_list:
+                                try:
+                                    wc_i = int(mreg.get(mname, {}).get('workcenter', 0))
+                                    machine_free.append(self.env._resource_free(self.env.wc_resources[wc_i]))
+                                except Exception:
+                                    machine_free.append(True)
                     except Exception:
                         machine_free = [True] * num_m
                     try:
@@ -307,7 +316,13 @@ class RolloutWorker:
                                                 continue
                                 op_to_m[p_idx] = mapped
 
-                    machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
+                    try:
+                        if getattr(self.env, 'machine_resources', None):
+                            machine_free = [self.env._resource_free(self.env.machine_resources[m]) for m in range(num_m)]
+                        else:
+                            machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
+                    except Exception:
+                        machine_free = [True] * num_m
                     try:
                         operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(num_p)]
                     except Exception:

@@ -188,3 +188,102 @@ class QMIX:
         h_shape = (1, batch_size, int(getattr(self.args, "rnn_hidden_dim", 64)))
         self.eval_hidden = torch.zeros(h_shape, device=self.device)
         self.target_hidden = torch.zeros(h_shape, device=self.device)
+
+    # --------------------------------------------------
+    def select_actions(self, obs_batch, avail_batch=None, evaluate: bool = False, epsilon: float = None):
+        """Select actions for a batch of per-agent observations using the eval_rnn Q-values.
+
+        obs_batch: list or array of shape (n_agents, obs_dim) or list-of-arrays
+        avail_batch: optional list of per-agent availability vectors (list or np.array)
+        Returns: list of integer actions (one per agent)
+        """
+        import numpy as _np
+        to_t = lambda x: torch.tensor(x, dtype=torch.float32, device=self.device)
+
+        # Determine epsilon
+        if epsilon is None:
+            try:
+                epsilon = float(getattr(self.args, 'epsilon', 0.0))
+            except Exception:
+                epsilon = 0.0
+
+        # Normalize obs_batch to tensor shape (1, n_agents, obs_dim)
+        try:
+            obs_arr = _np.asarray(obs_batch, dtype=_np.float32)
+            if obs_arr.ndim == 1:
+                obs_arr = obs_arr.reshape(1, -1)
+            if obs_arr.ndim == 2:
+                # assume (n_agents, obs_dim)
+                obs_t = to_t(obs_arr).unsqueeze(0)
+            elif obs_arr.ndim == 3:
+                obs_t = to_t(obs_arr)
+            else:
+                obs_t = to_t(obs_arr).unsqueeze(0)
+        except Exception:
+            # fallback: single zeros
+            obs_t = torch.zeros((1, self.n_agents, self.obs_shape), dtype=torch.float32, device=self.device)
+
+        # Ensure hidden state is initialized for a single-step batch
+        try:
+            self.init_hidden(episode_num=1)
+        except Exception:
+            pass
+
+        # Build inputs using the same helper as training
+        try:
+            u_onehot = None
+            inputs = self._get_inputs_t(obs_t, None, episode_num=1)
+        except Exception:
+            inputs = obs_t
+
+        # Forward through eval_rnn
+        try:
+            q_vals, _ = self.eval_rnn(inputs, self.eval_hidden)
+            # q_vals shape: (episode_num * n_agents, n_actions)
+            q_vals = q_vals.view(1, self.n_agents, -1).squeeze(0).detach().cpu().numpy()
+        except Exception:
+            # fallback random / zeros
+            q_vals = _np.zeros((self.n_agents, int(self.n_actions)))
+
+        actions = []
+        for a_idx in range(q_vals.shape[0]):
+            q_row = q_vals[a_idx]
+            # apply availability mask if provided
+            allowed = None
+            if avail_batch is not None:
+                try:
+                    allowed = list(_np.asarray(avail_batch[a_idx], dtype=_np.int32))
+                except Exception:
+                    try:
+                        allowed = list(_np.asarray(avail_batch[0], dtype=_np.int32))
+                    except Exception:
+                        allowed = None
+
+            if allowed is not None:
+                # mask unavailable actions by setting very low Q
+                mask = _np.asarray(allowed, dtype=_np.int32)
+                masked_q = _np.where(mask, q_row, -1e9)
+            else:
+                masked_q = q_row
+
+            # epsilon-greedy
+            if (not evaluate) and (float(_np.random.rand()) < float(epsilon)):
+                # choose uniformly among allowed actions
+                if allowed is None:
+                    act = int(_np.argmax(masked_q))
+                else:
+                    try:
+                        allowed_inds = [i for i, v in enumerate(mask) if int(v)]
+                        if allowed_inds:
+                            act = int(_np.random.choice(allowed_inds))
+                        else:
+                            act = int(_np.argmax(masked_q))
+                    except Exception:
+                        act = int(_np.argmax(masked_q))
+            else:
+                # greedy
+                act = int(_np.argmax(masked_q))
+
+            actions.append(act)
+
+        return actions
