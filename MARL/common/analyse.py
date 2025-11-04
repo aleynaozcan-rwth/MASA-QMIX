@@ -1,3 +1,9 @@
+"""
+# Candidate for reintegration – plotting utilities for analyzing reward and
+# learning stability trends.
+# Useful for post-training visualization of MASA-QMIX experiments.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 

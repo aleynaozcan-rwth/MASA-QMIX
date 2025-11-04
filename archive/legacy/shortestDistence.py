@@ -1,3 +1,11 @@
+# Archived legacy file – superseded by integrated modules (Phase 4B cleanup).
+
+"""
+Archived copy of `utils/PDRs/shortestDistence.py` preserved for history.
+See `archive/legacy/util.py` for the helper `count_path_on_road` used here.
+"""
+
+# --- Begin archived content ---
 """
 优先选择离自己最近并且有资源的进行加工
 都是优先选择距离最近的，但是选择的顺序不一样，有的是fifo（for循环），有的是按照剩余任务最多进行选择，等等。。。
@@ -55,3 +63,5 @@ class SDrules:
         left_jobs_array = np.array(left_jobs)
         arg_sort = np.argsort(left_jobs_array)
         return list(arg_sort)
+
+# --- End archived content ---

@@ -1,3 +1,8 @@
+"""
+# Candidate for reintegration – helper functions for action and availability
+# masks used in multi-agent rollouts and replay buffers.
+"""
+
 """Mask utilities for deterministic (machine,operator) index mapping.
 
 Provides helpers to build a consistent index map for (machine,operator)

@@ -377,10 +377,10 @@ utils/PDRs/shortestDistence.py -> 🔴 Obsolete
 utils/machine_registry.py -> 🟢 Candidate for reintegration
   defines:
     - func build_machine_registry
-utils/machine_registry.py -> � Archived (merged into `utils/workcenter.py`)
+utils/machine_registry.py -> 🗑️ deleted (archived backup retained)
   notes:
-    - Deprecated and archived. Functionality merged into `WorkCenters.from_config` in `utils/workcenter.py` (Phase 4A.1).
-    - Original implementation preserved under `archive/legacy/machine_registry.py`.
+    - Deprecated implementation was merged into `WorkCenters.from_config` in `utils/workcenter.py` (Phase 4A.1).
+    - The original implementation is preserved under `archive/legacy/machine_registry.py`.
 
 utils/operator.py -> 🟢 Candidate for reintegration
   defines:

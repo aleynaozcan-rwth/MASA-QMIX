@@ -1,3 +1,12 @@
+# Archived legacy file – superseded by integrated modules (Phase 4B cleanup).
+
+"""
+Archived copy of `utils/util.py` preserved for history. The active code
+base now centralizes similar helpers in the main utils modules; this file
+is kept for reference.
+"""
+
+# --- Begin archived content ---
 """
 Wrappers for some common utility helpers
 """
@@ -57,3 +66,5 @@ def count_path_on_road(path):
         return len(path)
     except Exception:
         return 0
+
+# --- End archived content ---
