@@ -15,8 +15,8 @@ Operators now:
 # Example operator list with qualified machines and group mapping
 # TODO(Phase3C.1): integrate with Operators.__init__() via merge_config(DEFAULT_OPERATORS, cfg)
 DEFAULT_OPERATORS = [
-    {"id": 1, "qualified_machines": ["M_0_0", "M_1_0"]},
-    {"id": 2, "qualified_machines": ["M_0_1", "M_1_0"]},
+    {"id": "O1", "qualified_machines": ["M1", "M4", "M5"]},
+    {"id": "O2", "qualified_machines": ["M2", "M3", "M5"]},
 ]
 
 class Operator:

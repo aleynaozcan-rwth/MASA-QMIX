@@ -26,13 +26,21 @@ from typing import Dict, List, Any, Tuple
 # Example structure: mapping of machine name -> metadata and work_center grouping
 # TODO(Phase3C.1): integrate with WorkCenters.from_config() via merge_config(DEFAULT_WORKCENTERS, cfg)
 DEFAULT_WORKCENTERS = {
+    # Synchronized to configs/env_config_enabled.yaml so default topology
+    # matches the canonical enabled config (3 work centers, 5 machines).
     "machines": {
-        "M_0_0": {"workcenter": 0, "capabilities": [0, 1, 2], "speed_factor": 1.0},
-        "M_0_1": {"workcenter": 0, "capabilities": [0, 1], "speed_factor": 1.0},
-        "M_1_0": {"workcenter": 1, "capabilities": [2, 3], "speed_factor": 1.0},
+        "M1": {"wc": "WC1", "capable_ops": ["Op1", "Op2", "Op3", "Op5", "Op9"], "speed_factor": 1.0},
+        "M2": {"wc": "WC1", "capable_ops": ["Op4", "Op5", "Op8"], "speed_factor": 1.0},
+        "M3": {"wc": "WC2", "capable_ops": ["Op1", "Op2", "Op4", "Op6", "Op9"], "speed_factor": 1.0},
+        "M4": {"wc": "WC2", "capable_ops": ["Op1", "Op3", "Op7", "Op8"], "speed_factor": 1.0},
+        "M5": {"wc": "WC3", "capable_ops": ["Op1", "Op3", "Op4", "Op6", "Op8", "Op9"], "speed_factor": 1.0},
     },
-    "work_centers": {"WC0": {"id": 0}, "WC1": {"id": 1}},
-    "operators": [{"id": 0, "qualified_machines": ["M_0_0", "M_1_0"]}],
+    "work_centers": {"WC1": {"id": 0}, "WC2": {"id": 1}, "WC3": {"id": 2}},
+    # Operators are defined separately in utils.operator; keep a mirror here
+    "operators": [
+        {"id": "O1", "qualified_machines": ["M1", "M4", "M5"]},
+        {"id": "O2", "qualified_machines": ["M2", "M3", "M5"]},
+    ],
 }
 class WorkCenter:
     def __init__(self, wc_id: int, machine_names: List[str]):

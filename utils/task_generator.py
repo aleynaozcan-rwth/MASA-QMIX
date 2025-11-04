@@ -17,7 +17,7 @@ import simpy
 # TODO(Phase3C.1): integrate with TaskGenerator via merge_config(DEFAULT_TASKGEN_PARAMS, cfg)
 DEFAULT_TASKGEN_PARAMS = {
     "task_generator": {
-        "arrival_lambda": 0.1,
+        "arrival_lambda": 0.05,
         "seq_length": {"min": 1, "max": 5}
     }
 }
@@ -25,8 +25,16 @@ DEFAULT_TASKGEN_PARAMS = {
 # Default processing time means mirror (Phase 3C.0)
 # Mirrors YAML key: 'processing_time_means'
 DEFAULT_PROCESSING_TIME_MEANS = {
-    "Op1": {"M_0_0": 1.0, "M_0_1": 1.2},
-    "Op2": {"M_1_0": 2.0}
+    # synchronized with configs/env_config_enabled.yaml
+    "Op1": {"M1": 1.225, "M3": 1.575, "M4": 1.4, "M5": 1.05},
+    "Op2": {"M1": 1.05, "M3": 1.75},
+    "Op3": {"M1": 1.575, "M4": 1.75, "M5": 1.925},
+    "Op4": {"M2": 1.575, "M3": 1.68, "M5": 2.1},
+    "Op5": {"M2": 1.75, "M1": 2.275},
+    "Op6": {"M3": 2.1, "M5": 2.8},
+    "Op7": {"M4": 1.82},
+    "Op8": {"M5": 1.575, "M4": 2.625, "M2": 2.975},
+    "Op9": {"M5": 1.925, "M1": 2.975, "M3": 3.15},
 }
 
 

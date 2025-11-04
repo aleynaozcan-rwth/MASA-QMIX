@@ -31,10 +31,30 @@ import json
 # Mirrors YAML keys: 'reward_params', 'training_defaults', 'task_generator'
 # These are inert defaults for inspection and future merge_config() integration.
 # TODO(Phase3C.1): integrate with MASAEnv via merge_config(DEFAULT_ENV_PARAMS, cfg)
+# Synchronized to configs/env_config_enabled.yaml so the environment behaves
+# identically even when YAML loading is disabled.
 DEFAULT_ENV_PARAMS = {
-    "reward_params": {"alpha": 1.0, "beta": 0.5, "gamma": 0.2, "delta": 0.1, "c_time": 0.0},
-    "training_defaults": {"obs_shape": 11, "state_shape": 64},
-    "task_generator": {"arrival_lambda": 0.0, "seq_length": {"min": 1, "max": 5}},
+    "reward_params": {
+        "alpha": 0.01,
+        "beta": 0.005,
+        "gamma": 0.02,
+        "delta": 1.0,
+        "c_time": 0.001,
+    },
+    "training_defaults": {
+        # preserve observation/state shapes while adding training hyperparams
+        "obs_shape": 11,
+        "state_shape": 64,
+        "rnn_hidden": 64,
+        "lr": 1e-3,
+        "discount": 0.99,
+        "batch_size": 32,
+        "target_update": 200,
+        "epsilon_start": 1.0,
+        "epsilon_end": 0.05,
+        "epsilon_decay_steps": 100000,
+    },
+    "task_generator": {"arrival_lambda": 0.05, "seq_length": {"min": 1, "max": 5}},
 }
 
 
