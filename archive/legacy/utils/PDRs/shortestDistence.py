@@ -2,7 +2,7 @@
 
 """
 Archived copy of `utils/PDRs/shortestDistence.py` preserved for history.
-See `archive/legacy/util.py` for the helper `count_path_on_road` used here.
+See `archive/legacy/utils/util.py` for the helper `count_path_on_road` used here.
 """
 
 # --- Begin archived content ---

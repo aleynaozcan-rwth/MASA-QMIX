@@ -28,7 +28,7 @@ MARL/common/arguments.py -> imports:
     - func get_g2anet_args  (used elsewhere: yes)
     - class ReadOnlyArgs (used elsewhere: no)
 
-MARL/common/mask_utils.py -> imports:
+MARL/common/mask_utils.py -> imports: (clarified candidate)
   defines:
     - func build_index_map  (used elsewhere: yes)
     - func build_mask_for_job  (used elsewhere: yes)
@@ -292,7 +292,7 @@ utils/workcenter.py -> imports:
 === Inactive / Unused Files ===
 MARL/__init__.py -> 🔴 Obsolete
 
-MARL/common/analyse.py -> 🟢 Candidate for reintegration
+MARL/common/analyse.py -> 🟢 clarified candidate
   defines:
     - func plt_win_rate_mean
 
@@ -370,7 +370,9 @@ tests/test_taskgenerator_start_on_reset.py -> 🟢 Candidate for reintegration
   defines:
     - func test_taskgenerator_start_called_on_reset
 
-utils/PDRs/shortestDistence.py -> 🔴 Obsolete
+utils/PDRs/shortestDistence.py -> 🗃️ archived (preserved at `archive/legacy/utils/PDRs/shortestDistence.py`)
+  notes:
+    - Archived to `archive/legacy/utils/PDRs/shortestDistence.py` (Phase 4B cleanup)
   defines:
     - class SDrules
 
@@ -387,7 +389,9 @@ utils/operator.py -> 🟢 Candidate for reintegration
     - class Operator
     - class Operators
 
-utils/util.py -> 🔴 Obsolete
+utils/util.py -> 🗃️ archived (preserved at `archive/legacy/utils/util.py`)
+  notes:
+    - Archived to `archive/legacy/utils/util.py` (Phase 4B cleanup)
   defines:
     - func left_planes
     - func min_but_zero
