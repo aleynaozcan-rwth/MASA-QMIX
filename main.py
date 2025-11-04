@@ -28,16 +28,18 @@ def marl_agent_wrapper(args):
     """Standard MARL training loop (supports QMIX, COMA, etc.)."""
 
     # --- Environment (MASAEnv) ---
-    env = MASAEnv()
-    env.reset()
-    env_info = env.get_env_info()
-
-    # --- Shape bilgilerini environment'tan al ---
-    args.n_actions = env_info["n_actions"]
-    args.n_agents = env_info["n_agents"]
-    args.state_shape = env_info["state_shape"]
-    args.obs_shape = env_info["obs_shape"]
-    args.episode_limit = env_info["episode_limit"]
+    # Inject the centralized args namespace — environment will not read CLI
+    # itself and must be driven by the orchestrator.
+    # If the orchestrator provided config_path/auto_load_config flags on args
+    # pass them into MASAEnv so it can load/merge runtime configuration.
+    env = MASAEnv(
+        args=args,
+        config_path=getattr(args, 'config_path', None),
+        auto_load_config=getattr(args, 'auto_load_config', False),
+    )
+    # Runner will query the environment and initialize any runtime-derived
+    # shapes (n_actions, n_agents, obs/state dims, episode_limit). Keep
+    # `main.py` strictly as orchestration so it does not set or mutate args.
 
     # --- Algorithm-specific args (env'den sonra çağrılmalı!) ---
     if args.alg.find("coma") > -1:
@@ -54,9 +56,8 @@ def marl_agent_wrapper(args):
     if args.alg.find("g2anet") > -1:
         args = get_g2anet_args(args)
 
-    # ✅ get_mixer_args env boyutlarını ezdiği için tekrar sabitle
-    args.obs_shape = env_info["obs_shape"]
-    args.state_shape = env_info["state_shape"]
+    # Note: Runner will initialize environment-derived shapes (n_agents,
+    # n_actions, obs/state dims, episode_limit). Do not mutate `args` here.
 
     # --- Summary printout ---
     print("\n=== Training Setup Summary (Args) ===")
@@ -84,9 +85,13 @@ def marl_agent_wrapper(args):
 # === Random Baseline ========================================
 # ============================================================
 
-def random_agent_wrapper():
+def random_agent_wrapper(args):
     episodes = 10
-    env = MASAEnv()
+    env = MASAEnv(
+        args=args,
+        config_path=getattr(args, 'config_path', None),
+        auto_load_config=getattr(args, 'auto_load_config', False),
+    )
     EATs = []
     schedule_processes = []
 
@@ -127,25 +132,13 @@ def random_agent_wrapper():
 # ============================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["marl", "random"], default="marl",
-                        help="Select which mode to run: marl / random.")
-    parser.add_argument("--alg", type=str, default="qmix",
-                        help="Algorithm type (qmix, coma, reinforce, etc.)")
-    parser.add_argument("--seed", type=int, default=123,
-                        help="Random seed for reproducibility.")
-    # allow additional training flags to be passed through (they will be parsed by get_common_args)
-    args_main, unknown = parser.parse_known_args()
-
-    # Integrate with common args
+    # Centralized argument parsing
     args = get_common_args()
-    args.alg = args_main.alg
-    args.seed = args_main.seed
 
     # Select execution mode
-    if args_main.mode == "marl":
+    if getattr(args, 'mode', 'marl') == "marl":
         marl_agent_wrapper(args)
-    elif args_main.mode == "random":
-        random_agent_wrapper()
+    elif getattr(args, 'mode', 'marl') == "random":
+        random_agent_wrapper(args)
     else:
-        raise ValueError(f"Unknown mode: {args_main.mode}")
+        raise ValueError(f"Unknown mode: {getattr(args, 'mode', None)}")

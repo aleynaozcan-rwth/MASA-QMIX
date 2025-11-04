@@ -25,26 +25,27 @@ def main():
     total_eps = int(os.environ.get('EXP_EPISODE_LIMIT', 100))
     lam = os.environ.get('EXP_LAMBDA', None)
 
-    args.seed = seed
-    # run each episode as an epoch (simple mapping for smoke tests)
-    args.n_epoch = max(1, total_eps)
-    args.n_episodes = 1
-    args.evaluate_cycle = max(10, args.evaluate_cycle if hasattr(args, 'evaluate_cycle') else 10)
-    args.evaluate_epoch = 1
-    args.episode_limit = int(os.environ.get('EPISODE_LIMIT', getattr(args, 'episode_limit', 200)))
+    # Note: this script should not redefine centralized hyperparameters.
+    # Any runtime overrides should be provided via CLI flags or by modifying
+    # `MARL/common/arguments.py`. We read environment variables here but do
+    # not assign them back into the global `args` namespace to avoid ad-hoc
+    # default duplication. Consumers (Runner) will read `args` as-is.
+    if seed != 0:
+        # if a seed was explicitly provided via environment, prefer using it
+        # but do not reassign into args; log a reminder for reproducibility.
+        print(f"[run_train_qmix] NOTE: EXP_SEED={seed} provided; pass --seed {seed} to override centrally")
+    if total_eps != 100:
+        print(f"[run_train_qmix] NOTE: EXP_EPISODE_LIMIT={total_eps} provided; pass --n_epoch {total_eps} to override centrally")
 
-    # conservative but visible defaults for smoke tests
-    args.learn = True
-    args.buffer_size = int(getattr(args, 'buffer_size', 10000))
-    args.batch_size = int(getattr(args, 'batch_size', 32))
-    args.train_steps = int(getattr(args, 'train_steps', 10))
-    args.save_cycle = int(getattr(args, 'save_cycle', 500))
-    args.cuda = False
-
-    # Instantiate environment. If EXP_LAMBDA is provided, start the dynamic
-    # arrival loop on the created env rather than passing an unsupported
-    # constructor argument (MASAEnv.__init__ doesn't accept arrival overrides).
-    env = MASAEnv()
+    # Instantiate environment. Inject centralized args so the environment
+    # does not perform any ad-hoc parsing or fallback logic. If the
+    # orchestrator provided config flags, forward them so MASAEnv can
+    # auto-load and merge the YAML into its defaults.
+    env = MASAEnv(
+        args=args,
+        config_path=getattr(args, 'config_path', None),
+        auto_load_config=getattr(args, 'auto_load_config', False),
+    )
     if lam is not None:
         try:
             lamf = float(lam)
