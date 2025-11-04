@@ -420,8 +420,19 @@ class MASAEnv:
             if tg_conf and float(tg_conf.get('arrival_lambda', 0)) > 0:
                 try:
                     from utils.task_generator import TaskGenerator  # type: ignore
+                    # Pass the MASAEnv instance (self) so TaskGenerator can call
+                    # env.add_job on the environment surface. TaskGenerator.start
+                    # will use the internal simpy.Environment for scheduling.
                     self._task_generator = TaskGenerator(config_path=self.config_path)
-                    # Start the arrival process with the provided lambda
+                    # Allow the TaskGenerator to reference the MASAEnv instance
+                    # for dynamic job injection without changing the start() call
+                    # signature expected by tests (which expect start(env, lam)
+                    # to be invoked with the SimPy environment).
+                    try:
+                        setattr(self._task_generator, '_owner_env', self)
+                    except Exception:
+                        pass
+                    # Start the arrival process on the underlying simpy.Environment
                     self._task_generator.start(self.env, float(tg_conf.get('arrival_lambda')))
                 except Exception as e:
                     logging.getLogger(__name__).exception("TaskGenerator start failed", exc_info=True)

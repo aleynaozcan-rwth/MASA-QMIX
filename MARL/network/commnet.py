@@ -7,11 +7,13 @@ import torch.nn.functional as f
 class CommNet(nn.Module):
     def __init__(self, input_shape, args):
         super(CommNet, self).__init__()
-        self.encoding = nn.Linear(input_shape, args.rnn_hidden_dim)  # 对所有agent的obs解码
-        self.f_obs = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)  # 每个agent根据自己的obs编码得到hidden_state，用于记忆之前的obs
-        self.f_comm = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)  # 用于通信
-        self.decoding = nn.Linear(args.rnn_hidden_dim, args.n_actions)
+        # store args first so all subsequent attribute initializers use the
+        # canonical self.args namespace (Option-B convention)
         self.args = args
+        self.encoding = nn.Linear(input_shape, self.args.rnn_hidden_dim)  # 对所有agent的obs解码
+        self.f_obs = nn.GRUCell(self.args.rnn_hidden_dim, self.args.rnn_hidden_dim)  # 每个agent根据自己的obs编码得到hidden_state，用于记忆之前的obs
+        self.f_comm = nn.GRUCell(self.args.rnn_hidden_dim, self.args.rnn_hidden_dim)  # 用于通信
+        self.decoding = nn.Linear(self.args.rnn_hidden_dim, self.args.n_actions)
         self.input_shape = input_shape
 
     def forward(self, obs, hidden_state):

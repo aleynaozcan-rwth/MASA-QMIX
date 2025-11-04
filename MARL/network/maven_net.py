@@ -7,8 +7,10 @@ import torch.nn.functional as f
 class HierarchicalPolicy(nn.Module):
     def __init__(self, args):
         super(HierarchicalPolicy, self).__init__()
-        self.fc_1 = nn.Linear(args.state_shape, 128)
-        self.fc_2 = nn.Linear(128, args.noise_dim)
+        # canonicalize args for consistency
+        self.args = args
+        self.fc_1 = nn.Linear(self.args.state_shape, 128)
+        self.fc_2 = nn.Linear(128, self.args.noise_dim)
 
     def forward(self, state):
         x = f.relu(self.fc_1(state))
@@ -22,10 +24,10 @@ class BootstrappedRNN(nn.Module):
         super(BootstrappedRNN, self).__init__()
         self.args = args
 
-        self.fc = nn.Linear(input_shape, args.rnn_hidden_dim)
-        self.rnn = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)
-        self.hyper_w = nn.Linear(args.noise_dim + args.n_agents, args.rnn_hidden_dim * args.n_actions)
-        self.hyper_b = nn.Linear(args.noise_dim + args.n_agents, args.n_actions)
+        self.fc = nn.Linear(input_shape, self.args.rnn_hidden_dim)
+        self.rnn = nn.GRUCell(self.args.rnn_hidden_dim, self.args.rnn_hidden_dim)
+        self.hyper_w = nn.Linear(self.args.noise_dim + self.args.n_agents, self.args.rnn_hidden_dim * self.args.n_actions)
+        self.hyper_b = nn.Linear(self.args.noise_dim + self.args.n_agents, self.args.n_actions)
 
     def forward(self, obs, hidden_state, z):
         agent_id = obs[:, -self.args.n_agents:]
@@ -52,10 +54,10 @@ class VarDistribution(nn.Module):
         super(VarDistribution, self).__init__()
         self.args = args
 
-        self.GRU = nn.GRU(args.n_agents * args.n_actions + args.state_shape, 64)
+        self.GRU = nn.GRU(self.args.n_agents * self.args.n_actions + self.args.state_shape, 64)
 
         self.fc_1 = nn.Linear(64, 32)
-        self.fc_2 = nn.Linear(32, args.noise_dim)
+        self.fc_2 = nn.Linear(32, self.args.noise_dim)
 
     def forward(self, q_value, avail_actions, state, episode_length):  # q_value.
         """

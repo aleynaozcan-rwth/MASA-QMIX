@@ -8,27 +8,28 @@ import numpy as np
 class G2ANet(nn.Module):
     def __init__(self, input_shape, args):
         super(G2ANet, self).__init__()
+        # store args early and use self.args consistently (Option-B)
+        self.args = args
 
         # Encoding
-        self.encoding = nn.Linear(input_shape, args.rnn_hidden_dim)  # 对所有agent的obs解码
-        self.h = nn.GRUCell(args.rnn_hidden_dim, args.rnn_hidden_dim)  # 每个agent根据自己的obs编码得到hidden_state，用于记忆之前的obs
+        self.encoding = nn.Linear(input_shape, self.args.rnn_hidden_dim)  # 对所有agent的obs解码
+        self.h = nn.GRUCell(self.args.rnn_hidden_dim, self.args.rnn_hidden_dim)  # 每个agent根据自己的obs编码得到hidden_state，用于记忆之前的obs
 
         # Hard
         # GRU输入[[h_i,h_1],[h_i,h_2],...[h_i,h_n]]与[0,...,0]，输出[[h_1],[h_2],...,[h_n]]与[h_n]， h_j表示了agent j与agent i的关系
         # 输入的iputs维度为(n_agents - 1, batch_size * n_agents, rnn_hidden_dim * 2)，
         # 即对于batch_size条数据，输入每个agent与其他n_agents - 1个agents的hidden_state的连接
-        self.hard_bi_GRU = nn.GRU(args.rnn_hidden_dim * 2, args.rnn_hidden_dim, bidirectional=True)
+        self.hard_bi_GRU = nn.GRU(self.args.rnn_hidden_dim * 2, self.args.rnn_hidden_dim, bidirectional=True)
         # 对h_j进行分析，得到agent j对于agent i的权重，输出两维，经过gumble_softmax后取其中一维即可，如果是0则不考虑agent j，如果是1则考虑
-        self.hard_encoding = nn.Linear(args.rnn_hidden_dim * 2, 2)  # 乘2因为是双向GRU，hidden_state维度为2 * hidden_dim
+        self.hard_encoding = nn.Linear(self.args.rnn_hidden_dim * 2, 2)  # 乘2因为是双向GRU，hidden_state维度为2 * hidden_dim
 
         # Soft
-        self.q = nn.Linear(args.rnn_hidden_dim, args.attention_dim, bias=False)
-        self.k = nn.Linear(args.rnn_hidden_dim, args.attention_dim, bias=False)
-        self.v = nn.Linear(args.rnn_hidden_dim, args.attention_dim)
+        self.q = nn.Linear(self.args.rnn_hidden_dim, self.args.attention_dim, bias=False)
+        self.k = nn.Linear(self.args.rnn_hidden_dim, self.args.attention_dim, bias=False)
+        self.v = nn.Linear(self.args.rnn_hidden_dim, self.args.attention_dim)
 
         # Decoding 输入自己的h_i与x_i，输出自己动作的概率分布
-        self.decoding = nn.Linear(args.rnn_hidden_dim + args.attention_dim, args.n_actions)
-        self.args = args
+        self.decoding = nn.Linear(self.args.rnn_hidden_dim + self.args.attention_dim, self.args.n_actions)
         self.input_shape = input_shape
 
     def forward(self, obs, hidden_state):

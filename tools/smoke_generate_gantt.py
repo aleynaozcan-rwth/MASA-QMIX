@@ -113,21 +113,27 @@ if __name__ == '__main__':
     png_path = os.path.join(OUT_DIR, 'smoke_gantt.png')
     csv_path = os.path.join(OUT_DIR, 'smoke_gantt.csv')
 
-    # save CSV (start,end,op_idx,wc,job_id,operator_grp,arrival,duration)
-    with open(csv_path, 'w') as cf:
-        cf.write('start,end,op_idx,wc,job_id,operator_grp,arrival,duration\n')
-        for r in gantt:
-            if not isinstance(r, (list, tuple)):
-                continue
-            if len(r) >= 8:
-                vals = [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]]
-            elif len(r) == 6:
-                vals = [r[0], r[1], r[2], r[3], r[4], r[5], '', '']
-            elif len(r) == 5:
-                vals = [r[0], r[1], r[2], r[3], r[4], '', '', '']
-            else:
-                continue
-            cf.write(','.join([str(x) for x in vals]) + '\n')
+    # save CSV using utils.gantt helper (consistent formatting)
+    try:
+        from utils.gantt import write_gantt_csv, format_gantt_records
+        write_gantt_csv(csv_path, gantt)
+        print('Gantt records sample:', format_gantt_records(gantt[:10]))
+    except Exception:
+        # fallback to legacy behavior if helpers unavailable
+        with open(csv_path, 'w') as cf:
+            cf.write('start,end,op_idx,wc,job_id,operator_grp,arrival,duration\n')
+            for r in gantt:
+                if not isinstance(r, (list, tuple)):
+                    continue
+                if len(r) >= 8:
+                    vals = [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]]
+                elif len(r) == 6:
+                    vals = [r[0], r[1], r[2], r[3], r[4], r[5], '', '']
+                elif len(r) == 5:
+                    vals = [r[0], r[1], r[2], r[3], r[4], '', '', '']
+                else:
+                    continue
+                cf.write(','.join([str(x) for x in vals]) + '\n')
 
     plot_gantt_local(gantt, filename=png_path)
     print('Saved:', png_path, csv_path)

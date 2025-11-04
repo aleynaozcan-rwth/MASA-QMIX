@@ -7,18 +7,19 @@ from MARL.network.g2anet import G2ANet
 
 class CentralV:
     def __init__(self, args):
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
+        # canonical args for this instance
+        self.args = args
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
         actor_input_shape = self.obs_shape  # actor网络输入的维度，和vdn、qmix的rnn输入维度一样，使用同一个网络结构
         critic_input_shape = self.state_shape  # critic网络输入的维度
         # 根据参数决定RNN的输入维度
-        if args.last_action:
+        if self.args.last_action:
             actor_input_shape += self.n_actions
-        if args.reuse_network:
+        if self.args.reuse_network:
             actor_input_shape += self.n_agents
-        self.args = args
 
         # 神经网络
         # 每个agent选动作的网络,输出当前agent所有动作对应的概率，用该概率选动作的时候还需要用softmax再运算一次。
@@ -42,7 +43,7 @@ class CentralV:
             self.eval_critic.cuda()
             self.target_critic.cuda()
 
-        self.model_dir = args.model_dir + '/' + args.alg + '/' + args.map
+        self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
         # 如果存在模型则加载模型
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_params.pkl'):
@@ -61,10 +62,9 @@ class CentralV:
         self.rnn_parameters = list(self.eval_rnn.parameters())
         self.critic_parameters = list(self.eval_critic.parameters())
 
-        if args.optimizer == "RMS":
-            self.critic_optimizer = torch.optim.RMSprop(self.critic_parameters, lr=args.lr_critic)
-            self.rnn_optimizer = torch.optim.RMSprop(self.rnn_parameters, lr=args.lr_actor)
-        self.args = args
+        if self.args.optimizer == "RMS":
+            self.critic_optimizer = torch.optim.RMSprop(self.critic_parameters, lr=self.args.lr_critic)
+            self.rnn_optimizer = torch.optim.RMSprop(self.rnn_parameters, lr=self.args.lr_actor)
 
         # 执行过程中，要为每个agent都维护一个eval_hidden
         # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden

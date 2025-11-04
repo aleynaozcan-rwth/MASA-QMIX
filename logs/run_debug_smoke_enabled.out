@@ -1,0 +1,479 @@
+Exception caught
+Traceback (most recent call last):
+  File "/home/aleynaozcan/projects/MASA-QMIX/MARL/runner.py", line 23, in <module>
+    from MARL.common.rollout import CommRolloutWorker  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ImportError: cannot import name 'CommRolloutWorker' from 'MARL.common.rollout' (/home/aleynaozcan/projects/MASA-QMIX/MARL/common/rollout.py)
+
+=== Training Setup Summary (Args) ===
+Algorithm: qmix
+Random seed: 123
+Replay buffer size: 3000
+Batch size: 32
+Total epochs: 5
+Episodes per epoch: 4
+Evaluation every 2 epochs
+Observation dim: 11
+State dim: 64
+====================================
+[Runner] Env shapes initialized from env.get_env_info(): n_agents=10, n_actions=18, obs_shape=11, state_shape=64, episode_limit=10
+[Runner] Auto-set run_args.n_agents = 10 from env.get_env_info()['n_agents']
+[QMIX Init] RNN input shape = 39 (obs=11, last_action=True, reuse_network=True)
+[QMIX] Checkpoints dir: /home/aleynaozcan/projects/MASA-QMIX/MARL/model/qmix/masa_schedule
+[QMIX] Policy initialized and moved to device: cpu
+[Agents] Initialized (QMIX)
+[RolloutWorker] init | episode_limit=10 | device=cpu
+[Runner 8A.6.6] Initialized | alg=qmix | buffer=3000 | batch=32
+[Runner] === Training loop started ===
+Run 1, epoch 0, avg rewards 0.00[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=1
+[JobAgent 8] selected action=1
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=1
+[JobAgent 8] selected action=1
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=1
+[JobAgent 8] selected action=1
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=1
+[JobAgent 8] selected action=1
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+
+[DEBUG] Training active (buffer=49) – gradient updates...
+[Agents] Step 0 | Loss=2.1972 | TD-Error=1.0202
+[Agents] Step 1 | Loss=2.0547 | TD-Error=0.9768
+[Agents] Step 2 | Loss=1.9835 | TD-Error=0.9265
+[Agents] Step 3 | Loss=1.9261 | TD-Error=0.8834
+[Agents] Step 4 | Loss=1.8766 | TD-Error=0.8416
+[Agents] Step 5 | Loss=1.8362 | TD-Error=0.8062
+[Agents] Step 6 | Loss=1.8024 | TD-Error=0.7769
+[Agents] Step 7 | Loss=1.7735 | TD-Error=0.7535
+[Agents] Step 8 | Loss=1.7482 | TD-Error=0.7344
+[QMIX] ✅ Checkpoint saved @ step 10
+   RNN  → /home/aleynaozcan/projects/MASA-QMIX/MARL/model/qmix/masa_schedule/rnn_net_params.pkl
+   MIX  → /home/aleynaozcan/projects/MASA-QMIX/MARL/model/qmix/masa_schedule/qmix_net_params.pkl
+[Agents] Step 9 | Loss=1.7253 | TD-Error=0.7202
+Run 1, epoch 1, avg rewards -9.15[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=1
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+
+[DEBUG] Training active (buffer=100) – gradient updates...
+[Agents] Step 10 | Loss=1.8834 | TD-Error=0.7410
+[Agents] Step 11 | Loss=1.8594 | TD-Error=0.7273
+[Agents] Step 12 | Loss=1.8375 | TD-Error=0.7194
+[Agents] Step 13 | Loss=1.8171 | TD-Error=0.7141
+[Agents] Step 14 | Loss=1.7979 | TD-Error=0.7110
+[Agents] Step 15 | Loss=1.7798 | TD-Error=0.7087
+[Agents] Step 16 | Loss=1.7625 | TD-Error=0.7067
+[Agents] Step 17 | Loss=1.7460 | TD-Error=0.7047
+[Agents] Step 18 | Loss=1.7300 | TD-Error=0.7027
+[Agents] Step 19 | Loss=1.7145 | TD-Error=0.7008
+[TRAIN] step=20, loss=1.7145, td=0.7008, buffer=100
+Run 1, epoch 2, avg rewards -10.84[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+
+[Eval] Epoch 2 | Reward=-9.08
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+
+[DEBUG] Training active (buffer=211) – gradient updates...
+[Agents] Step 20 | Loss=1.6711 | TD-Error=0.6948
+[Agents] Step 21 | Loss=2.7530 | TD-Error=0.8282
+[Agents] Step 22 | Loss=2.7294 | TD-Error=0.8111
+[Agents] Step 23 | Loss=2.7082 | TD-Error=0.8107
+[Agents] Step 24 | Loss=2.6880 | TD-Error=0.8084
+[Agents] Step 25 | Loss=2.6686 | TD-Error=0.8054
+[Agents] Step 26 | Loss=2.6499 | TD-Error=0.8025
+[Agents] Step 27 | Loss=2.6318 | TD-Error=0.7998
+[Agents] Step 28 | Loss=2.6142 | TD-Error=0.7975
+[Agents] Step 29 | Loss=2.5972 | TD-Error=0.7950
+Run 1, epoch 3, avg rewards -10.19[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+
+[DEBUG] Training active (buffer=259) – gradient updates...
+[Agents] Step 30 | Loss=2.5117 | TD-Error=0.7847
+[Agents] Step 31 | Loss=2.4964 | TD-Error=0.7831
+[Agents] Step 32 | Loss=2.4814 | TD-Error=0.7815
+[Agents] Step 33 | Loss=2.4667 | TD-Error=0.7800
+[Agents] Step 34 | Loss=2.4523 | TD-Error=0.7786
+[Agents] Step 35 | Loss=2.4382 | TD-Error=0.7773
+[Agents] Step 36 | Loss=2.4243 | TD-Error=0.7760
+[Agents] Step 37 | Loss=2.4107 | TD-Error=0.7748
+[Agents] Step 38 | Loss=2.3974 | TD-Error=0.7735
+[Agents] Step 39 | Loss=2.3844 | TD-Error=0.7723
+[TRAIN] step=40, loss=2.3844, td=0.7723, buffer=259
+Run 1, epoch 4, avg rewards -8.39[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 3] selected action=0
+
+[Eval] Epoch 4 | Reward=-12.33
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 2] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+[JobAgent 0] selected action=2
+[JobAgent 1] selected action=2
+[JobAgent 2] selected action=2
+[JobAgent 3] selected action=2
+[JobAgent 4] selected action=2
+[JobAgent 5] selected action=2
+[JobAgent 6] selected action=2
+[JobAgent 7] selected action=2
+[JobAgent 8] selected action=2
+[JobAgent 9] selected action=2
+[JobAgent 0] selected action=0
+[JobAgent 1] selected action=0
+
+[DEBUG] Training active (buffer=375) – gradient updates...
+[Agents] Step 40 | Loss=2.5086 | TD-Error=0.8979
+[Agents] Step 41 | Loss=3.2423 | TD-Error=1.0133
+[Agents] Step 42 | Loss=3.2229 | TD-Error=0.9884
+[Agents] Step 43 | Loss=3.2054 | TD-Error=0.9852
+[Agents] Step 44 | Loss=3.1882 | TD-Error=0.9830
+[Agents] Step 45 | Loss=3.1715 | TD-Error=0.9808
+[Agents] Step 46 | Loss=3.1551 | TD-Error=0.9788
+[Agents] Step 47 | Loss=3.1391 | TD-Error=0.9769
+[Agents] Step 48 | Loss=3.1233 | TD-Error=0.9752
+[Agents] Step 49 | Loss=3.1077 | TD-Error=0.9736
+[Runner] Reward/time/wait logs saved for analysis.
+
+✅ [Runner] Training completed successfully.
+[Runner] Scheduling trace and job timelines written to ./my_data_and_graph/historydata
+[Runner] run_summary.json written to ./my_data_and_graph/historydata/run_summary.json
+system fully functional
+[Runner] Learning stability plot saved.
+[Runner] Loss/TD/Reward PNGs saved.

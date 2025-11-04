@@ -9,6 +9,16 @@ Operators now:
  - Fully aligned with 8A terminology (WorkCenter / JobAgent)
 """
 
+
+# Default configuration mirror for Operators (Phase 3C.0)
+# Mirrors YAML keys: 'operators'
+# Example operator list with qualified machines and group mapping
+# TODO(Phase3C.1): integrate with Operators.__init__() via merge_config(DEFAULT_OPERATORS, cfg)
+DEFAULT_OPERATORS = [
+    {"id": 1, "qualified_machines": ["M_0_0", "M_1_0"]},
+    {"id": 2, "qualified_machines": ["M_0_1", "M_1_0"]},
+]
+
 class Operator:
     """Single operator who can work on specific machine names."""
 
@@ -101,6 +111,29 @@ class Operators:
     """Manages all Operator objects."""
 
     def __init__(self, workcenters_ref):
+        # Attempt to merge in-module DEFAULT_OPERATORS with any provided
+        # operator configuration present on the WorkCenters object or its
+        # attached config. This fills missing fields while remaining
+        # non-destructive to inputs.
+        try:
+            from utils.config_loader import merge_config
+            provided = None
+            try:
+                provided = getattr(workcenters_ref, 'operators', None)
+            except Exception:
+                provided = None
+            if provided is None:
+                try:
+                    cfg = getattr(workcenters_ref, 'config', None) or {}
+                    provided = cfg.get('operators') if isinstance(cfg, dict) else None
+                except Exception:
+                    provided = None
+            # merge expects dicts; wrap list into {'operators': [...]}
+            merged = merge_config({"operators": DEFAULT_OPERATORS}, {"operators": provided} if provided is not None else None)
+            merged_operators = merged.get('operators', DEFAULT_OPERATORS)
+        except Exception:
+            merged_operators = DEFAULT_OPERATORS
+
         # Default operator qualification mapping (user-specified topology):
         # Operator 1 can work on machine numbers [1,4,5]
         # Operator 2 can work on machine numbers [2,3,5]
@@ -162,10 +195,33 @@ class Operators:
         op1_machines = [m1, m4, m5]
         op2_machines = [m2, m3, m5]
 
-        self.operators_object_list = [
-            Operator(1, op1_machines, workcenters_ref),
-            Operator(2, op2_machines, workcenters_ref),
-        ]
+        # If an operators config was provided, prefer it to construct
+        # Operator objects; otherwise, fall back to default mapping.
+        try:
+            if isinstance(merged_operators, (list, tuple)) and len(merged_operators) > 0:
+                objs = []
+                for entry in merged_operators:
+                    try:
+                        oid = entry.get('id', None) if isinstance(entry, dict) else None
+                        q = entry.get('qualified_machines', []) if isinstance(entry, dict) else []
+                        if oid is None:
+                            # try to infer id from position
+                            oid = len(objs) + 1
+                        objs.append(Operator(oid, q, workcenters_ref))
+                    except Exception:
+                        continue
+                self.operators_object_list = objs
+            else:
+                self.operators_object_list = [
+                    Operator(1, op1_machines, workcenters_ref),
+                    Operator(2, op2_machines, workcenters_ref),
+                ]
+        except Exception:
+            # fallback to original explicit default
+            self.operators_object_list = [
+                Operator(1, op1_machines, workcenters_ref),
+                Operator(2, op2_machines, workcenters_ref),
+            ]
 
         # Compute and attach qualified_workcenters for convenience: map each
         # operator's qualified machine names to their WorkCenter indices using

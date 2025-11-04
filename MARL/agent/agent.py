@@ -12,34 +12,34 @@ from MARL.policy.maven import MAVEN
 
 class Agents:
     def __init__(self, args):
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
         self.args = args
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
 
         # --- Policy selection ---
-        alg = args.alg.lower()
+        alg = self.args.alg.lower()
         if alg == "vdn":
-            self.policy = VDN(args)
+            self.policy = VDN(self.args)
         elif alg == "qmix":
-            self.policy = QMIX(args)
+            self.policy = QMIX(self.args)
         elif alg == "coma":
-            self.policy = COMA(args)
+            self.policy = COMA(self.args)
         elif alg == "qtran_alt":
-            self.policy = QtranAlt(args)
+            self.policy = QtranAlt(self.args)
         elif alg == "qtran_base":
-            self.policy = QtranBase(args)
+            self.policy = QtranBase(self.args)
         elif alg == "maven":
-            self.policy = MAVEN(args)
+            self.policy = MAVEN(self.args)
         elif alg == "central_v":
-            self.policy = CentralV(args)
+            self.policy = CentralV(self.args)
         elif alg == "reinforce":
-            self.policy = Reinforce(args)
+            self.policy = Reinforce(self.args)
         else:
-            raise Exception(f"Unknown algorithm: {args.alg}")
+            raise Exception(f"Unknown algorithm: {self.args.alg}")
 
-        print(f"[Agents] Initialized ({args.alg.upper()})")
+        print(f"[Agents] Initialized ({self.args.alg.upper()})")
 
     # ============================================================
     # Step 8A.7 – Replay-aware learning (QMIX / QTRAN / MAVEN)
@@ -151,19 +151,19 @@ class Agents:
 # ============================================================
 class CommAgents:
     def __init__(self, args):
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
         self.args = args
-        alg = args.alg.lower()
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
+        alg = self.args.alg.lower()
 
         if "reinforce" in alg:
-            self.policy = Reinforce(args)
+            self.policy = Reinforce(self.args)
         elif "coma" in alg:
-            self.policy = COMA(args)
+            self.policy = COMA(self.args)
         elif "central_v" in alg:
-            self.policy = CentralV(args)
+            self.policy = CentralV(self.args)
         else:
             raise Exception(f"No CommAgent variant implemented for: {alg}")
 

@@ -9,17 +9,21 @@ from collections import deque
 from typing import Any, Dict, List, Optional, Sequence, Union, Tuple
 import numpy as np
 import random
+import logging
 
 Transition = Dict[str, Any]
 Episode = List[Transition]
 
 
 class ReplayBuffer:
-    def __init__(self, episode_capacity: int = 1000, seed: int = 123):
+    def __init__(self, episode_capacity: int = 1000, seed: int = 123, n_agents: Optional[int] = None, obs_dim: Optional[int] = None):
         self._episodes: deque[Episode] = deque(maxlen=int(episode_capacity))
         self._current: Episode = []
         self._rng = random.Random(seed)
         self._num_transitions: int = 0
+        # Optional pre-specified runtime shapes (preferred over inference)
+        self._n_agents = int(n_agents) if n_agents is not None else None
+        self._obs_dim = int(obs_dim) if obs_dim is not None else None
 
     # -----------------------------------------------------------
     # Store a full episode (as list of transitions OR dict batch)
@@ -75,7 +79,11 @@ class ReplayBuffer:
         ep_lengths = [len(ep) for ep in episodes]
         T = max(ep_lengths) if max_seq_len is None else int(max_seq_len)
 
-        n_agents, obs_dim = _infer_agents_obs(episodes)
+        # Prefer runner-provided shapes when available; otherwise infer from episodes
+        if getattr(self, '_n_agents', None) is not None and getattr(self, '_obs_dim', None) is not None:
+            n_agents, obs_dim = int(self._n_agents), int(self._obs_dim)
+        else:
+            n_agents, obs_dim = _infer_agents_obs(episodes)
 
         # Pre-scan episodes to find the maximum availability vector length so
         # we can allocate a consistent avail_u tensor even when some
@@ -90,7 +98,8 @@ class ReplayBuffer:
                         _len = int(np.asarray(tr["avail_a"]).shape[-1])
                         if _len > max_avail_len:
                             max_avail_len = _len
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                         continue
 
         # Allocate tensors
@@ -121,9 +130,51 @@ class ReplayBuffer:
 
                 # Observations
                 if "o" in tr:
-                    o[b, t] = _as_agents_obs(tr["o"], ensure_shape=(n_agents, obs_dim))
+                    try:
+                        arr_o = _as_agents_obs(tr["o"], ensure_shape=(n_agents, obs_dim))
+                    except Exception:
+                        arr_o = _as_agents_obs(tr["o"]) if 'o' in tr else np.zeros((n_agents, obs_dim), dtype=np.float32)
+                    if __debug__:
+                        try:
+                            print(f"[DEBUG shapes] o target={(n_agents, obs_dim)} src={arr_o.shape} (b={b},t={t})")
+                        except Exception:
+                            print(f"[DEBUG shapes] o src={getattr(arr_o, 'shape', None)} (b={b},t={t})")
+                    # ensure safe copy to avoid broadcasting errors
+                    if arr_o.shape != (n_agents, obs_dim):
+                        tmp = np.zeros((n_agents, obs_dim), dtype=np.float32)
+                        r = min(arr_o.shape[0], n_agents)
+                        c = min(arr_o.shape[1], obs_dim if arr_o.ndim > 1 else arr_o.shape[1])
+                        try:
+                            tmp[:r, :c] = arr_o[:r, :c]
+                        except Exception:
+                            # final fallback: flatten and copy leading elements
+                            flat = np.asarray(arr_o).reshape(-1)
+                            flat = np.pad(flat, (0, max(0, n_agents * obs_dim - flat.size)), mode='constant')[: n_agents * obs_dim]
+                            tmp = flat.reshape((n_agents, obs_dim))
+                        arr_o = tmp
+                    o[b, t] = arr_o
                 if "o_next" in tr:
-                    o_next[b, t] = _as_agents_obs(tr["o_next"], ensure_shape=(n_agents, obs_dim))
+                    try:
+                        arr_on = _as_agents_obs(tr["o_next"], ensure_shape=(n_agents, obs_dim))
+                    except Exception:
+                        arr_on = _as_agents_obs(tr.get("o_next", []))
+                    if __debug__:
+                        try:
+                            print(f"[DEBUG shapes] o_next target={(n_agents, obs_dim)} src={arr_on.shape} (b={b},t={t})")
+                        except Exception:
+                            print(f"[DEBUG shapes] o_next src={getattr(arr_on, 'shape', None)} (b={b},t={t})")
+                    if arr_on.shape != (n_agents, obs_dim):
+                        tmp = np.zeros((n_agents, obs_dim), dtype=np.float32)
+                        r = min(arr_on.shape[0], n_agents)
+                        c = min(arr_on.shape[1], obs_dim if arr_on.ndim > 1 else arr_on.shape[1])
+                        try:
+                            tmp[:r, :c] = arr_on[:r, :c]
+                        except Exception:
+                            flat = np.asarray(arr_on).reshape(-1)
+                            flat = np.pad(flat, (0, max(0, n_agents * obs_dim - flat.size)), mode='constant')[: n_agents * obs_dim]
+                            tmp = flat.reshape((n_agents, obs_dim))
+                        arr_on = tmp
+                    o_next[b, t] = arr_on
 
                 # Actions (indices)
                 if "u" in tr:
@@ -152,21 +203,42 @@ class ReplayBuffer:
                         mask = _as_agents_mask(tr["avail_a"], n_agents)
                         # mask shape: (n_agents, current_len)
                         curr_len = mask.shape[1]
+                        if __debug__:
+                            try:
+                                print(f"[DEBUG shapes] avail_a target=(B={B},T={T},n_agents={n_agents},max_avail={max_avail_len}) src={mask.shape} (b={b},t={t})")
+                            except Exception:
+                                print(f"[DEBUG shapes] avail_a src={getattr(mask,'shape',None)} (b={b},t={t})")
                         if avail_u is None:
                             # allocate conservative buffer if not pre-allocated
                             avail_u = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
                             avail_u_next = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
                             have_avail = True
                         # copy into the pre-allocated buffer (pad/truncate as needed)
-                        avail_u[b, t, :curr_len] = mask
-                    except Exception:
+                        # be careful: mask may have different second-dim than buffer
+                        cpy = min(curr_len, avail_u.shape[3]) if avail_u.ndim >= 4 else curr_len
+                        try:
+                            avail_u[b, t, :mask.shape[0], :cpy] = mask[:, :cpy]
+                        except Exception:
+                            # best-effort flatten-copy
+                            mm = np.zeros((n_agents, avail_u.shape[3]), dtype=np.float32)
+                            mm[:, :min(mask.shape[1], mm.shape[1])] = mask[:, :mm.shape[1]]
+                            avail_u[b, t] = mm
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                         pass
                 if "avail_a_next" in tr and have_avail:
                     try:
                         maskn = _as_agents_mask(tr["avail_a_next"], n_agents)
                         curr_len_n = maskn.shape[1]
-                        avail_u_next[b, t, :curr_len_n] = maskn
-                    except Exception:
+                        cpy = min(curr_len_n, avail_u_next.shape[3]) if avail_u_next.ndim >= 4 else curr_len_n
+                        try:
+                            avail_u_next[b, t, :maskn.shape[0], :cpy] = maskn[:, :cpy]
+                        except Exception:
+                            mm = np.zeros((n_agents, avail_u_next.shape[3]), dtype=np.float32)
+                            mm[:, :min(maskn.shape[1], mm.shape[1])] = maskn[:, :mm.shape[1]]
+                            avail_u_next[b, t] = mm
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                         pass
 
                 # State vectors (global state)
@@ -212,7 +284,8 @@ class ReplayBuffer:
         # include machine mapping per action if present
         try:
             batch["u_machine"] = u_machine
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
         if have_state:
             batch["state"] = state

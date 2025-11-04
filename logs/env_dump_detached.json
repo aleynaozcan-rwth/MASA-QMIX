@@ -1,0 +1,20 @@
+{
+  "reward_params": {
+    "alpha": 1.0,
+    "beta": 0.5,
+    "c_time": 0.0,
+    "delta": 0.1,
+    "gamma": 0.2
+  },
+  "task_generator": {
+    "arrival_lambda": 0.0,
+    "seq_length": {
+      "max": 5,
+      "min": 1
+    }
+  },
+  "training_defaults": {
+    "obs_shape": 11,
+    "state_shape": 64
+  }
+}

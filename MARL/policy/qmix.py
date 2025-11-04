@@ -20,33 +20,33 @@ class QMIX:
 
     def __init__(self, args):
         self.args = args
-        self.device = torch.device("cuda" if args.cuda else "cpu")
+        self.device = torch.device("cuda" if self.args.cuda else "cpu")
 
         # --- Network dimensions ---
-        self.n_agents = args.n_agents
-        self.n_actions = args.n_actions
-        self.obs_shape = args.obs_shape
-        self.state_shape = args.state_shape
+        self.n_agents = self.args.n_agents
+        self.n_actions = self.args.n_actions
+        self.obs_shape = self.args.obs_shape
+        self.state_shape = self.args.state_shape
 
         # --- Input (obs + last_action + agent_ID) ---
         input_shape = self.obs_shape
-        if args.last_action:
+        if self.args.last_action:
             input_shape += self.n_actions
-        if args.reuse_network:
+        if self.args.reuse_network:
             input_shape += self.n_agents
 
         print(f"[QMIX Init] RNN input shape = {input_shape} "
-              f"(obs={self.obs_shape}, last_action={args.last_action}, reuse_network={args.reuse_network})")
+              f"(obs={self.obs_shape}, last_action={self.args.last_action}, reuse_network={self.args.reuse_network})")
 
         # --- Networks ---
-        self.eval_rnn = RNNAgent(input_shape, args).to(self.device)
-        self.target_rnn = RNNAgent(input_shape, args).to(self.device)
-        self.eval_mixer = QMixer(args).to(self.device)
-        self.target_mixer = QMixer(args).to(self.device)
+        self.eval_rnn = RNNAgent(input_shape, self.args).to(self.device)
+        self.target_rnn = RNNAgent(input_shape, self.args).to(self.device)
+        self.eval_mixer = QMixer(self.args).to(self.device)
+        self.target_mixer = QMixer(self.args).to(self.device)
 
         # --- Optimizer ---
         self.params = list(self.eval_rnn.parameters()) + list(self.eval_mixer.parameters())
-        self.optimizer = torch.optim.RMSprop(self.params, lr=args.lr)
+        self.optimizer = torch.optim.RMSprop(self.params, lr=self.args.lr)
         self.train_step = 0
 
         # =====================================================

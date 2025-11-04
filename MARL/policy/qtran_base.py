@@ -7,28 +7,28 @@ from MARL.network.qtran_net import QtranV, QtranQBase
 
 class QtranBase:
     def __init__(self, args):
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
         self.args = args
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
 
         rnn_input_shape = self.obs_shape
 
         # 根据参数决定RNN的输入维度
-        if args.last_action:
+        if self.args.last_action:
             rnn_input_shape += self.n_actions  # 当前agent的上一个动作的one_hot向量
-        if args.reuse_network:
+        if self.args.reuse_network:
             rnn_input_shape += self.n_agents
 
         # 神经网络
-        self.eval_rnn = RNN(rnn_input_shape, args)  # 每个agent选动作的网络
-        self.target_rnn = RNN(rnn_input_shape, args)
+        self.eval_rnn = RNN(rnn_input_shape, self.args)  # 每个agent选动作的网络
+        self.target_rnn = RNN(rnn_input_shape, self.args)
 
-        self.eval_joint_q = QtranQBase(args)  # Joint action-value network
-        self.target_joint_q = QtranQBase(args)
+        self.eval_joint_q = QtranQBase(self.args)  # Joint action-value network
+        self.target_joint_q = QtranQBase(self.args)
 
-        self.v = QtranV(args)
+        self.v = QtranV(self.args)
 
         if self.args.cuda:
             self.eval_rnn.cuda()
@@ -37,7 +37,7 @@ class QtranBase:
             self.target_joint_q.cuda()
             self.v.cuda()
 
-        self.model_dir = args.model_dir + '/' + args.alg + '/' + args.map
+        self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
         # 如果存在模型则加载模型
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_net_params.pkl'):
@@ -59,8 +59,8 @@ class QtranBase:
         self.eval_parameters = list(self.eval_joint_q.parameters()) + \
                                list(self.v.parameters()) + \
                                list(self.eval_rnn.parameters())
-        if args.optimizer == "RMS":
-            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=args.lr)
+        if self.args.optimizer == "RMS":
+            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=self.args.lr)
 
         # 执行过程中，要为每个agent都维护一个eval_hidden
         # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden、target_hidden

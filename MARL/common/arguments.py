@@ -6,9 +6,47 @@
 # -------------------------------------------------
 
 import argparse
+import copy
+from types import SimpleNamespace
 
 
-def get_common_args():
+class ReadOnlyArgs:
+    """Lightweight read-only wrapper around an argparse.Namespace.
+
+    Attempts to set attributes raise AttributeError. Provides `as_mutable()`
+    which returns a deep-copied mutable namespace, and a custom
+    __deepcopy__ so callers using copy.deepcopy(...) get a mutable copy.
+    """
+
+    def __init__(self, ns):
+        # store a shallow copy to avoid external aliasing
+        object.__setattr__(self, "__data__", copy.deepcopy(ns))
+
+    def __getattr__(self, item):
+        data = object.__getattribute__(self, "__data__")
+        try:
+            return getattr(data, item)
+        except AttributeError:
+            raise
+
+    def __setattr__(self, key, value):
+        raise AttributeError("ReadOnlyArgs does not allow attribute assignment")
+
+    def __repr__(self):
+        return f"ReadOnlyArgs({repr(object.__getattribute__(self, '__data__'))})"
+
+    def as_mutable(self):
+        """Return a deep-copied, mutable argparse.Namespace of the data."""
+        data = object.__getattribute__(self, "__data__")
+        return copy.deepcopy(data)
+
+    def __deepcopy__(self, memo):
+        # Return a plain, deep-copied Namespace so callers that deepcopy a
+        # ReadOnlyArgs receive a mutable object they can safely modify.
+        return self.as_mutable()
+
+
+def get_mutable_args():
     parser = argparse.ArgumentParser()
 
     # ============================================================
@@ -18,6 +56,9 @@ def get_common_args():
     parser.add_argument('--game_version', type=str, default='latest')
     parser.add_argument('--map', type=str, default='masa_schedule')
     parser.add_argument('--seed', type=int, default=123)
+    # Execution mode (marl vs utilities). Move main-level mode flag here so
+    # all entrypoints can reuse the same centralized parser.
+    parser.add_argument('--mode', type=str, choices=['marl', 'random'], default='marl')
     parser.add_argument('--step_mul', type=int, default=8)
     parser.add_argument('--replay_dir', type=str, default='')
     parser.add_argument('--alg', type=str, default='qmix')
@@ -46,6 +87,12 @@ def get_common_args():
     parser.add_argument('--job_max_ops', type=int, default=4,
                         help='Maximum number of operations per job (default 4)')
     parser.add_argument('--machine_speed_range', type=float, nargs=2, default=[0.7, 1.4])
+    # Reward shaping defaults (centralized single source-of-truth)
+    parser.add_argument('--reward_alpha', type=float, default=1.0, help='Shaped reward coefficient alpha (completed jobs)')
+    parser.add_argument('--reward_beta', type=float, default=0.5, help='Shaped reward coefficient beta (avg wait)')
+    parser.add_argument('--reward_gamma', type=float, default=0.2, help='Shaped reward coefficient gamma (WIP)')
+    parser.add_argument('--reward_delta', type=float, default=0.1, help='Shaped reward coefficient delta (idle ops)')
+    parser.add_argument('--reward_c_time', type=float, default=0.0, help='Cost per time unit (c_time)')
 
     # ============================================================
     # === Episode / agent configuration ==========================
@@ -104,7 +151,9 @@ def get_common_args():
     parser.add_argument('--clean_history', action='store_true', default=False,
                         help='If set, remove previous historydata artifacts at Runner startup')
 
-    args = parser.parse_args()
+    # Use parse_known_args to avoid failing when external tooling (pytest)
+    # injects unknown CLI flags during test collection.
+    args, _unknown = parser.parse_known_args()
      # Güvenli varsayılanlar (Runner / policies tarafından beklenenler)
     args.evaluate_cycle   = getattr(args, "evaluate_cycle", 2)    # lowered for fast test
     args.n_epoch          = getattr(args, "n_epoch", 5)          # lowered for fast test
@@ -126,15 +175,40 @@ def get_common_args():
     args.snapshot_on_eval = getattr(args, "snapshot_on_eval", True)
     args.clean_history = getattr(args, "clean_history", False)
 
+    # Expose reward shaping values so other modules (Environment) can consume them
+    args.reward_alpha = getattr(args, 'reward_alpha', 1.0)
+    args.reward_beta = getattr(args, 'reward_beta', 0.5)
+    args.reward_gamma = getattr(args, 'reward_gamma', 0.2)
+    args.reward_delta = getattr(args, 'reward_delta', 0.1)
+    args.reward_c_time = getattr(args, 'reward_c_time', 0.0)
+
     return args
+
+
+def get_common_args():
+    """Return a read-only canonical args namespace.
+
+    Use `get_mutable_args()` when you need to mutate fields (tests, tools,
+    smoke harness). The returned object forbids attribute assignment.
+    """
+    return ReadOnlyArgs(get_mutable_args())
 
 
 # ===============================================================
 # === Algorithm-specific argument groups ========================
 # ===============================================================
 
+def _ensure_mutable(args):
+    """If args is ReadOnlyArgs, return a mutable deep-copy; otherwise
+    return args as-is (assumed mutable)."""
+    if isinstance(args, ReadOnlyArgs):
+        return args.as_mutable()
+    return args
+
+
 def get_mixer_args(args):
     """Optimized QMIX hyperparameters for MASA-QMIX learning stability."""
+    args = _ensure_mutable(args)
     args.rnn_hidden_dim   = 64
     args.qmix_hidden_dim  = 32
     args.two_hyper_layers = True
@@ -164,7 +238,34 @@ def get_mixer_args(args):
     return args
 
 
+def get_smoke_args():
+    """Return a compact, deterministic argument namespace suitable for
+    smoke tests and CI: small buffers, few episodes, no GPU, reproducible seed.
+    This is a convenience wrapper used by tools/tests to reduce repeated
+    local overrides across scripts and test files.
+    """
+    # Return a mutable, small configuration for smoke tests
+    args = get_mutable_args()
+    # small, fast defaults for smoke runs
+    args.n_epoch = 1
+    args.n_episodes = 3
+    args.evaluate_cycle = 10
+    args.evaluate_epoch = 1
+    args.episode_limit = getattr(args, 'episode_limit', 200)
+    args.learn = False
+    args.buffer_size = 10
+    args.batch_size = 4
+    args.train_steps = 1
+    args.save_cycle = 500
+    args.cuda = False
+    args.seed = 0
+    args.use_machine_actions = False
+    args.use_granular_actions = False
+    return args
+
+
 def get_coma_args(args):
+    args = _ensure_mutable(args)
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -184,6 +285,7 @@ def get_coma_args(args):
 
 
 def get_centralv_args(args):
+    args = _ensure_mutable(args)
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -202,6 +304,7 @@ def get_centralv_args(args):
 
 
 def get_reinforce_args(args):
+    args = _ensure_mutable(args)
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -220,10 +323,13 @@ def get_reinforce_args(args):
 
 
 def get_commnet_args(args):
+    args = _ensure_mutable(args)
     args.k = 2 if args.map == '3m' else 3
     return args
 
 
 def get_g2anet_args(args):
+    args = _ensure_mutable(args)
     args.attention_dim = 32
     args.hard = True
+    return args

@@ -1,6 +1,6 @@
 import os
 import shutil
-from MARL.common.arguments import get_common_args
+from MARL.common.arguments import get_smoke_args
 from environment import MASAEnv
 from MARL.runner import Runner
 
@@ -19,23 +19,9 @@ def test_metrics_writer_tempdir(tmp_path):
         shutil.copy(met, met + '.testbak')
         os.remove(met)
 
-    args = get_common_args()
-    args.n_epoch = 1
-    args.n_episodes = 3
-    args.evaluate_cycle = 10
-    args.evaluate_epoch = 1
-    args.episode_limit = 200
-    args.learn = False
-    args.buffer_size = 10
-    args.batch_size = 4
-    args.train_steps = 1
-    args.save_cycle = 500
-    args.cuda = False
-    args.seed = 0
-    args.use_machine_actions = False
-    args.use_granular_actions = False
+    args = get_smoke_args()
 
-    env = MASAEnv()
+    env = MASAEnv(args=args)
     runner = Runner(env, args)
     # run; should create metrics file with header + 3 rows
     runner.run(0)

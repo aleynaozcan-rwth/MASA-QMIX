@@ -8,30 +8,30 @@ from MARL.network.qmix_net import QMixNet
 
 class MAVEN:
     def __init__(self, args):
-        self.n_actions = args.n_actions
-        self.n_agents = args.n_agents
-        self.state_shape = args.state_shape
-        self.obs_shape = args.obs_shape
+        # canonical args
+        self.args = args
+        self.n_actions = self.args.n_actions
+        self.n_agents = self.args.n_agents
+        self.state_shape = self.args.state_shape
+        self.obs_shape = self.args.obs_shape
 
         # input shaoe of rnn
         input_shape = self.obs_shape
-        if args.last_action:
+        if self.args.last_action:
             input_shape += self.n_actions
-        if args.reuse_network:
+        if self.args.reuse_network:
             input_shape += self.n_agents
 
         # network
-        self.z_policy = HierarchicalPolicy(args)  # choose z
+        self.z_policy = HierarchicalPolicy(self.args)  # choose z
 
-        self.eval_rnn = BootstrappedRNN(input_shape, args)  # choose action for each agent
-        self.target_rnn = BootstrappedRNN(input_shape, args)
+        self.eval_rnn = BootstrappedRNN(input_shape, self.args)  # choose action for each agent
+        self.target_rnn = BootstrappedRNN(input_shape, self.args)
 
-        self.eval_qmix_net = QMixNet(args)  # mix the q value
-        self.target_qmix_net = QMixNet(args)
+        self.eval_qmix_net = QMixNet(self.args)  # mix the q value
+        self.target_qmix_net = QMixNet(self.args)
 
-        self.mi_net = VarDistribution(args)  # get q(z|sigma(tau))
-
-        self.args = args
+        self.mi_net = VarDistribution(self.args)  # get q(z|sigma(tau))
         if self.args.cuda:
             self.z_policy.cuda()
             self.eval_rnn.cuda()
@@ -39,7 +39,8 @@ class MAVEN:
             self.eval_qmix_net.cuda()
             self.target_qmix_net.cuda()
             self.mi_net.cuda()
-        self.model_dir = args.model_dir + '/' + args.alg + '/' + args.map
+
+        self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
         # 如果存在模型则加载模型
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_net_params.pkl'):
@@ -62,8 +63,8 @@ class MAVEN:
 
         self.eval_parameters = list(self.z_policy.parameters()) + list(self.eval_qmix_net.parameters()) +\
                                list(self.eval_rnn.parameters()) + list(self.mi_net.parameters())
-        if args.optimizer == "RMS":
-            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=args.lr)
+        if self.args.optimizer == "RMS":
+            self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=self.args.lr)
 
         # 执行过程中，要为每个agent都维护一个eval_hidden
         # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden、target_hidden
