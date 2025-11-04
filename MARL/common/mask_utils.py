@@ -1,12 +1,21 @@
-"""
-# Candidate for reintegration – helper functions for action and availability
-# masks used in multi-agent rollouts and replay buffers.
-"""
+"""RL-facing action masking helpers (MARL/common/mask_utils.py)
 
-"""Mask utilities for deterministic (machine,operator) index mapping.
+Archived/clarified candidate: Reintegration candidate — action/availability
+mask helpers used by rollout and replay logic.
 
-Provides helpers to build a consistent index map for (machine,operator)
-pairs and to compute boolean masks of feasible actions for a job/operation.
+Role:
+    - This module provides the RL-facing action masking layer. It translates
+        workcenter/operator eligibility and current availability into deterministic
+        index maps and boolean masks (numpy arrays) that indicate which
+        (machine,operator) action pairs are valid for a given job/operation.
+    - Rollout and policy code should use these helpers to produce tensors or
+        flattened action vectors consumed by agents and replay buffers.
+
+Notes:
+    - Keep this module small and dependency-free (numpy only) so it remains easy
+        to audit or move into a shared utilities module if desired.
+    - If functionality is merged elsewhere during refactors, ensure callers are
+        updated before removing this file.
 """
 from typing import List, Tuple, Dict, Iterable
 import numpy as np
