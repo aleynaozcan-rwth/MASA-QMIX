@@ -1,7 +1,7 @@
 {
-  "last_10_avg_reward": -156.19143333333332,
+  "last_10_avg_reward": -154.45096666666666,
   "last_10_avg_loss": 1.5678736925125123,
   "last_10_avg_td": 1.1262574791908264,
-  "avg_machine_utilization": 0.06858205128205128,
-  "avg_operator_utilization": 0.10714285714285714
+  "avg_machine_utilization": 0.06833175182481752,
+  "avg_operator_utilization": 0.10675182481751824
 }
