@@ -292,7 +292,11 @@ utils/workcenter.py -> imports:
 === Inactive / Unused Files ===
 MARL/__init__.py -> 🔴 Obsolete
 
-MARL/common/analyse.py -> 🟢 clarified candidate
+MARL/common/analyse.py -> �️ archived (preserved at `archive/legacy/MARL/common/analyse.py`)
+  notes:
+    - Archived during Phase 4 refactor/cleanup. The plotting utilities are preserved for
+      historical/reference purposes under `archive/legacy/MARL/common/analyse.py` and are
+      no longer part of the active runtime. Do not import from the archived path.
   defines:
     - func plt_win_rate_mean
 
