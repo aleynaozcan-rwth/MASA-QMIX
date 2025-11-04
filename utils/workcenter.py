@@ -16,6 +16,7 @@ Operators and other components should consult `workcenters_list` and
 """
 
 import random
+import re
 import simpy
 from typing import Dict, List, Any, Tuple
 
@@ -48,12 +49,49 @@ class WorkCenter:
         # dictionary of machine_name -> metadata
         self.machines: Dict[str, Dict] = {}
         for mid in machine_names:
-            # small random speed factor for variability (stable enough)
+            # Prefer speed_factor and capability info from module-level
+            # DEFAULT_WORKCENTERS (synchronized to YAML). If an entry exists
+            # for this machine name, copy its metadata (normalizing capable
+            # op names like 'Op1' -> index 0). Otherwise fall back to a
+            # deterministic default (no randomness) so runs are reproducible.
+            speed = 1.0
+            caps_idx = list(range(0, 9))
+            default_machines = DEFAULT_WORKCENTERS.get('machines', {}) if isinstance(DEFAULT_WORKCENTERS, dict) else {}
+            meta = default_machines.get(mid)
+            # try mapping names like M_0_0 -> M1..M5 used in DEFAULT_WORKCENTERS
+            if meta is None:
+                m = re.match(r"M_(\d+)_(\d+)$", mid)
+                if m:
+                    a = int(m.group(1))
+                    b = int(m.group(2))
+                    idx = a * 2 + b + 1
+                    key = f"M{idx}"
+                    meta = default_machines.get(key)
+
+            if isinstance(meta, dict):
+                # extract speed_factor
+                try:
+                    speed = float(meta.get('speed_factor', 1.0))
+                except Exception:
+                    speed = 1.0
+                # extract capabilities, support both 'capable_ops' (YAML) and 'capabilities'
+                raw_caps = meta.get('capable_ops', None) or meta.get('capabilities', None)
+                if isinstance(raw_caps, (list, tuple)):
+                    caps_idx = []
+                    for c in raw_caps:
+                        try:
+                            if isinstance(c, str) and c.lower().startswith('op'):
+                                caps_idx.append(int(c[2:]) - 1)
+                            else:
+                                caps_idx.append(int(c))
+                        except Exception:
+                            # ignore unparsable entries
+                            continue
+
             self.machines[mid] = {
                 "workcenter": int(wc_id),
-                # default to supporting op types 0..8 unless overridden by config
-                "capabilities": list(range(0, 9)),
-                "speed_factor": round(random.uniform(0.9, 1.1), 3),
+                "capabilities": caps_idx,
+                "speed_factor": float(speed),
             }
 
     def machine_list(self) -> List[str]:
