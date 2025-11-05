@@ -51,7 +51,7 @@ def main():
     env.operator_groups = [simpy.Resource(env.env, capacity=2) for _ in range(env.num_ops)]
 
     # Add two jobs targeting WC 0 but leave machines free so both can be processed concurrently
-    # Each job will have a single op: op_type 0, allowed_wcs [0], per_wc duration 5
+    # Each job will have a single op: op_type 0, allowed_machine_indices [0], per_machine duration 5
     op = (0, [0], {0:5.0})
     env.add_job([op])
     env.add_job([op])

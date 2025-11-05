@@ -8,27 +8,28 @@ def test_create_decision_item_basic():
     job = env.jobs[0]
     op = job.current_op()
     # create decision_item via WorkCenters helper
-    di, evt = env.workcenters_meta.create_decision_item(env, job, op)
+    di = env.workcenters_meta.create_decision_item(env, job, op)
 
     # basic keys
     assert isinstance(di, dict)
-    for k in ["job_id", "obs", "avail_row", "allowed_machines", "allowed_machine_indices", "per_machine_durations", "base_duration", "resume"]:
+    for k in ["job_id", "obs", "avail_row", "allowed_machines", "allowed_machine_indices", "per_machine_durations", "base_duration"]:
         assert k in di
 
     # obs should be a numpy array-like of length >= 1
     obs = di['obs']
     assert getattr(obs, 'shape', None) is not None
 
-    # resume should trigger the returned event when called with a valid choice
-    resume = di['resume']
-    # if there is an allowed machine index, use it; else pass None
+    # The environment is responsible for creating a resume Event. Create
+    # one here, attach it and then succeed it to simulate the policy.
+    evt = simpy.Event(env.env)
+    di['resume_evt'] = evt
     allowed = di.get('allowed_machine_indices', [])
     if allowed:
         choice = allowed[0]
-        resume(choice)
+        evt.succeed(int(choice))
         assert evt.triggered
         assert evt.value == int(choice)
     else:
-        resume(None)
+        evt.succeed(None)
         assert evt.triggered
         assert evt.value is None

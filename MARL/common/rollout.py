@@ -13,11 +13,10 @@ except Exception as e:
 
 # mask utilities
 try:
-    from MARL.common.mask_utils import build_index_map, build_mask_for_job
+    from MARL.common.mask_utils import build_machine_major_mask
 except Exception as e:
     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-    build_index_map = None
-    build_mask_for_job = None
+    build_machine_major_mask = None
 # gantt helpers (selection logging) and IO control
 try:
     from utils import gantt as gantt_utils
@@ -172,13 +171,13 @@ class RolloutWorker:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
 
-        # Fallback: pick first allowed or random
+            # Fallback: pick first allowed or random
         actions = []
         for ob in obs_batch:
-            # try to extract allowed_wcs from ob if present
+            # try to extract allowed_machine_indices from ob if present
             allowed = None
             if isinstance(ob, dict):
-                allowed = ob.get("allowed_wcs", None) or ob.get("avail_row", None)
+                allowed = ob.get("allowed_machine_indices", None) or ob.get("avail_row", None)
             if allowed is None:
                 # no info — pick 0
                 actions.append(0)
@@ -216,138 +215,24 @@ class RolloutWorker:
             avail = None
 
         try:
-            # Best-effort: compute detailed avail masks and attach to batch entries
-            if build_index_map is not None and hasattr(self.env, 'num_ops'):
-                # determine if we're using machine-level actions (global machine list)
-                machine_list = getattr(self.env.workcenters_meta, 'machine_list', None)
-                if bool(getattr(self.args, 'use_machine_actions', False)) and machine_list is not None:
-                    num_m = int(len(machine_list))
-                    # op_to_m maps operator -> list of machine indices
-                    op_to_m = {p: [] for p in range(int(self.env.num_ops))}
-                    try:
-                        # build by scanning machine_registry capabilities
-                        mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
-                        mindex = getattr(self.env.workcenters_meta, 'machine_index', {})
-                        for mname, mdata in mreg.items():
-                            caps = list(mdata.get('capabilities', []))
-                            for p in caps:
-                                op_to_m.setdefault(int(p), []).append(int(mindex.get(mname, 0)))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        op_to_m = {p: [] for p in range(int(self.env.num_ops))}
-                    # machine resource free state: prefer per-machine resources
-                    machine_free = []
-                    try:
-                        if getattr(self.env, 'machine_resources', None):
-                            mindex = getattr(self.env.workcenters_meta, 'machine_index', {})
-                            for mname in machine_list:
-                                try:
-                                    mi = int(mindex.get(mname, 0))
-                                    machine_free.append(self.env._resource_free(self.env.machine_resources[mi]))
-                                except Exception as e:
-                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                    machine_free.append(True)
-                        else:
-                            mreg = getattr(self.env.workcenters_meta, 'machine_registry', {})
-                            for mname in machine_list:
-                                try:
-                                    wc_i = int(mreg.get(mname, {}).get('workcenter', 0))
-                                    machine_free.append(self.env._resource_free(self.env.wc_resources[wc_i]))
-                                except Exception as e:
-                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                    machine_free.append(True)
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        machine_free = [True] * num_m
-                    try:
-                        operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(int(self.env.num_ops))]
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        operator_free = [True] * int(self.env.num_ops)
-                    num_p = int(self.env.num_ops)
-                    idx_map = build_index_map(num_m, num_p)
-                else:
-                    # fallback: use workcenter-level mapping as before
-                    num_m = int(self.env.num_wcs)
-                    num_p = int(self.env.num_ops)
-                    idx_map = build_index_map(num_m, num_p)
-                    # build operator->workcenter mapping
-                    op_to_m = {p: [] for p in range(num_p)}
-                    try:
-                        groups_map = getattr(self.env.workcenters_meta, 'eligible_operator_groups_by_wc', {})
-                        for wc_idx, groups in groups_map.items():
-                            for g in groups:
-                                if g in op_to_m:
-                                    op_to_m[g].append(int(wc_idx))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        # fallback to config mapping
-                        if getattr(self.env, 'config', None):
-                            ops_cfg = self.env.config.get('operators', [])
-                            for p_idx, opconf in enumerate(ops_cfg):
-                                q = opconf.get('qualified_machines', [])
-                                mapped = []
-                                for mname in q:
-                                    for mid in getattr(self.env.workcenters_meta, 'machine_registry', {}).keys():
-                                        if mname in mid or mname == mid:
-                                            try:
-                                                wc_i = int(self.env.workcenters_meta.machine_registry[mid]['workcenter'])
-                                                mapped.append(wc_i)
-                                            except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                continue
-                                op_to_m[p_idx] = mapped
-
-                    try:
-                        if getattr(self.env, 'machine_resources', None):
-                            machine_free = [self.env._resource_free(self.env.machine_resources[m]) for m in range(num_m)]
-                        else:
-                            machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        machine_free = [True] * num_m
-                    try:
-                        operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(num_p)]
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        operator_free = [True] * num_p
-            else:
-                idx_map = None
-                op_to_m = {}
-                machine_free = []
-                operator_free = []
-
+            # Ensure every decision item has a machine-major availability row.
+            # Prefer existing `item['avail_row']` populated by the environment; when
+            # missing, compute using the canonical helper `build_machine_major_mask`.
             for item in batch:
-                allowed = item.get('allowed_wcs', [])
                 try:
-                    if idx_map is not None:
-                        mask = build_mask_for_job(idx_map, allowed, op_to_m, machine_free, operator_free)
-                        # attach granular (machine×op) mask
-                        item['avail_mask'] = mask.tolist()
-                        # also attach per-machine availability (n_actions) by OR-ing operators
-                        num_ops = int(self.env.num_ops) if hasattr(self.env, 'num_ops') else 0
-                        # determine num_m: if machine_list present and using machine actions, use that
-                        if getattr(self.args, 'use_machine_actions', False) and getattr(self.env.workcenters_meta, 'machine_list', None) is not None:
-                            num_m = int(len(self.env.workcenters_meta.machine_list))
-                        else:
-                            num_m = int(getattr(self.env, 'num_wcs', 0))
-                        per_machine = []
-                        for m in range(num_m):
-                            start = m * num_ops
-                            end = start + num_ops
-                            try:
-                                per_machine.append(int(bool(mask[start:end].any())))
-                            except Exception as e:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                per_machine.append(0)
-                        # prefer to set 'avail_row' so Runner will pick it up for storing into replay
-                        item['avail_row'] = per_machine
-                    else:
-                        item['avail_mask'] = None
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    item['avail_mask'] = None
-                    # leave avail_row untouched if we can't compute mask
+                    if item is None:
+                        continue
+                    if item.get('avail_row') is None and build_machine_major_mask is not None:
+                        jid = item.get('job_id')
+                        try:
+                            row = build_machine_major_mask(self.env, jid)
+                            if row:
+                                item['avail_row'] = row
+                        except Exception:
+                            # leave item unchanged if we can't compute
+                            pass
+                except Exception:
+                    continue
 
             actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
             return actions
@@ -356,7 +241,7 @@ class RolloutWorker:
             # fallback deterministic/random pick
             outs = []
             for item in batch:
-                allowed = item.get("allowed_wcs", [])
+                allowed = item.get("allowed_machine_indices", [])
                 if not allowed:
                     outs.append(None)
                 else:
@@ -408,28 +293,72 @@ class RolloutWorker:
                             else:
                                 chosen_i = 0
 
-                    # validate against granular avail_mask if present
-                    mask = None
+                    # Prefer per-machine availability (avail_row) for validation.
+                    # This makes the default action-space machine-length. If
+                    # per-machine information is missing we attempt to compute
+                    # it deterministically; we do not expand the action-space
+                    # here to include operator-level slots.
+                    per_machine = None
                     try:
-                        mask = np.asarray(item.get('avail_mask')) if item.get('avail_mask') is not None else None
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        mask = None
+                        per_machine = item.get('avail_row') if item.get('avail_row') is not None else None
+                    except Exception:
+                        per_machine = None
 
-                    if mask is not None:
-                        start = chosen_i * ops
-                        end = start + ops
-                        if end <= mask.size and not bool(mask[start:end].any()):
-                            found = None
-                            for cand in (allowed_m_inds or list(range(len(mlist)))):
-                                s = int(cand) * ops
-                                if s + ops <= mask.size and bool(mask[s:s+ops].any()):
-                                    found = int(cand)
-                                    break
-                            if found is not None:
-                                chosen_i = found
-                            elif allowed_m_inds:
-                                chosen_i = int(allowed_m_inds[0])
+                    validated = False
+                    if per_machine is not None:
+                        try:
+                            if 0 <= int(chosen_i) < len(per_machine) and int(bool(per_machine[int(chosen_i)])):
+                                validated = True
+                            else:
+                                # try to find a permitted machine that is available
+                                found = None
+                                for cand in (allowed_m_inds or list(range(len(mlist)))):
+                                    if 0 <= int(cand) < len(per_machine) and int(bool(per_machine[int(cand)])):
+                                        found = int(cand)
+                                        break
+                                if found is not None:
+                                    chosen_i = found
+                                    validated = True
+                                elif allowed_m_inds:
+                                    chosen_i = int(allowed_m_inds[0])
+                                    validated = False
+                        except Exception:
+                            validated = False
+
+                    if not validated:
+                        # Attempt to recompute a per-machine row deterministically
+                        # using the canonical helper if available. Otherwise fall
+                        # back to the allowed_machine_indices list or a permissive
+                        # choice to maintain determinism and backward-compat.
+                        try:
+                            if build_machine_major_mask is not None:
+                                jid = item.get('job_id')
+                                try:
+                                    new_row = build_machine_major_mask(self.env, jid)
+                                    if new_row is not None:
+                                        if 0 <= int(chosen_i) < len(new_row) and int(bool(new_row[int(chosen_i)])):
+                                            validated = True
+                                            # chosen_i stays the same
+                                        else:
+                                            found = None
+                                            for cand in (allowed_m_inds or list(range(len(mlist)))):
+                                                if 0 <= int(cand) < len(new_row) and int(bool(new_row[int(cand)])):
+                                                    found = int(cand); break
+                                            if found is not None:
+                                                chosen_i = found; validated = True
+                                            elif allowed_m_inds:
+                                                chosen_i = int(allowed_m_inds[0])
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        # final fallback: choose first allowed or clamp
+                        if not validated:
+                            if allowed_m_inds:
+                                try:
+                                    chosen_i = int(allowed_m_inds[0])
+                                except Exception:
+                                    chosen_i = int(allowed_m_inds[0])
 
                     if not (0 <= chosen_i < len(mlist)) and len(mlist) > 0:
                         chosen_i = max(0, min(len(mlist) - 1, chosen_i if chosen_i is not None else 0))
@@ -478,8 +407,9 @@ class RolloutWorker:
                 os.makedirs(history_dir, exist_ok=True)
                 sched_path = os.path.join(history_dir, 'scheduling_trace.csv')
                 job_id = item.get('job_id')
-                allowed_wcs = item.get('allowed_wcs') or item.get('allowed_machine_indices') or []
-                avail_mask = item.get('avail_mask') if item.get('avail_mask') is not None else item.get('avail_row')
+                allowed_machine_indices = item.get('allowed_machine_indices', [])
+                # use canonical machine-major availability
+                avail_actions = item.get('avail_row')
                 try:
                     chosen_idx = int(chosen) if chosen is not None else None
                 except Exception as e:
@@ -489,21 +419,11 @@ class RolloutWorker:
 
                 reason = ''
                 try:
-                    if avail_mask is not None and chosen_idx is not None:
-                        arr = np.asarray(avail_mask)
-                        if arr.size > 0:
-                            if hasattr(self.env, 'num_wcs') and hasattr(self.env, 'num_ops'):
-                                ops = int(self.env.num_ops)
-                                mcnt = int(self.env.num_wcs)
-                                if arr.size >= mcnt * ops:
-                                    start = chosen_idx * ops
-                                    end = start + ops
-                                    if end <= arr.size and not bool(arr[start:end].any()):
-                                        reason = 'no_operator_free'
-                            else:
-                                if hasattr(self.env, 'num_wcs') and arr.size == int(self.env.num_wcs):
-                                    if int(arr[chosen_idx]) == 0:
-                                        reason = 'machine_not_available'
+                    if avail_actions is not None and chosen_idx is not None:
+                        arr = np.asarray(avail_actions)
+                        if arr.size > int(chosen_idx):
+                            if int(arr[int(chosen_idx)]) == 0:
+                                reason = 'machine_not_available'
                 except Exception as e:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                     reason = reason or ''
@@ -514,7 +434,7 @@ class RolloutWorker:
                 else:
                     if gantt_utils is not None:
                         try:
-                            gantt_utils.append_selection_log(sched_path, sim_time, job_id, allowed_wcs, avail_mask, chosen_idx, chosen_name, reason)
+                            gantt_utils.append_selection_log(sched_path, sim_time, job_id, allowed_machine_indices, avail_actions, chosen_idx, chosen_name, reason)
                         except Exception as e:
                             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                             pass
@@ -523,8 +443,8 @@ class RolloutWorker:
                             header_needed = not os.path.exists(sched_path)
                             with open(sched_path, 'a') as sf:
                                 if header_needed:
-                                    sf.write('time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason\n')
-                                sf.write(f"{sim_time},{job_id},{allowed_wcs},{avail_mask},{chosen_idx},{repr(chosen_name)},{reason}\n")
+                                    sf.write('time,job_id,allowed_machine_indices,avail_actions,chosen_machine_idx,chosen_machine_name,reason\n')
+                                sf.write(f"{sim_time},{job_id},{allowed_machine_indices},{avail_actions},{chosen_idx},{repr(chosen_name)},{reason}\n")
                         except Exception as e:
                             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                             pass
@@ -535,20 +455,37 @@ class RolloutWorker:
             processed_actions.append(chosen)
             processed_machine_names.append(chosen_machine_name)
 
-            # finally, attempt to resume the decision with chosen value
+            # finally, attempt to resume the decision with chosen value.
+            # Prefer the SimPy resume Event interface (`resume_evt.succeed(choice)`) —
+            # fallback to older `resume` callable if present for backward compatibility.
             try:
-                item.get('resume')(chosen)
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                try:
-                    item.get('resume')(int(chosen))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                resume_evt = item.get('resume_evt')
+                if resume_evt is not None:
                     try:
-                        item.get('resume')(chosen_machine_name)
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                        resume_evt.succeed(chosen)
+                    except Exception:
+                        try:
+                            resume_evt.succeed(int(chosen))
+                        except Exception:
+                            try:
+                                resume_evt.succeed(chosen_machine_name)
+                            except Exception:
+                                # swallow to avoid breaking runtime
+                                pass
+                else:
+                    # backward compatibility: old resume callable
+                    try:
+                        item.get('resume')(chosen)
+                    except Exception:
+                        try:
+                            item.get('resume')(int(chosen))
+                        except Exception:
+                            try:
+                                item.get('resume')(chosen_machine_name)
+                            except Exception:
+                                pass
+            except Exception as e:
+                logging.getLogger(__name__).exception("Exception caught when resuming decision", exc_info=True)
 
         return processed_actions, processed_machine_names
 
@@ -599,74 +536,51 @@ class RolloutWorker:
         # Build avail_batch similar to Runner
         avail_batch = []
         if use_gran:
-            # try to import mask utils
+            # Compatibility: when operator-granular actions are requested we
+            # deterministically expand the canonical per-machine 'avail_row'
+            # into a flattened per-(machine×operator) vector by repeating each
+            # machine slot `num_ops` times. This preserves deterministic
+            # behavior while avoiding operator-selection during mask build.
             try:
-                from MARL.common.mask_utils import build_index_map, build_mask_for_job
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                build_index_map = None
-                build_mask_for_job = None
-
-            # build op->machines mapping
-            op_to_m = {}
-            try:
-                groups_map = getattr(self.env.workcenters_meta, 'eligible_operator_groups_by_wc', {})
-                for wc_idx, ops in groups_map.items():
-                    for p in ops:
-                        op_to_m.setdefault(int(p), []).append(int(wc_idx))
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                op_to_m = {}
-
+                ops = int(getattr(self.env, 'num_ops', 1))
+            except Exception:
+                ops = 1
             try:
                 num_m = int(len(getattr(self.env.workcenters_meta, 'machine_list', []) or []))
                 if num_m == 0:
                     num_m = int(getattr(self.env, 'num_wcs', 0))
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            except Exception:
                 num_m = int(getattr(self.env, 'num_wcs', 0))
-            num_p = int(getattr(self.env, 'num_ops', 0))
-
-            try:
-                if getattr(self.env, 'machine_resources', None):
-                    machine_free = [self.env._resource_free(self.env.machine_resources[m]) for m in range(num_m)]
-                else:
-                    machine_free = [self.env._resource_free(self.env.wc_resources[m]) for m in range(num_m)]
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                machine_free = [True] * num_m
-            try:
-                operator_free = [self.env._resource_free(self.env.operator_groups[p]) for p in range(num_p)]
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                operator_free = [True] * num_p
 
             for item in batch:
                 try:
-                    if item.get('avail_mask') is not None:
-                        mask = item.get('avail_mask')
-                        avail_batch.append(list(mask))
+                    # prefer canonical per-machine row
+                    row = item.get('avail_row')
+                    if row is not None:
+                        r = np.asarray(row, dtype=np.int32)
+                        # ensure length matches known machines
+                        if r.size < num_m:
+                            # pad permissively
+                            pad = np.ones((num_m - r.size,), dtype=np.int32)
+                            r = np.concatenate([r, pad], axis=0)
+                        expanded = np.repeat(r.astype(np.int32), ops)
+                        avail_batch.append(expanded.tolist())
                         continue
 
-                    allowed = item.get('allowed_wcs', [])
-                    if build_index_map is not None and build_mask_for_job is not None and num_m > 0 and num_p > 0:
-                        idx_map = build_index_map(num_m, num_p)
-                        try:
-                            msk = build_mask_for_job(idx_map, allowed, op_to_m, machine_free, operator_free)
-                            avail_batch.append(msk.tolist())
-                            item['avail_mask'] = msk.tolist()
+                    # fallback: if avail_arr is present, expand that row
+                    try:
+                        if avail_arr is not None:
+                            row = avail_arr[len(avail_batch)]
+                            r = np.asarray(row, dtype=np.int32)
+                            expanded = np.repeat(r.astype(np.int32), ops)
+                            avail_batch.append(expanded.tolist())
                             continue
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            pass
+                    except Exception:
+                        pass
 
-                    row = item.get('avail_row') or []
-                    flat = []
-                    for m in range(num_m):
-                        v = 1 if (m < len(row) and int(bool(row[m]))) else 0
-                        flat.extend([int(v)] * max(1, num_p))
-                    avail_batch.append(flat)
-                except Exception as e:
+                    # final fallback: all-ones (permissive)
+                    avail_batch.append([1] * (max(1, num_m) * max(1, ops)))
+                except Exception:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                     avail_batch.append(None)
         else:
@@ -780,41 +694,44 @@ class RolloutWorker:
                         n_actions_local = None
                     avail_flat = []
                     for j, it in enumerate(batch):
-                        mask = it.get('avail_mask')
-                        if mask is not None:
+                            # prefer canonical per-machine row if present
                             try:
-                                arr = np.asarray(mask, dtype=np.float32)
-                                if n_actions_local is None or arr.size >= n_actions_local:
-                                    if n_actions_local is not None:
-                                        s = arr.size
-                                        if s < n_actions_local:
-                                            pad = np.zeros((n_actions_local - s,), dtype=np.float32)
-                                            arr = np.concatenate([arr, pad], axis=0)
-                                        arr = arr[:n_actions_local]
-                                    avail_flat.append(arr.astype(np.float32))
-                                    continue
-                            except Exception as e:
+                                row = it.get('avail_row')
+                                if row is not None:
+                                    r = np.asarray(row, dtype=np.float32)
+                                    if ops is not None:
+                                        expanded = np.repeat(r.astype(np.float32), ops)
+                                        if n_actions_local is not None:
+                                            expanded = expanded[:n_actions_local]
+                                        avail_flat.append(expanded)
+                                        continue
+                                    else:
+                                        avail_flat.append(r)
+                                        continue
+                            except Exception:
                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                pass
-                        try:
-                            if avail_arr is not None:
-                                row = np.asarray(avail_arr[j], dtype=np.float32)
-                                if ops is not None:
-                                    expanded = np.repeat(row.astype(np.float32), ops)
-                                    if n_actions_local is not None:
-                                        expanded = expanded[:n_actions_local]
-                                    avail_flat.append(expanded)
-                                    continue
-                                else:
-                                    avail_flat.append(row)
-                                    continue
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            pass
-                        if n_actions_local is not None:
-                            avail_flat.append(np.zeros((n_actions_local,), dtype=np.float32))
-                        else:
-                            avail_flat.append(np.zeros((len(u_list),), dtype=np.float32))
+
+                            try:
+                                # fallback: avail_arr (post-decision availability) if present
+                                if avail_arr is not None:
+                                    row = np.asarray(avail_arr[j], dtype=np.float32)
+                                    if ops is not None:
+                                        expanded = np.repeat(row.astype(np.float32), ops)
+                                        if n_actions_local is not None:
+                                            expanded = expanded[:n_actions_local]
+                                        avail_flat.append(expanded)
+                                        continue
+                                    else:
+                                        avail_flat.append(row)
+                                        continue
+                            except Exception:
+                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+
+                            # final fallback: zeros
+                            if n_actions_local is not None:
+                                avail_flat.append(np.zeros((n_actions_local,), dtype=np.float32))
+                            else:
+                                avail_flat.append(np.zeros((len(u_list),), dtype=np.float32))
 
                     tr['avail_a'] = np.asarray(avail_flat, dtype=np.float32)
                 else:

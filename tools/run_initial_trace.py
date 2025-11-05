@@ -41,7 +41,7 @@ for item in batch:
     print('obs (11-dim):', [float(round(x,6)) for x in obs])
     ar = item.get('avail_row')
     print('avail_row:', [int(x) for x in ar])
-    print('allowed_wcs:', item.get('allowed_wcs'))
+    print('allowed_machine_indices:', item.get('allowed_machine_indices'))
     print('allowed_machines:', item.get('allowed_machines'))
     print('allowed_machine_indices:', item.get('allowed_machine_indices'))
     print('per_machine_durations:', {int(k): float(v) for k, v in (item.get('per_machine_durations') or {}).items()})

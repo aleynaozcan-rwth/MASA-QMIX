@@ -306,29 +306,36 @@ class WorkCenters:
 
         return inst, int(num_wcs), int(num_ops)
     # ------------------------------------------------------------------
-    def create_decision_item(self, env: Any, job: Any, op: Any) -> Tuple[Dict, simpy.Event]:
-        """Create a decision_item for an operation and a SimPy resume event.
+    def create_decision_item(self, env: Any, job: Any, op: Any) -> Dict:
+        """Create a canonical decision_item describing an operation.
 
-        This method centralizes the logic that was previously embedded inside
-        `environment._job_process`. It returns a tuple (decision_item, resume_evt)
-        where `decision_item` is a dict compatible with existing Runner code
-        and `resume_evt` is a `simpy.Event` that the job process will yield.
+        Returns a dict containing at minimum the keys:
+            - job_id
+            - obs
+            - avail_row
+            - allowed_machine_indices (list of machine indices)
+            - per_machine_durations (dict machine_index -> duration)
+            - base_duration
+
+        Note: this function does NOT create or return a resume Event. The
+        environment is responsible for creating a `simpy.Event` and attaching
+        it to the returned decision_item under the key `resume_evt` before
+        presenting the item to the policy/runner. This keeps the resume Event
+        ownership in the env (single source of truth for SimPy events).
         """
-        # create resume event on the env's simpy.Environment
-        resume_evt = simpy.Event(env.env)
 
         # normalize op tuple formats
         op_type = None
-        allowed_wcs = []
+        allowed_machine_indices = []
         per_wc_durations = None
         base_dur = None
         if isinstance(op, (list, tuple)):
             if len(op) == 2:
-                allowed_wcs, base_dur = op
+                allowed_machine_indices, base_dur = op
                 op_type = None
             elif len(op) == 3:
                 op_type = op[0]
-                allowed_wcs = op[1]
+                allowed_machine_indices = op[1]
                 third = op[2]
                 if isinstance(third, dict):
                     per_wc_durations = third
@@ -336,14 +343,16 @@ class WorkCenters:
                     base_dur = float(third)
             else:
                 try:
-                    allowed_wcs, base_dur = op[0], op[1]
+                    allowed_machine_indices, base_dur = op[0], op[1]
                 except Exception:
-                    allowed_wcs, base_dur = [], 0.0
+                    allowed_machine_indices, base_dur = [], 0.0
         else:
-            allowed_wcs, base_dur = [], 0.0
+            allowed_machine_indices, base_dur = [], 0.0
 
         allowed_machines = []
-        allowed_machine_indices = []
+        # allowed_machine_indices may have been provided in the op tuple; if
+        # not, we'll build it from the registry below.
+        allowed_machine_indices = list(allowed_machine_indices) if isinstance(allowed_machine_indices, (list, tuple)) else []
         per_machine_durations = {}
 
         try:
@@ -392,62 +401,32 @@ class WorkCenters:
         else:
             base_duration_val = 0.0
 
-        # resume callable that will validate choice and succeed the resume_evt
-        def _resume_with(choice, _resume_evt=resume_evt):
-            try:
-                mlist_local = getattr(self, 'machine_list', []) or []
-                mreg = getattr(self, 'machine_registry', {}) or {}
-                if isinstance(choice, str):
-                    if choice not in mreg:
-                        _resume_evt.succeed(None)
-                        return
-                    mi = int(getattr(self, 'machine_index', {}).get(choice, -1))
-                else:
-                    try:
-                        c = int(choice)
-                    except Exception:
-                        _resume_evt.succeed(None)
-                        return
-                    if mlist_local and 0 <= c < len(mlist_local):
-                        mi = int(c)
-                    else:
-                        if c in allowed_wcs:
-                            mi = None
-                            for mname, md in (mreg or {}).items():
-                                try:
-                                    if int(md.get('workcenter', -1)) == int(c):
-                                        mi_candidate = int(getattr(self, 'machine_index', {}).get(mname, -1))
-                                        mi = mi_candidate
-                                        break
-                                except Exception:
-                                    continue
-                            if mi is None:
-                                _resume_evt.succeed(None)
-                                return
-                        else:
-                            _resume_evt.succeed(None)
-                            return
+        # NOTE: Decision validation and resume Event completion is the
+        # responsibility of the environment/runner that owns the SimPy Event.
+        # This function builds the canonical per-operation metadata only.
 
-                allowed_inds = decision_item.get('allowed_machine_indices', [])
-                if allowed_inds and (mi not in allowed_inds):
-                    _resume_evt.succeed(None)
-                    return
-                _resume_evt.succeed(int(mi))
-            except Exception:
-                _resume_evt.succeed(None)
-                return
+        # Build eligible operator-groups mapping keyed by workcenter index for
+        # workcenters that own at least one allowed machine.
+        eligible_ops_by_wc = {}
+        try:
+            for m in allowed_machines:
+                try:
+                    wc_idx = int(self.machine_registry.get(m, {}).get('workcenter', 0))
+                    eligible_ops_by_wc[wc_idx] = getattr(self, 'eligible_operator_groups_by_wc', {}).get(int(wc_idx), [])
+                except Exception:
+                    continue
+        except Exception:
+            eligible_ops_by_wc = {}
 
         decision_item = {
             "job_id": getattr(job, 'id', getattr(job, 'agent_id', None)),
             "obs": env._build_agent_obs(job),
             "avail_row": env._avail_row_for_job(job),
-            "allowed_wcs": list(allowed_wcs),
             "allowed_machines": list(allowed_machines),
-            "allowed_machine_indices": list(allowed_machine_indices),
+            "allowed_machine_indices": list(dict.fromkeys(allowed_machine_indices)),
             "per_machine_durations": dict(per_machine_durations),
             "base_duration": float(base_duration_val),
-            "resume": _resume_with,
-            "eligible_ops_by_wc": {wc: getattr(self, 'eligible_operator_groups_by_wc', {}).get(int(wc), []) for wc in allowed_wcs},
+            "eligible_ops_by_wc": eligible_ops_by_wc,
         }
 
-        return decision_item, resume_evt
+        return decision_item

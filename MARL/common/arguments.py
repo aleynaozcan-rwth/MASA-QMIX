@@ -95,7 +95,7 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=200)
+    parser.add_argument('--episode_limit', type=int, default=600)
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
                         help='Number of jobs created at the start of the simulation (default 4)')
@@ -103,7 +103,8 @@ def get_mutable_args():
     parser.add_argument('--n_epoch', type=int, default=5)
     parser.add_argument('--n_episodes', type=int, default=4)
     parser.add_argument('--evaluate_cycle', type=int, default=2)
-    parser.add_argument('--n_actions', type=int, default=18)
+    parser.add_argument('--n_actions', type=int, default=5,
+                        help='(fallback) number of actions/workcenters when machine_list is not provided')
     parser.add_argument('--state_shape', type=int, default=64)
     parser.add_argument('--obs_shape', type=int, default=11)
 
@@ -154,6 +155,17 @@ def get_mutable_args():
     # Use parse_known_args to avoid failing when external tooling (pytest)
     # injects unknown CLI flags during test collection.
     args, _unknown = parser.parse_known_args()
+    # If user provided a CLI n_actions that differs from eventual machine_list,
+    # the environment will align to the actual machine list length. Warn if
+    # they used a commonly-mistaken default like 18 to avoid confusion.
+    try:
+        if getattr(args, 'n_actions', None) == 18:
+            try:
+                print('[WARN] CLI --n_actions=18 detected. MASAEnv will override n_actions to match actual machine_list length if available.')
+            except Exception:
+                pass
+    except Exception:
+        pass
      # Güvenli varsayılanlar (Runner / policies tarafından beklenenler)
     args.evaluate_cycle   = getattr(args, "evaluate_cycle", 2)    # lowered for fast test
     args.n_epoch          = getattr(args, "n_epoch", 5)          # lowered for fast test
@@ -186,7 +198,7 @@ def get_mutable_args():
     # These can be overridden by CLI flags, but provide a compact default
     # for developer quick-sanity checks.
     args.n_episodes = getattr(args, 'n_episodes', 10)
-    args.episode_limit = getattr(args, 'episode_limit', 128)
+    args.episode_limit = getattr(args, 'episode_limit', 600)
     args.batch_size = getattr(args, 'batch_size', 32)
     args.lr = getattr(args, 'lr', 0.0005)
     args.rnn_hidden_dim = getattr(args, 'rnn_hidden_dim', 64)
@@ -269,7 +281,7 @@ def get_smoke_args():
     args.n_episodes = 3
     args.evaluate_cycle = 10
     args.evaluate_epoch = 1
-    args.episode_limit = getattr(args, 'episode_limit', 200)
+    args.episode_limit = getattr(args, 'episode_limit', 600)
     args.learn = False
     args.buffer_size = 10
     args.batch_size = 4

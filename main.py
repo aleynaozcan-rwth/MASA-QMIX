@@ -33,10 +33,12 @@ def marl_agent_wrapper(args):
     # itself and must be driven by the orchestrator.
     # If the orchestrator provided config_path/auto_load_config flags on args
     # pass them into MASAEnv so it can load/merge runtime configuration.
+    # Construct environment without auto-loading YAML/config to ensure
+    # the environment runs purely from its module defaults and injected args.
     env = MASAEnv(
         args=args,
         config_path=getattr(args, 'config_path', None),
-        auto_load_config=getattr(args, 'auto_load_config', False),
+        auto_load_config=False,
     )
     # Runner will query the environment and initialize any runtime-derived
     # shapes (n_actions, n_agents, obs/state dims, episode_limit). Keep
@@ -94,10 +96,11 @@ def marl_agent_wrapper(args):
 
 def random_agent_wrapper(args):
     episodes = 10
+    # For the random baseline use a pure environment (no YAML/config auto-load)
     env = MASAEnv(
         args=args,
         config_path=getattr(args, 'config_path', None),
-        auto_load_config=getattr(args, 'auto_load_config', False),
+        auto_load_config=False,
     )
     EATs = []
     schedule_processes = []
@@ -144,23 +147,36 @@ if __name__ == "__main__":
     # developer mini-run without hitting ReadOnlyArgs protections.
     args = get_mutable_args()
 
-    # --- Mini-run override for quick QMIX smoke test ---
-    # These in-code overrides are intentional for the developer quick-run
-    # requested: reproducible short training session.
-    args.seed = getattr(args, 'seed', 0) if args.seed is None else 42
-    args.n_epoch = 1
-    args.n_episodes = 3
-    args.learn = True
-    args.evaluate_cycle = 1
-    args.n_agents = 4
-    args.initial_jobs = 2
-    args.episode_limit = 64
-    args.history_dir = getattr(args, 'history_dir', None) or "./my_data_and_graph/historydata"
+    # No in-code mini-run overrides: trust CLI/config to provide runtime values
+    # (This avoids accidental mutation of fundamental settings like n_agents
+    # or initial_jobs during developer quick-runs. To run a short test, set
+    # the desired args via the command line or a wrapper script.)
+    # Ensure a sensible default history_dir if the caller didn't provide one.
+    # Avoid assigning to `args.*` at module import time (hygiene rule); use a
+    # local variable instead so callers/tests that import this module don't
+    # observe mutated globals.
+    history_dir = getattr(args, 'history_dir', None) or "./my_data_and_graph/historydata"
 
-    print(f"[Mini-run] Overriding args for quick test: seed={args.seed}, n_epoch={args.n_epoch}, n_episodes={args.n_episodes}, n_agents={args.n_agents}, initial_jobs={args.initial_jobs}")
-    # Allow writing artifacts for this quick developer run so we can inspect outputs
-    # (this is safe for local developer runs; CI/test harnesses rely on the default False)
-    args.allow_history_writes = True
+    # Clean previous run artifacts in the history directory to avoid mixing
+    # results from earlier runs. Remove all files and subdirectories inside
+    # the history dir (preserve the directory itself). This gives a fully
+    # fresh history folder for each run.
+    try:
+        import os, shutil
+        hist = history_dir
+        os.makedirs(hist, exist_ok=True)
+        for name in os.listdir(hist):
+            path = os.path.join(hist, name)
+            try:
+                if os.path.islink(path) or os.path.isfile(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+            except Exception:
+                # best-effort: skip items we can't remove
+                pass
+    except Exception:
+        pass
 
     # Select execution mode
     if getattr(args, 'mode', 'marl') == "marl":

@@ -25,7 +25,10 @@ def build_agent_obs(env: Any, job: Any) -> np.ndarray:
     wip_norm = np.clip(env._wip() / 80.0, 0, 1)
     time_norm = np.clip(env.env.now / env.episode_limit, 0, 1)
     reward_norm = np.clip((np.mean(env._recent_rewards) if env._recent_rewards else 0) / 10.0, 0, 1)
-    completed_norm = np.clip(env.completed_jobs / 100.0, 0, 1)
+    try:
+        completed_norm = np.clip(env.completed_jobs / float(getattr(env, 'episode_limit', 1)), 0, 1)
+    except Exception:
+        completed_norm = np.clip(env.completed_jobs / 100.0, 0, 1)
     n_ops_norm = np.clip(len(job.operations) / 10.0, 0, 1)
     finished_flag = 1.0 if job.finished else 0.0
 
@@ -46,7 +49,10 @@ def build_state_vector(env: Any) -> np.ndarray:
     util_m, util_o = env._util_machines(), env._util_ops()
     avg_wait = np.clip(env.total_wait_time / max(1, env.env.now * 10.0), 0, 1)
     wip = np.clip(env._wip() / 100.0, 0, 1)
-    completed = np.clip(env.completed_jobs / 200.0, 0, 1)
+    try:
+        completed = np.clip(env.completed_jobs / float(getattr(env, 'episode_limit', 1)), 0, 1)
+    except Exception:
+        completed = np.clip(env.completed_jobs / 200.0, 0, 1)
     reward_recent = np.clip((np.mean(env._recent_rewards) if env._recent_rewards else 0) / 10.0, 0, 1)
     idle_ratio = 1.0 - 0.5 * (util_m + util_o)
     core = np.array([util_m, util_o, avg_wait, wip, completed, reward_recent, idle_ratio], dtype=np.float32)

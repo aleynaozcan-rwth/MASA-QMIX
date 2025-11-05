@@ -62,12 +62,14 @@ class Operator:
     # === Capability check =======================================
     # ============================================================
 
-    def can_do_job(self, job_id, workcenter_id):
+    def can_do_job(self, op_idx, workcenter_id):
         """
-        Return True if operator can work at the given WorkCenter and that WorkCenter allows this job.
+        Return True if operator can perform operation `op_idx` at the given WorkCenter.
+
+        This checks machine-level qualifications: operator must be qualified for
+        at least one machine inside the workcenter and that machine's
+        capabilities must include op_idx.
         """
-        # Operator must be able to operate at least one machine inside the workcenter.
-        # Prefer direct registry-based lookup for speed and clarity.
         try:
             registry = getattr(self.workcenters_ref, 'machine_registry', {}) or {}
             # collect machines in this workcenter
@@ -79,7 +81,7 @@ class Operator:
             # check capabilities via registry
             for m in candidate_machines:
                 caps = registry.get(m, {}).get('capabilities', [])
-                if int(job_id) in caps:
+                if int(op_idx) in caps:
                     return True
             return False
         except Exception:
@@ -314,11 +316,14 @@ class Operators:
     # === Lookup / Utility =======================================
     # ============================================================
 
-    def find_free_operator(self, job_id, workcenter_id):
-        """Return the first free operator who can perform this job at this WorkCenter."""
+    def find_free_operator(self, op_idx, workcenter_id):
+        """Return the first free operator who can perform operation `op_idx` at this WorkCenter."""
         for op in self.operators_object_list:
-            if (not op.is_busy) and op.can_do_job(job_id, workcenter_id):
-                return op
+            try:
+                if (not op.is_busy) and op.can_do_job(op_idx, workcenter_id):
+                    return op
+            except Exception:
+                continue
         return None
 
     def find_free_operator_for_machine(self, op_idx, machine_name):

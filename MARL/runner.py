@@ -25,6 +25,11 @@ except Exception as e:
     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
     CommRolloutWorker = RolloutWorker
 
+try:
+    from MARL.common.mask_utils import build_machine_major_mask
+except Exception:
+    build_machine_major_mask = None
+
 # Agents / Buffer
 from MARL.agent.agent import Agents, CommAgents
 from MARL.common.replay_buffer import ReplayBuffer
@@ -232,11 +237,24 @@ class Runner:
         self.run_args = run_args
 
         # Central flag to control whether Runner writes history/artifact files.
-        # Default: False. Set args.allow_history_writes = True to enable.
+        # The repository uses a single authoritative source for this decision
+        # (`utils.io_control.allow_history_writes`). Runner will no longer
+        # trust a per-run argument to override that central decision. This
+        # prevents scattering overrides and ensures a single control point
+        # for history writes.
         try:
-            self.allow_history_writes = bool(getattr(self.run_args, 'allow_history_writes', False))
+            from utils.io_control import allow_history_writes as _allow_fn
+            self.allow_history_writes = bool(_allow_fn())
         except Exception:
+            # conservative fallback if import fails
             self.allow_history_writes = False
+
+        # Print canonical IO setting for clarity at Runner startup
+        try:
+            from utils.io_control import allow_history_writes
+            print("[Runner] Allow history writes:", allow_history_writes())
+        except Exception:
+            print("[Runner] Allow history writes: <error determining setting>")
 
         # ---------------------------
         # Environment-derived shapes
@@ -521,24 +539,10 @@ class Runner:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
 
-        # Ensure a fresh scheduling_timeline.txt is created at the start of a
-        # run when history writes are allowed. This uses episode_id==0 so the
-        # generator will open the timeline in 'w' mode (overwrite) and avoid
-        # mixing legacy timeline entries from previous runs.
-        try:
-            if getattr(self, 'allow_history_writes', False):
-                try:
-                    if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
-                        gantt_utils.generate_scheduling_timeline(self.env, episode_id=0, write_if_allowed=True, out_dir=self.history_dir)
-                    else:
-                        # fallback to local import
-                        from utils.gantt import generate_scheduling_timeline as _gst
-                        _gst(self.env, episode_id=0, write_if_allowed=True, out_dir=self.history_dir)
-                    print(f"[Runner] Initialized/overwrote scheduling_timeline.txt at {self.history_dir}")
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught while initializing scheduling_timeline", exc_info=True)
-        except Exception:
-            logging.getLogger(__name__).exception("Exception caught when attempting to initialize scheduling_timeline", exc_info=True)
+        # NOTE: removed pre-run creation/overwrite of scheduling_timeline.txt.
+        # The timeline file is now written dynamically after episodes when
+        # runtime gantt records exist. This prevents creating placeholder
+        # timeline files before simulation data is produced.
 
         print(f"[Runner 8A.6.6] Initialized | alg={self.args.alg} | buffer={getattr(self.args,'buffer_size','-')} | batch={getattr(self.args,'batch_size','-')}")
         # Write initial job -> operations mapping for easy inspection
@@ -554,55 +558,55 @@ class Runner:
                     header = f"\n=== Initial Job -> Operation mapping (appended {datetime.datetime.utcnow().isoformat()}Z) ===\n"
                     with open(init_path, 'a') as hf:
                         hf.write(header)
-                        hf.write("Format: JobID | OpIdx | OpType | Allowed_WCs | OpGroups | BaseDur\n\n")
+                        hf.write("Format: JobID | OpIdx | OpType | Allowed_Machine_Indices | OpGroups | BaseDur\n\n")
                         for job in getattr(self.env, 'jobs', []):
                             hf.write(f"Job {int(job.id)}:\n")
                             for idx, op in enumerate(getattr(job, 'operations', [])):
                                 try:
                                     # canonical formats:
-                                    # legacy: (allowed_wcs, dur)
-                                    # old: (op_type, allowed_wcs, base_dur)
-                                    # new canonical: (op_type, allowed_wcs, per_wc_durations_dict)
+                                    # legacy: (allowed_machine_indices, dur)
+                                    # old: (op_type, allowed_machine_indices, base_dur)
+                                    # new canonical: (op_type, allowed_machine_indices, per_machine_durations_dict)
                                     if isinstance(op, (list, tuple)) and len(op) == 2:
-                                        allowed_wcs, dur = op
+                                        allowed_machine_indices, dur = op
                                         op_type = 'legacy'
-                                        hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Dur {float(dur):.3f}\n")
+                                        hf.write(f"  Op {idx} | Type {op_type} | machines {allowed_machine_indices} | Dur {float(dur):.3f}\n")
                                     else:
                                         op_type = op[0]
-                                        allowed_wcs = op[1]
+                                        allowed_machine_indices = op[1]
                                         third = op[2]
-                                        # if third is dict, print per-WC durations and both coarse/eligible operator info
+                                        # if third is dict, print per-machine durations and both coarse/eligible operator info
                                         if isinstance(third, dict):
-                                            per_wc = third
-                                            groups_by_wc = []
-                                            for wc in allowed_wcs:
+                                            per_machine = third
+                                            groups_by_machine = []
+                                            for m in allowed_machine_indices:
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
                                                 except Exception:
                                                     eligible = []
-                                                groups_by_wc.append({'wc': int(wc), 'eligible_ops': eligible})
-                                            hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_by_wc} | base_per_wc_durations:\n")
-                                            for wc in allowed_wcs:
+                                                groups_by_machine.append({'machine': int(m), 'eligible_ops': eligible})
+                                            hf.write(f"  Op {idx} | Type {op_type} | machines {allowed_machine_indices} | Groups {groups_by_machine} | base_per_machine_durations:\n")
+                                            for m in allowed_machine_indices:
                                                 try:
-                                                    dur_wc = float(per_wc.get(int(wc), 0.0))
+                                                    dur_m = float(per_machine.get(int(m), 0.0))
                                                 except Exception:
-                                                    dur_wc = 0.0
+                                                    dur_m = 0.0
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
                                                 except Exception:
                                                     eligible = []
-                                                hf.write(f"    WC{wc} -> dur={dur_wc:.3f} | eligible_ops={eligible}\n")
+                                                hf.write(f"    M{m} -> dur={dur_m:.3f} | eligible_ops={eligible}\n")
                                         else:
                                             # legacy-ish third numeric
                                             base_dur = float(third)
                                             groups_info = []
-                                            for wc in allowed_wcs:
+                                            for m in allowed_machine_indices:
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
                                                 except Exception:
                                                     eligible = []
-                                                groups_info.append({'wc': int(wc), 'eligible_ops': eligible})
-                                            hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_info} | base_dur {base_dur:.3f}\n")
+                                                groups_info.append({'machine': int(m), 'eligible_ops': eligible})
+                                            hf.write(f"  Op {idx} | Type {op_type} | machines {allowed_machine_indices} | Groups {groups_info} | base_dur {base_dur:.3f}\n")
                                 except Exception:
                                     hf.write(f"  Op {idx} | malformed: {op}\n")
                             hf.write("\n")
@@ -845,21 +849,68 @@ class Runner:
                 # Optionally append a human-readable scheduling timeline for this episode
                 try:
                     if getattr(self, 'allow_history_writes', False):
-                        timeline = None
-                        if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                            # Guard timeline generation so it only happens when runtime
+                            # gantt records exist and the central IO gate permits writes.
                             try:
-                                timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                from utils.io_control import allow_history_writes as _allow_fn
                             except Exception:
-                                timeline = None
-                        if timeline is None:
+                                def _allow_fn():
+                                    return False
+
                             try:
-                                from utils.gantt import generate_scheduling_timeline
-                                timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                gr_count = len(getattr(self.env, 'gantt_records', []) or [])
                             except Exception:
+                                gr_count = 0
+
+                            # Only attempt to generate/write the timeline if there are
+                            # actual runtime records. Otherwise skip to avoid creating
+                            # deterministic/placeholder timeline files at startup.
+                            if _allow_fn() and gr_count > 0:
+                                # Debug print confirming data presence before writing
+                                try:
+                                    print(f"[Runner] Writing Scheduling_Timeline.txt for episode {global_ep_idx-1}, gantt_records={gr_count}")
+                                except Exception:
+                                    pass
+
                                 timeline = None
-                        if timeline:
+                                if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                                    try:
+                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                    except Exception:
+                                        timeline = None
+                                if timeline is None:
+                                    try:
+                                        from utils.gantt import generate_scheduling_timeline
+                                        timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                    except Exception:
+                                        timeline = None
+                                if timeline:
+                                    try:
+                                        print(f"[Runner] Scheduling timeline appended for episode {global_ep_idx-1} to {self.history_dir}/scheduling_timeline.txt")
+                                    except Exception:
+                                        pass
+                            else:
+                                try:
+                                    print(f"[Runner] Skipped timeline generation for episode {global_ep_idx-1} (no runtime data yet, gantt_records={gr_count}, allow_history_writes={_allow_fn()})")
+                                except Exception:
+                                    pass
+
+                            # Runtime debug logs after each episode: report whether writes are allowed
+                            # and how many gantt records the environment has collected.
                             try:
-                                print(f"[Runner] Scheduling timeline appended for episode {global_ep_idx-1} to {self.history_dir}/scheduling_timeline.txt")
+                                from utils.io_control import allow_history_writes as _allow_fn2
+                                try:
+                                    print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes={_allow_fn2()})")
+                                except Exception:
+                                    print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes=<error>)")
+                            except Exception:
+                                print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes=<import-error>)")
+                            try:
+                                gr_count = len(getattr(self.env, 'gantt_records', []) or [])
+                            except Exception:
+                                gr_count = 0
+                            try:
+                                print(f"[Runner] Gantt records collected: {gr_count}")
                             except Exception:
                                 pass
                 except Exception:
@@ -1147,26 +1198,52 @@ class Runner:
                         try:
                             # Prefer the centralized gantt_utils wrapper if available
                             timeline = None
-                            if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                            # Only generate the authoritative scheduling timeline if
+                            # history writes are allowed AND the environment has
+                            # collected runtime gantt records. This prevents creating
+                            # a deterministic placeholder at startup.
+                            try:
+                                from utils.io_control import allow_history_writes as _allow_fn
+                            except Exception:
+                                def _allow_fn():
+                                    return False
+
+                            try:
+                                gr_count = len(getattr(self.env, 'gantt_records', []) or [])
+                            except Exception:
+                                gr_count = 0
+
+                            if _allow_fn() and gr_count > 0:
                                 try:
-                                    timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                    print(f"[Runner] Writing Scheduling_Timeline.txt (final) gantt_records={gr_count}")
                                 except Exception:
-                                    # fall through to direct import fallback
-                                    timeline = None
-                            if timeline is None:
+                                    pass
+
+                                if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                                    try:
+                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                    except Exception:
+                                        # fall through to direct import fallback
+                                        timeline = None
+                                if timeline is None:
+                                    try:
+                                        # direct import fallback
+                                        from utils.gantt import generate_scheduling_timeline
+                                        timeline = generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                    except Exception:
+                                        timeline = None
+                                # If the generator returned text, log a short message indicating where it was written.
+                                if timeline:
+                                    try:
+                                        tl_path = os.path.join(self.history_dir, 'scheduling_timeline.txt')
+                                        print(f"[Runner] Scheduling timeline generated and written to {tl_path}")
+                                    except Exception:
+                                        print("[Runner] Scheduling timeline generated.")
+                            else:
                                 try:
-                                    # direct import fallback
-                                    from utils.gantt import generate_scheduling_timeline
-                                    timeline = generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                    print(f"[Runner] Skipped final timeline generation (no runtime data yet, gantt_records={gr_count}, allow_history_writes={_allow_fn()})")
                                 except Exception:
-                                    timeline = None
-                            # If the generator returned text, log a short message indicating where it was written.
-                            if timeline:
-                                try:
-                                    tl_path = os.path.join(self.history_dir, 'scheduling_timeline.txt')
-                                    print(f"[Runner] Scheduling timeline generated and written to {tl_path}")
-                                except Exception:
-                                    print("[Runner] Scheduling timeline generated.")
+                                    pass
                         except Exception:
                             logging.getLogger(__name__).exception("Exception caught while generating scheduling_timeline", exc_info=True)
                 except Exception:
@@ -1393,8 +1470,11 @@ class Runner:
         Returns: list of chosen wc indices (or None)
         """
         obs_batch = [item.get("obs") for item in batch]
-        # Prefer granular per-action masks ('avail_mask') if present, otherwise
-        # expand per-machine 'avail_row' into per-action mask by repeating per operator.
+    # Prefer per-machine 'avail_row' as the canonical mask. Operator-granular
+    # masks (historically named 'avail_mask') are deprecated and removed
+    # from runtime. When operator-granular actions are required, expand
+    # the canonical per-machine row deterministically using
+    # `np.repeat(avail_row, num_ops)`. (operator-level masks are deprecated since vX.Y)
         avail_batch = []
         for item in batch:
             if item is None:
@@ -1406,55 +1486,79 @@ class Runner:
             # so policies that understand operator granularity can select an
             # index in that flattened space.
             if bool(getattr(self.args, 'use_granular_actions', False)):
-                if 'avail_mask' in item and item.get('avail_mask') is not None:
-                    try:
-                        mask_arr = np.asarray(item.get('avail_mask'), dtype=np.int32)
-                        # validate shape: should be num_wcs * num_ops
-                        if hasattr(self.env, 'num_ops') and hasattr(self.env, 'num_wcs'):
-                            ops = int(self.env.num_ops)
-                            mcnt = int(self.env.num_wcs)
-                            if mask_arr.size >= mcnt * ops:
-                                avail_batch.append(mask_arr.tolist())
-                                continue
-                        # fallback: pass raw mask
-                        avail_batch.append(mask_arr.tolist())
+                # Prefer canonical per-machine avail_row and expand deterministically
+                # to per-(machine×operator) flattened space. If avail_row missing,
+                # compute it deterministically via `build_machine_major_mask`.
+                try:
+                    ar = item.get('avail_row')
+                    if ar is not None:
+                        try:
+                            ops = int(getattr(self.env, 'num_ops', 1))
+                        except Exception:
+                            ops = 1
+                        r = np.asarray(ar, dtype=np.int32)
+                        expanded = np.repeat(r.astype(np.int32), ops)
+                        avail_batch.append(expanded.tolist())
                         continue
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                except Exception:
+                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                # Try to compute canonical per-machine row deterministically
+                ar = None
+                try:
+                    if build_machine_major_mask is not None:
+                        jid = item.get('job_id')
+                        ar = build_machine_major_mask(self.env, jid)
+                except Exception:
+                    ar = None
+
+                if ar is not None:
+                    try:
+                        ops = int(getattr(self.env, 'num_ops', 1))
+                    except Exception:
+                        ops = 1
+                    r = np.asarray(ar, dtype=np.int32)
+                    expanded = np.repeat(r.astype(np.int32), ops)
+                    avail_batch.append(expanded.tolist())
+                    continue
+
+                # final deterministic permissive fallback: all ones
+                try:
+                    num_m = int(len(getattr(self.env.workcenters_meta, 'machine_list', []) or []))
+                    ops = int(getattr(self.env, 'num_ops', 1))
+                    avail_batch.append([1] * (max(1, num_m) * max(1, ops)))
+                    continue
+                except Exception:
+                    avail_batch.append([1])
+                    continue
 
             # Default behavior: provide per-machine availability (n_actions == num_wcs)
             # If a granular mask exists but user didn't request granular actions,
             # reduce it by OR-ing per-operator slots into a per-machine vector.
-            if 'avail_mask' in item and item.get('avail_mask') is not None:
-                try:
-                    mask_arr = np.asarray(item.get('avail_mask'), dtype=np.int32)
-                    if hasattr(self.env, 'num_ops') and hasattr(self.env, 'num_wcs'):
-                        ops = int(self.env.num_ops)
-                        mcnt = int(self.env.num_wcs)
-                        if mask_arr.size >= mcnt * ops:
-                            per_machine = []
-                            for m in range(mcnt):
-                                start = m * ops
-                                end = start + ops
-                                per_machine.append(int(bool(mask_arr[start:end].any())))
-                            avail_batch.append(per_machine)
-                            continue
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
-
+            # Prefer per-machine avail_row for agents; reduce operator-granular
+            # masks only as a fallback for compatibility.
             ar = item.get('avail_row')
             if ar is not None:
                 try:
                     per_machine = [1 if int(bool(x)) else 0 for x in list(ar)]
                     avail_batch.append(per_machine)
                     continue
-                except Exception as e:
+                except Exception:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
 
-            avail_batch.append(item.get('avail_row'))
+            # Try to compute canonical per-machine row deterministically
+            try:
+                if build_machine_major_mask is not None:
+                    jid = item.get('job_id')
+                    row = build_machine_major_mask(self.env, jid)
+                    if row:
+                        per_machine = [1 if int(bool(x)) else 0 for x in list(row)]
+                        avail_batch.append(per_machine)
+                        continue
+            except Exception:
+                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+
+            # final fallback: None (no mask info)
+            avail_batch.append(None)
 
         # common agent APIs attempted (in order)
         try:
@@ -1476,10 +1580,10 @@ class Runner:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
 
-        # last resort: simple deterministic / random pick from allowed_wcs
+    # last resort: simple deterministic / random pick from allowed_machine_indices
         actions = []
         for item in batch:
-            allowed = item.get("allowed_wcs", [])
+            allowed = item.get("allowed_machine_indices", [])
             if not allowed:
                 actions.append(None)
             else:

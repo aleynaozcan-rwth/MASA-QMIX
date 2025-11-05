@@ -60,7 +60,7 @@ def test_append_selection_log_appends(tmp_path):
     append_selection_log(str(log_path), 0.1, 10, [0, 1], [1, 0], 0, 'M0', 'ok')
     assert log_path.exists()
     lines = [ln for ln in log_path.read_text(encoding='utf-8').splitlines() if ln.strip()]
-    assert lines[0].startswith('time,job_id,allowed_wcs')
+    assert lines[0].startswith('time,job_id,allowed_machine_indices')
     assert len(lines) == 2
 
     # second append adds another data line

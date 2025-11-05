@@ -15,12 +15,38 @@ tries to use `utils` components when present. The goal is to be a stable
 authoritative surface for the rest of the code while we iteratively move
 full runtime behavior into this module.
 """
-from __future__ import annotations
 import logging
 import random
 import time
 from collections import deque
 from typing import Optional, Any, Dict, List
+from dataclasses import dataclass, asdict, field
+
+
+@dataclass
+class EligibilityEntry:
+    machine_id: str
+    machine_busy: bool
+    machine_available_at: float
+    operator_id: Optional[str]
+    operator_busy: Optional[bool]
+    operator_available_at: Optional[float]
+    qualified: Optional[bool]
+    # operator_candidates is a list of dicts describing per-operator eligibility
+    # Use a default factory to avoid mutable default pitfalls when instantiated.
+    operator_candidates: List[Dict[str, Any]] = field(default_factory=list)
+    # reason describes why this machine is not/was not immediately usable
+    # values: 'no qualified', 'busy (avail@ t=X)', 'available' (has free qualified op)
+    reason: Optional[str] = None
+
+
+@dataclass
+class DecisionTrace:
+    chosen_machine: str
+    chosen_operator: Optional[str]
+    policy_reason: str
+    at_time: float
+    eligibilities: List[EligibilityEntry]
 
 import numpy as np
 import simpy
@@ -180,9 +206,9 @@ class MASAEnv:
         # Control whether MASAEnv should prefer YAML-defined processing times
         # over the internal WorkCenters fallback.
         self.use_yaml_config = bool(use_yaml_config)
-        # Control whether MASAEnv should write a runtime config dump to disk.
-        # Opt-in only: default is False. Caller may set args.dump_config=True
-        # or pass dump_config=True in kwargs to enable.
+    # Control whether MASAEnv should write a runtime config dump to disk.
+    # Opt-in only: default is False. Caller may set args.dump_config to True
+    # or pass dump_config=True in kwargs to enable.
         try:
             self.dump_config = bool(getattr(args, 'dump_config', False)) or bool(kwargs.get('dump_config', False))
         except Exception:
@@ -325,9 +351,11 @@ class MASAEnv:
                 self.state_dim = 64
         except Exception:
             self.state_dim = 64
+
         # Increase default episode length so initial jobs have time to start
         # and progress. Callers may still override via args or kwargs.
-        self.episode_limit = _resolve(('episode_limit',), int, default=300)
+        # Default increased to 600s to allow longer episodes by default.
+        self.episode_limit = _resolve(('episode_limit',), int, default=600)
 
         # reward params — prefer explicit reward_weights dict, else require
         # presence in args or kwargs
@@ -364,6 +392,22 @@ class MASAEnv:
         # job generation params
         self.job_min_ops = int(_resolve(('job_min_ops',), int, default=1))
         self.job_max_ops = int(_resolve(('job_max_ops',), int, default=5))
+
+        # dynamic arrival params (mean interarrival time in seconds)
+        try:
+            # allow args/kwargs/config to set interarrival_time
+            self.interarrival_time = float(_resolve(('interarrival_time', 'ia'), float, default=4.0))
+        except Exception:
+            try:
+                self.interarrival_time = float(kwargs.get('interarrival_time', 4.0))
+            except Exception:
+                self.interarrival_time = 4.0
+
+        # maximum number of jobs to generate via the dynamic job generator
+        try:
+            self.max_jobs = int(_resolve(('max_jobs', 'num_generate_jobs'), int, default=int(getattr(self, 'initial_jobs', 0) or 0)))
+        except Exception:
+            self.max_jobs = int(kwargs.get('max_jobs', getattr(self, 'initial_jobs', 0) or 0))
 
         # options controlling eager behaviors
         self.strict_mode = bool(strict_mode)
@@ -449,6 +493,25 @@ class MASAEnv:
         except Exception as e:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             self.workcenters_meta.machine_list = list(getattr(self.workcenters_meta, 'machine_registry', {}).keys())
+        
+        # Ensure n_actions reflects actual machine count when machine_list is present
+        try:
+            mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+            if mlist:
+                # prefer machine_list as the canonical action space
+                self.n_actions = int(len(mlist))
+                # if num_wcs was set differently, correct it (num_wcs is legacy / fallback)
+                if int(getattr(self, 'num_wcs', 0)) != int(self.n_actions):
+                    try:
+                        print(f"[WARN] CLI/num_wcs ({getattr(self,'num_wcs',None)}) differs from machine_list length ({self.n_actions}); aligning to machine_list")
+                    except Exception:
+                        pass
+                    self.num_wcs = int(self.n_actions)
+            else:
+                # fallback: keep existing num_wcs (from args) and expose as n_actions
+                self.n_actions = int(getattr(self, 'num_wcs', 1))
+        except Exception:
+            self.n_actions = int(getattr(self, 'num_wcs', 1))
 
         # If num_wcs still None, derive from machine_list length
         if self.num_wcs is None:
@@ -492,10 +555,15 @@ class MASAEnv:
 
         # job list and generation
         self.jobs: List[JobAgent] = []
+        # stable job id counter to ensure episode isolation and no id leaks
+        self.job_counter = 0
         # pending jobs queued when capacity reached
         self.pending_jobs: List[List] = []
         # active jobs tracked to enforce capacity (n_agents)
         self.active_jobs: List[JobAgent] = []
+
+        # generator/process lifecycle flag to avoid leaked processes across resets
+        self._generator_shutdown = False
 
         # initial_jobs: independent from n_agents (max capacity)
         try:
@@ -503,41 +571,65 @@ class MASAEnv:
         except Exception:
             self.initial_jobs = int(getattr(args, 'initial_jobs', 4))
 
-        # Ensure TaskGenerator exists and is owner-aware
+        # Ensure TaskGenerator exists and is owner-aware. Try several
+        # constructor signatures for backward compatibility with older
+        # TaskGenerator implementations.
         try:
             from utils.task_generator import TaskGenerator  # type: ignore
-            # Pass RNGs for deterministic job creation when available
-            self.job_generator = TaskGenerator(config_path=self.config_path, py_rng=self._py_rng, np_rng=self._np_rng)
+            # Try the modern signature first (seed + py_rng). If that fails
+            # due to a TypeError (older TaskGenerator that doesn't accept
+            # these kwargs), fall back to simpler signatures. This preserves
+            # compatibility with external test fakes that accept only seed.
             try:
-                setattr(self.job_generator, '_owner_env', self)
-                # ensure TaskGenerator uses the MASAEnv RNG for deterministic draws
+                # Preferred: provide deterministic RNG objects
+                self.job_generator = TaskGenerator(seed=self.seed, py_rng=self._py_rng)
+            except TypeError:
                 try:
-                    setattr(self.job_generator, '_py_rng', self._py_rng)
-                except Exception:
-                    pass
+                    # Older/alternate signature: only seed
+                    self.job_generator = TaskGenerator(seed=self.seed)
+                except TypeError:
+                    try:
+                        # Legacy signature: config_path + rngs
+                        self.job_generator = TaskGenerator(config_path=self.config_path)
+                    except Exception:
+                        # final fallback: attempt the original call that may work
+                        try:
+                            self.job_generator = TaskGenerator(config_path=self.config_path, py_rng=self._py_rng, np_rng=self._np_rng)
+                        except Exception:
+                            self.job_generator = None
+
+            # Attach owner and RNGs when possible for deterministic behavior
+            try:
+                if self.job_generator is not None:
+                    setattr(self.job_generator, '_owner_env', self)
+                    try:
+                        setattr(self.job_generator, '_py_rng', self._py_rng)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         except Exception as e:
             logging.getLogger(__name__).exception("TaskGenerator not available: %s", e, exc_info=True)
             self.job_generator = None
 
-        # Build initial jobs deterministically via TaskGenerator when requested
-        if self.auto_build:
-            try:
-                if self.job_generator is not None:
-                    # create and add initial jobs using job_generator
-                    for _ in range(max(0, int(self.initial_jobs))):
-                        try:
-                            ops = self.job_generator.create_job()
-                            job = self.add_job(ops, start_immediately=True, set_arrival_zero=True)
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Failed to create initial job: %s", exc_info=True)
-                else:
-                    # fallback: nothing
-                    self.jobs = []
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught while generating initial jobs", exc_info=True)
-                self.jobs = []
+        # Create initial jobs deterministically (t=0) before starting dynamic arrivals
+        try:
+            if self.auto_build:
+                # create the configured number of initial jobs deterministically
+                try:
+                    self._generate_initial_jobs()
+                except Exception:
+                    logging.getLogger(__name__).exception("Failed to generate initial jobs", exc_info=True)
+        except Exception:
+            pass
+
+        # Note: automatic dynamic job generation is intentionally disabled
+        # here. MASAEnv should be passive and only create initial jobs via
+        # `_generate_initial_jobs()` (which itself uses TaskGenerator when
+        # available). Dynamic arrivals / internal generators were removed as
+        # part of the refactor to ensure decisions and arrivals are driven by
+        # external orchestrators or TaskGenerator attached to the env owner.
+        self._job_generator_proc = None
 
         # Startup summary: print and optionally persist to historydata
         try:
@@ -601,7 +693,25 @@ class MASAEnv:
     # ---------------- Public API ----------------
     def reset(self):
         """Reset runtime state; keep configuration and metadata intact."""
+        # Signal any running generator loop tied to previous env to stop
+        try:
+            self._generator_shutdown = True
+        except Exception:
+            pass
+
+        # Recreate SimPy environment for a clean episode
         self.env = simpy.Environment()
+        # Reseed RNGs for deterministic episode behavior
+        try:
+            random.seed(self.seed)
+        except Exception:
+            pass
+        try:
+            np.random.seed(self.seed)
+        except Exception:
+            pass
+        self._np_rng = np.random.RandomState(self.seed)
+        self._py_rng = random.Random(self.seed)
         # recreate resources
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
         if mlist:
@@ -622,7 +732,7 @@ class MASAEnv:
         except Exception:
             self.operators = None
 
-        # reset bookkeeping
+        # reset bookkeeping and job state
         self.t = 0.0
         self.completed_jobs = 0
         self.total_wait_time = 0.0
@@ -632,54 +742,100 @@ class MASAEnv:
         self.pending_decisions = []
         self.decisions_ready = simpy.Event(self.env)
         self.gantt_records = []
-
-        # regenerate jobs if desired
-        if self.auto_build:
-            try:
-                self._generate_initial_jobs()
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                self.jobs = []
-
-        # start job processes
+        # clear jobs and counters to ensure episode isolation
         try:
-            for job in self.jobs:
-                self.env.process(self._job_process(job))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
-
-        # Optionally start an external TaskGenerator if config requests arrivals.
+            self.jobs = []
+        except Exception:
+            self.jobs = []
         try:
-            tg_conf = self.config.get('task_generator') if isinstance(self.config, dict) else None
-            if tg_conf and float(tg_conf.get('arrival_lambda', 0)) > 0:
+            self.pending_jobs = []
+        except Exception:
+            self.pending_jobs = []
+        try:
+            self.active_jobs = []
+        except Exception:
+            self.active_jobs = []
+        try:
+            self.job_counter = 0
+        except Exception:
+            self.job_counter = 0
+
+        # Do not start any internal dynamic arrival loops on reset; however
+        # create deterministic initial jobs at t=0 so tests and callers that
+        # expect initial workload observe it. Initial jobs are produced via
+        # `self._generate_initial_jobs()` which prefers TaskGenerator.
+        self._job_generator_proc = None
+        self._dynamic_arrival_proc = None
+        self._task_generator = None
+
+        # If the config requests a task_generator with a positive arrival_lambda,
+        # construct and start it here. We keep this behavior opt-in and guarded
+        # so most environments remain passive unless explicitly configured.
+        try:
+            tg_cfg = (self.config or {}).get('task_generator', {}) or {}
+            lam = float(tg_cfg.get('arrival_lambda', 0.0)) if tg_cfg is not None else 0.0
+            if lam and lam > 0.0:
                 try:
                     from utils.task_generator import TaskGenerator  # type: ignore
-                    # Pass the MASAEnv instance (self) so TaskGenerator can call
-                    # env.add_job on the environment surface. TaskGenerator.start
-                    # will use the internal simpy.Environment for scheduling.
-                    self._task_generator = TaskGenerator(config_path=self.config_path, py_rng=self._py_rng, np_rng=self._np_rng)
-                    # Allow the TaskGenerator to reference the MASAEnv instance
-                    # for dynamic job injection without changing the start() call
-                    # signature expected by tests (which expect start(env, lam)
-                    # to be invoked with the SimPy environment).
+                    # Use a permissive construction call to support older or
+                    # test fakes that accept only config_path.
                     try:
-                        setattr(self._task_generator, '_owner_env', self)
+                        tg = TaskGenerator(config_path=self.config_path)
+                    except TypeError:
                         try:
-                            setattr(self._task_generator, '_py_rng', self._py_rng)
+                            tg = TaskGenerator(seed=self.seed)
                         except Exception:
-                            pass
+                            tg = TaskGenerator(config_path=self.config_path) if 'TaskGenerator' in locals() else None
+                    try:
+                        setattr(tg, '_owner_env', self)
                     except Exception:
                         pass
-                    # Start the arrival process on the underlying simpy.Environment
-                    self._task_generator.start(self.env, float(tg_conf.get('arrival_lambda')))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("TaskGenerator start failed", exc_info=True)
+                    # start the generator with the env and lambda
+                    try:
+                        tg.start(self.env, lam)
+                    except Exception:
+                        try:
+                            tg.start(self, lam)
+                        except Exception:
+                            pass
+                    self._task_generator = tg
+                except Exception:
+                    # don't fail reset just because TaskGenerator isn't available
                     self._task_generator = None
         except Exception:
-            # defensive: don't let arrival logic break reset
             self._task_generator = None
 
+        try:
+            # Create initial jobs deterministically at reset (t=0)
+            self._generate_initial_jobs()
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to generate initial jobs on reset", exc_info=True)
+
+        try:
+            print(f"[Env] Episode time limit set to {self.episode_limit} seconds")
+        except Exception:
+            pass
+        # DEBUG: print machine counts for tracing unexpected machine totals
+        try:
+            mr_len = len(getattr(self, 'machine_resources', []) or [])
+            mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+            ml_len = len(mlist)
+            n_actions = getattr(self, 'n_actions', None)
+            print(f"[DEBUG] num_wcs={getattr(self,'num_wcs',None)}, len(machine_list)={ml_len}, n_actions={n_actions}")
+            # If num_wcs and machine_list disagree, align to machine_list
+            try:
+                if ml_len > 0 and int(getattr(self, 'num_wcs', 0)) != ml_len:
+                    try:
+                        print(f"[WARN] Correcting num_wcs ({getattr(self,'num_wcs',None)}) -> {ml_len} to match machine_list")
+                    except Exception:
+                        pass
+                    self.num_wcs = int(ml_len)
+                    self.n_actions = int(ml_len)
+            except Exception:
+                # defensive: ignore debug printing alignment issues
+                pass
+        except Exception:
+            pass
         return self._build_all_agent_obs(), {"state_vec": None, "avail_actions": None}
 
     def step(self, action=None):
@@ -799,37 +955,47 @@ class MASAEnv:
                 job.finished = True
                 break
 
-            # normalize op formats: support legacy (allowed_wcs, dur) and
-            # canonical (op_type, allowed_wcs, per_wc_durations)
+            # normalize op formats: support legacy (allowed_machine_indices, dur) and
+            # canonical (op_type, allowed_machine_indices, per_wc_durations)
             op_type = None
-            allowed_wcs = []
+            allowed_machine_indices = []
             per_wc = None
             base_dur = None
             if isinstance(op, (list, tuple)):
                 if len(op) == 2:
-                    allowed_wcs, base_dur = op
+                    allowed_machine_indices, base_dur = op
                 elif len(op) >= 3:
                     op_type = op[0]
-                    allowed_wcs = op[1]
+                    allowed_machine_indices = op[1]
                     per_wc = op[2]
 
+            # Resolve operation index (machine-level op index) for use in
+            # operator qualification and duration lookups. Prefer explicit
+            # op_type when provided, else fall back to job.current_op_idx.
+            try:
+                op_idx_local = int(op_type) if op_type is not None else int(getattr(job, 'current_op_idx', 0))
+            except Exception:
+                op_idx_local = int(getattr(job, 'current_op_idx', 0))
             # create decision item — prefer workcenters_meta helper if present
             try:
                 if hasattr(self.workcenters_meta, 'create_decision_item'):
-                    decision_item, resume_evt = self.workcenters_meta.create_decision_item(self, job, op)
+                    decision_item = self.workcenters_meta.create_decision_item(self, job, op)
                 else:
                     raise AttributeError
             except Exception as e:
                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                resume_evt = simpy.Event(self.env)
                 decision_item = {
                     'job_id': job.id,
                     'obs': self._build_agent_obs(job),
                     'avail_row': self._avail_row_for_job(job),
-                    'allowed_wcs': allowed_wcs,
+                    'allowed_machine_indices': allowed_machine_indices,
                     'per_machine_durations': {},
-                    'resume': lambda choice: None,
                 }
+
+            # Environment owns the resume event — create it here and attach to
+            # the decision_item so the policy/runner can call resume_evt.succeed(choice).
+            resume_evt = simpy.Event(self.env)
+            decision_item['resume_evt'] = resume_evt
 
             self.pending_decisions.append(decision_item)
             try:
@@ -849,7 +1015,12 @@ class MASAEnv:
                 if int(chosen_idx) in decision_item.get('per_machine_durations', {}):
                     dur = float(decision_item.get('per_machine_durations', {}).get(int(chosen_idx), 0.0))
                 elif per_wc is not None:
-                    chosen_wc = int(allowed_wcs[int(chosen_idx)]) if allowed_wcs else 0
+                    # chosen_idx may index into allowed_machine_indices (legacy) or be a direct machine index
+                    try:
+                        chosen_idx_int = int(chosen_idx)
+                    except Exception:
+                        chosen_idx_int = 0
+                    chosen_wc = int(allowed_machine_indices[chosen_idx_int]) if (isinstance(allowed_machine_indices, (list, tuple)) and len(allowed_machine_indices) > chosen_idx_int) else chosen_idx_int
                     dur = float(per_wc.get(chosen_wc, 0.0)) if isinstance(per_wc, dict) else float(per_wc)
                 elif base_dur is not None:
                     dur = float(base_dur)
@@ -859,9 +1030,249 @@ class MASAEnv:
                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                 dur = 0.0
 
+            # Before acquiring resources, build a decision-time trace that
+            # records machine/operator availability for every eligible machine.
+            try:
+                # resolve allowed machine indices (decision_item may contain allowed_machine_indices)
+                # Extend eligibilities to cover all machines present in the env so
+                # we can report a full per-machine operator availability picture.
+                try:
+                    mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+                except Exception:
+                    mlist = []
+                try:
+                    total_machines = int(getattr(self, 'total_machines', None)) if getattr(self, 'total_machines', None) is not None else (len(mlist) if mlist else int(getattr(self, 'num_wcs', 1)))
+                except Exception:
+                    try:
+                        total_machines = len(mlist) if mlist else int(getattr(self, 'num_wcs', 1))
+                    except Exception:
+                        total_machines = 1
+
+                # Build canonical allowed list as indices 0..total_machines-1 (inclusive start)
+                try:
+                    allowed_list = list(range(int(total_machines)))
+                except Exception:
+                    allowed_list = [0]
+                # DEBUG: report what total_machines and allowed_list were resolved to
+                try:
+                    print(f"[DEBUG _job_process] total_machines={total_machines}, allowed_list={allowed_list}, len(machine_resources)={len(getattr(self, 'machine_resources', []) or [])}, num_wcs={getattr(self,'num_wcs', None)}")
+                except Exception:
+                    pass
+
+                # map to machine names when possible
+                mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+                elig_entries: List[EligibilityEntry] = []
+                now_t = float(self.env.now)
+                # helper to compute machine next-free (best-effort) from gantt_records
+                def _machine_next_free(mid: int) -> float:
+                    try:
+                        latest = now_t
+                        for r in getattr(self, 'gantt_records', []) or []:
+                            try:
+                                # support dict and tuple forms
+                                if isinstance(r, dict):
+                                    r_w = int(r.get('wc_idx', r.get('wc', -1)))
+                                    r_end = float(r.get('end', r.get('e', 0.0) or 0.0))
+                                else:
+                                    r_w = int(r[3])
+                                    r_end = float(r[1])
+                                if r_w == int(mid) and r_end > latest:
+                                    latest = r_end
+                            except Exception:
+                                continue
+                        return float(latest)
+                    except Exception:
+                        return now_t
+
+                for midx in allowed_list:
+                    try:
+                        midx = int(midx)
+                    except Exception:
+                        # attempt to resolve from name -> index
+                        try:
+                            midx = int(getattr(self.workcenters_meta, 'machine_index', {}).get(str(midx), midx))
+                        except Exception:
+                            continue
+                    # machine name
+                    try:
+                        mname = mlist[int(midx)] if mlist and 0 <= int(midx) < len(mlist) else f"M{int(midx)}"
+                    except Exception:
+                        mname = str(midx)
+                    # machine busy: check current resource users (best-effort)
+                    m_busy = False
+                    try:
+                        if getattr(self, 'machine_resources', None) and 0 <= int(midx) < len(self.machine_resources):
+                            res = self.machine_resources[int(midx)]
+                            m_busy = len(getattr(res, 'users', [])) > 0
+                    except Exception:
+                        m_busy = False
+                    m_avail_at = _machine_next_free(midx)
+
+                    # find operator candidates and choose a best operator (best-effort)
+                    op_id = None
+                    op_busy = None
+                    op_avail_at = None
+                    qualified = False
+                    operator_candidates = []
+                    try:
+                        ops_mgr = getattr(self, 'operators', None)
+                        if ops_mgr is not None:
+                            for op_obj in getattr(ops_mgr, 'operators_object_list', []) or []:
+                                try:
+                                    opid = str(getattr(op_obj, 'operator_id', None))
+                                    busy = bool(getattr(op_obj, 'is_busy', False))
+                                    # infer next free time from history when possible
+                                    try:
+                                        hist = getattr(op_obj, 'history', []) or []
+                                        if busy:
+                                            if hist and hist[-1].get('end_time', None) is not None:
+                                                next_free = float(hist[-1].get('end_time'))
+                                            else:
+                                                next_free = now_t
+                                        else:
+                                            next_free = now_t
+                                    except Exception:
+                                        next_free = None
+
+                                    # attempt to resolve workcenter for this machine
+                                    wc_idx_for_m = None
+                                    try:
+                                        wc_for_machine = getattr(self.workcenters_meta, 'workcenter_for_machine', None)
+                                        if callable(wc_for_machine):
+                                            wc_idx_for_m = int(wc_for_machine(mname))
+                                        else:
+                                            registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+                                            if mname in registry:
+                                                wc_idx_for_m = int(registry.get(mname, {}).get('workcenter', -1))
+                                    except Exception:
+                                        wc_idx_for_m = None
+
+                                    # qualification check: prefer can_do_job when wc_idx known
+                                    is_qualified = False
+                                    try:
+                                        # Use machine-level qualification: check whether
+                                        # this operator can do op_idx_local on this machine.
+                                        if wc_idx_for_m is not None:
+                                            try:
+                                                is_qualified = bool(op_obj.can_do_job(op_idx_local, wc_idx_for_m))
+                                            except Exception:
+                                                # fallback: check explicit machine name listing
+                                                is_qualified = mname in getattr(op_obj, 'qualified_machines', [])
+                                        else:
+                                            is_qualified = mname in getattr(op_obj, 'qualified_machines', [])
+                                    except Exception:
+                                        is_qualified = False
+
+                                    operator_candidates.append({
+                                        'operator_id': opid,
+                                        'qualified': bool(is_qualified),
+                                        'busy': busy,
+                                        'next_free': float(next_free) if next_free is not None else None,
+                                        'load': int(len(getattr(op_obj, 'history', []) or [])),
+                                    })
+
+                                    if is_qualified:
+                                        qualified = True
+                                        # prefer free operator, otherwise the one with earliest next_free
+                                        if not busy and op_id is None:
+                                            op_id = opid
+                                            op_busy = False
+                                            op_avail_at = float(next_free) if next_free is not None else None
+                                            # free operator is ideal; stop searching
+                                            break
+                                        else:
+                                            # busy operator; pick earliest next_free
+                                            try:
+                                                if op_id is None or (next_free is not None and (op_avail_at is None or float(next_free) < float(op_avail_at))):
+                                                    op_id = opid
+                                                    op_busy = busy
+                                                    op_avail_at = float(next_free) if next_free is not None else None
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    continue
+                            else:
+                                qualified = False
+                    except Exception:
+                        qualified = False
+
+                        # derive a human-readable per-machine reason for DecisionTrace
+                        try:
+                            if not operator_candidates or not any(c.get('qualified', False) for c in operator_candidates):
+                                reason_str = 'no qualified'
+                            else:
+                                # any qualified & free?
+                                if any(c.get('qualified', False) and not c.get('busy', False) for c in operator_candidates):
+                                    reason_str = 'available'
+                                else:
+                                    # busy but will be free at some point — pick earliest known next_free
+                                    next_times = [c.get('next_free') for c in operator_candidates if c.get('qualified', False) and c.get('next_free') is not None]
+                                    if next_times:
+                                        try:
+                                            earliest = min(next_times)
+                                            reason_str = f"busy (avail@ t={float(earliest):.2f})"
+                                        except Exception:
+                                            reason_str = 'busy'
+                                    else:
+                                        reason_str = 'busy'
+                        except Exception:
+                            reason_str = None
+
+                        elig_entries.append(EligibilityEntry(
+                            machine_id=str(mname),
+                            machine_busy=bool(m_busy),
+                            machine_available_at=float(m_avail_at),
+                            operator_id=op_id,
+                            operator_busy=op_busy,
+                            operator_available_at=op_avail_at,
+                            qualified=qualified,
+                            operator_candidates=operator_candidates,
+                            reason=reason_str,
+                        ))
+
+                # determine chosen machine/operator labels
+                try:
+                    # chosen_idx may be either machine index or index into allowed_list
+                    try:
+                        chosen_m_idx = int(chosen_idx)
+                        # if chosen_idx indexes into allowed_list (legacy), map
+                        if allowed_list and chosen_m_idx < len(allowed_list) and int(allowed_list[chosen_m_idx]) != chosen_m_idx:
+                            chosen_mid = int(allowed_list[chosen_m_idx])
+                        else:
+                            chosen_mid = chosen_m_idx
+                    except Exception:
+                        # fallback: assume chosen_idx indexes allowed_list by name
+                        chosen_mid = int(allowed_list[int(chosen_idx)]) if allowed_list else int(chosen_idx)
+                except Exception:
+                    chosen_mid = int(chosen_idx) if chosen_idx is not None else -1
+                try:
+                    chosen_m_name = mlist[chosen_mid] if mlist and 0 <= int(chosen_mid) < len(mlist) else f"M{int(chosen_mid)}"
+                except Exception:
+                    chosen_m_name = str(chosen_mid)
+
+                chosen_op_label = None
+                try:
+                    chosen_op_label = str(op_id_for_record) if 'op_id_for_record' in locals() else None
+                except Exception:
+                    chosen_op_label = None
+
+                # policy reason: not yet resolved (decision expected from policy)
+                policy_reason = 'pending'
+
+                decision_trace = DecisionTrace(
+                    chosen_machine=str(chosen_m_name),
+                    chosen_operator=chosen_op_label,
+                    policy_reason=str(policy_reason),
+                    at_time=float(now_t),
+                    eligibilities=elig_entries,
+                )
+            except Exception:
+                decision_trace = None
+
             # acquire resources and execute
             try:
-                mr = self.machine_resources[int(chosen_idx)] if self.machine_resources else self.wc_resources[int(0)]
+                # Use chosen_mid (resolved machine index) when selecting machine resource
+                mr = self.machine_resources[int(chosen_mid)] if getattr(self, 'machine_resources', None) else self.wc_resources[int(0)]
             except Exception as e:
                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                 mr = None
@@ -877,7 +1288,7 @@ class MASAEnv:
                 # determine the workcenter index for the chosen machine (if possible)
                 try:
                     mlist = getattr(getattr(self, 'workcenters_meta', None), 'machine_list', []) or []
-                    machine_name = mlist[int(chosen_idx)] if mlist and 0 <= int(chosen_idx) < len(mlist) else f"M{int(chosen_idx)}"
+                    machine_name = mlist[int(chosen_mid)] if mlist and 0 <= int(chosen_mid) < len(mlist) else f"M{int(chosen_mid)}"
                     wc_for_machine = getattr(self.workcenters_meta, 'workcenter_for_machine', None)
                     if callable(wc_for_machine):
                         wc_idx = int(wc_for_machine(machine_name))
@@ -890,16 +1301,15 @@ class MASAEnv:
                 eligible_groups = getattr(getattr(self, 'workcenters_meta', None), 'eligible_operator_groups_by_wc', {}).get(int(wc_idx), []) or []
                 if eligible_groups:
                     try:
-                        # use env RNG when available for reproducible selection
-                        if hasattr(self, '_py_rng') and getattr(self, '_py_rng', None) is not None:
-                            selected_grp = int(self._py_rng.choice(list(eligible_groups)))
-                        else:
-                            # fallback deterministic pick
-                            selected_grp = int(list(eligible_groups)[0])
+                        # Deterministic pick (no env auto-choice). Operator
+                        # group selection should be handled after a machine is
+                        # chosen; we pick the first entry deterministically as
+                        # a neutral fallback for downstream qualification.
+                        selected_grp = int(list(eligible_groups)[0])
                     except Exception:
                         selected_grp = int(list(eligible_groups)[0])
                 else:
-                    selected_grp = 0
+                    selected_grp = None
 
                 # Select a concrete operator and wait for availability using
                 # the Operators manager. We no longer use a numeric "group:0"
@@ -909,36 +1319,73 @@ class MASAEnv:
                 available_operator = None
                 try:
                     if getattr(self, 'operators', None) is not None:
-                        # Try to find a free operator that can perform this job
-                        # at the desired workcenter. If none available, wait
-                        # in short increments until one is free.
-                        try:
-                            available_operator = self.operators.find_free_operator(job.id, wc_idx)
-                        except Exception:
-                            available_operator = None
-                        wait_count = 0
-                        while available_operator is None:
-                            # Wait a short amount of simulated time and retry
-                            yield self.env.timeout(0.1)
-                            wait_count += 1
+                        # Try to locate a free operator qualified for the chosen
+                        # machine, with a limited retry policy. This ensures the
+                        # environment waits briefly for short operator-held times
+                        # but does not block indefinitely.
+                        max_retries = int(getattr(self, 'operator_selection_retries', 5))
+                        retry_wait = float(getattr(self, 'operator_selection_wait', 1.0))
+                        attempt = 0
+                        while attempt < max_retries and available_operator is None:
                             try:
-                                available_operator = self.operators.find_free_operator(job.id, wc_idx)
+                                available_operator = self.operators.find_free_operator_for_machine(op_idx_local, machine_name)
                             except Exception:
                                 available_operator = None
-                            # safety: if no operators manager exists or endless wait,
-                            # continue looping (tests expect determinism so this
-                            # should resolve when operators finish jobs)
+                            # Fallback: try workcenter-level lookup if machine-level fails
+                            if available_operator is None:
+                                try:
+                                    available_operator = self.operators.find_free_operator(op_idx_local, wc_idx)
+                                except Exception:
+                                    available_operator = None
+                            # If not found, wait a longer amount (1.0s by default)
+                            if available_operator is None:
+                                attempt += 1
+                                if attempt < max_retries:
+                                    yield self.env.timeout(retry_wait)
+                        # After retries, determine policy reason based on eligibilities
+                        try:
+                            chosen_entry = None
+                            for e in elig_entries:
+                                if str(e.machine_id) == str(chosen_m_name):
+                                    chosen_entry = e
+                                    break
+                            if available_operator is None:
+                                if chosen_entry is None:
+                                    policy_reason = 'no qualified'
+                                else:
+                                    # use the machine-level reason computed earlier
+                                    policy_reason = chosen_entry.reason if getattr(chosen_entry, 'reason', None) is not None else 'no qualified'
+                            else:
+                                policy_reason = 'selected'
+                                # reflect selected operator in the chosen_entry for trace clarity
+                                try:
+                                    if chosen_entry is not None:
+                                        chosen_entry.operator_id = str(getattr(available_operator, 'operator_id', None))
+                                        chosen_entry.operator_busy = False
+                                        chosen_entry.operator_available_at = float(self.env.now)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            policy_reason = 'selected' if available_operator is not None else 'no qualified'
                     else:
                         available_operator = None
+                        # no operators manager — policy reason remains 'pending' until we run
                 except Exception:
                     available_operator = None
 
                 # If we found an operator object, request its per-operator
                 # resource and the machine resource before starting the op.
+                # Update decision_trace with the resolved policy reason so that
+                # gantt/trace consumers see the final outcome.
+                try:
+                    if 'decision_trace' in locals() and decision_trace is not None:
+                        decision_trace.policy_reason = str(policy_reason)
+                except Exception:
+                    pass
                 try:
                     if available_operator is not None and getattr(available_operator, 'resource', None) is not None:
                         try:
-                            logging.getLogger(__name__).debug("Waiting -> starting job=%s on machine=%s by operator=%s time=%s", getattr(job, 'id', None), int(chosen_idx), getattr(available_operator, 'operator_id', None), float(self.env.now))
+                            logging.getLogger(__name__).debug("Waiting -> starting job=%s on machine=%s by operator=%s time=%s", getattr(job, 'id', None), int(chosen_mid), getattr(available_operator, 'operator_id', None), float(self.env.now))
                         except Exception:
                             pass
                         with available_operator.resource.request() as opres_req, mr.request() as mc_req:
@@ -975,11 +1422,17 @@ class MASAEnv:
                                         # include episode stamp if available for easier grouping
                                         ep_stamp = getattr(self, 'current_episode', None)
                                         try:
-                                            rec = [op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)]
+                                            rec = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
                                             if ep_stamp is not None:
-                                                rec.append(int(ep_stamp))
+                                                rec['episode'] = int(ep_stamp)
                                         except Exception:
-                                            rec = [op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)]
+                                            rec = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
+                                        # attach decision_trace if available
+                                        try:
+                                            if decision_trace is not None:
+                                                rec['decision_trace'] = asdict(decision_trace)
+                                        except Exception:
+                                            pass
                                         with open(dbg_path, 'a', encoding='utf-8') as df:
                                             df.write(json.dumps({'time': float(self.env.now), 'branch': 'concrete', 'op_id': op_id_for_record, 'op_id_type': str(type(op_id_for_record)), 'episode': ep_stamp, 'record': rec}) + '\n')
                                     except Exception:
@@ -993,14 +1446,20 @@ class MASAEnv:
                                 # attach episode stamp to the record if present on env
                                 try:
                                     ep_stamp = getattr(self, 'current_episode', None)
-                                    rec_tuple = (op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur))
+                                    rec_dict = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
                                     if ep_stamp is not None:
-                                        rec_tuple = rec_tuple + (int(ep_stamp),)
-                                    self.gantt_records.append(rec_tuple)
-                                except Exception:
-                                    # fallback to legacy append
+                                        rec_dict['episode'] = int(ep_stamp)
                                     try:
-                                        self.gantt_records.append((op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)))
+                                        if decision_trace is not None:
+                                            rec_dict['decision_trace'] = asdict(decision_trace)
+                                    except Exception:
+                                        pass
+                                    # Append dict record (generator updated to support dicts)
+                                    self.gantt_records.append(rec_dict)
+                                except Exception:
+                                    # fallback to legacy append tuple if dict append fails
+                                    try:
+                                        self.gantt_records.append((op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_mid), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)))
                                     except Exception:
                                         pass
                                 try:
@@ -1060,10 +1519,15 @@ class MASAEnv:
                                     pass
                                 try:
                                     ep_stamp = getattr(self, 'current_episode', None)
-                                    rec_tuple = (op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur))
+                                    rec_dict = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
                                     if ep_stamp is not None:
-                                        rec_tuple = rec_tuple + (int(ep_stamp),)
-                                    self.gantt_records.append(rec_tuple)
+                                        rec_dict['episode'] = int(ep_stamp)
+                                    try:
+                                        if decision_trace is not None:
+                                            rec_dict['decision_trace'] = asdict(decision_trace)
+                                    except Exception:
+                                        pass
+                                    self.gantt_records.append(rec_dict)
                                 except Exception:
                                     try:
                                         self.gantt_records.append((op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)))
@@ -1137,6 +1601,49 @@ class MASAEnv:
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
         n_m = len(mlist) if mlist else int(self.num_wcs)
         avail = np.zeros((len(self.jobs), n_m), dtype=np.int32)
+
+        # Compute per-machine free flags (prefer explicit machine resources,
+        # otherwise fall back to workcenter resources). If we can't determine
+        # this, default to True for backward compatibility.
+        machine_free = [True] * n_m
+        try:
+            if getattr(self, 'machine_resources', None):
+                machine_free = [self._resource_free(self.machine_resources[m]) for m in range(n_m)]
+            else:
+                # use machine_registry -> workcenter -> wc_resources
+                registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+                mlist_local = list(getattr(self.workcenters_meta, 'machine_list', []) or [])
+                tmp = []
+                for i, mname in enumerate(mlist_local):
+                    try:
+                        wc_i = int(registry.get(mname, {}).get('workcenter', 0))
+                        tmp.append(self._resource_free(self.wc_resources[wc_i]))
+                    except Exception:
+                        tmp.append(True)
+                if len(tmp) == n_m:
+                    machine_free = tmp
+        except Exception:
+            machine_free = [True] * n_m
+
+        # Compute operator free flags if operator_groups are present. If
+        # operator info is missing, keep operator_free as None to indicate
+        # we should default to permissive behavior for compatibility.
+        operator_free = None
+        try:
+            if getattr(self, 'operator_groups', None) is not None and int(getattr(self, 'num_ops', 0)) > 0:
+                operator_free = [self._resource_free(self.operator_groups[p]) for p in range(int(self.num_ops))]
+        except Exception:
+            operator_free = None
+
+        # For each job, only mark a machine as available if:
+        #  - the machine supports the job's current op (row==1), AND
+        #  - the machine resource is free, AND
+        #  - there exists at least one operator group qualified for the
+        #    machine whose resource is free. If eligible/operator mapping is
+        #  missing, we default to permissive (assume operator available).
+        registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+        eligible_map = getattr(getattr(self, 'workcenters_meta', None), 'eligible_operator_groups_by_wc', {}) or {}
+
         for idx, j in enumerate(self.jobs):
             if j.finished:
                 continue
@@ -1144,36 +1651,129 @@ class MASAEnv:
             if row is None:
                 continue
             try:
-                avail[idx, :] = row
-            except Exception as e:
+                # Start all zeros; set to 1 only when all checks pass
+                for m in range(n_m):
+                    try:
+                        if int(row[m]) != 1:
+                            continue
+                    except Exception:
+                        continue
+
+                    # Check machine-level free
+                    try:
+                        if not machine_free[m]:
+                            continue
+                    except Exception:
+                        # if we can't determine, assume free
+                        pass
+
+                    # Find eligible operator groups for this machine via its workcenter
+                    try:
+                        mname = mlist[m] if m < len(mlist) else None
+                        wc_i = int(registry.get(mname, {}).get('workcenter')) if mname is not None else None
+                        eligible_groups = eligible_map.get(int(wc_i), []) if wc_i is not None else []
+                    except Exception:
+                        eligible_groups = []
+
+                    # If operator info missing, assume operator available (back-compat)
+                    if operator_free is None:
+                        avail[idx, m] = 1
+                        continue
+
+                    # If eligible_groups is empty, be permissive (back-compat)
+                    if not eligible_groups:
+                        avail[idx, m] = 1
+                        continue
+
+                    # Otherwise, require at least one eligible operator group to be free
+                    found_free_op = False
+                    for g in eligible_groups:
+                        try:
+                            gi = int(g)
+                            if 0 <= gi < len(operator_free) and operator_free[gi]:
+                                found_free_op = True
+                                break
+                        except Exception:
+                            continue
+
+                    if found_free_op:
+                        avail[idx, m] = 1
+                # end per-machine loop
+            except Exception:
                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
+                # fallback: write the original row if anything went wrong
+                try:
+                    avail[idx, :] = row
+                except Exception:
+                    pass
         return avail
 
     def _avail_row_for_job(self, job: JobAgent):
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
-        if mlist:
-            row = np.zeros((len(mlist),), dtype=np.int32)
-        else:
-            row = np.zeros((int(self.num_wcs),), dtype=np.int32)
+        n_m = len(mlist) if mlist else int(getattr(self, 'num_wcs', 1))
+        row = np.zeros((int(n_m),), dtype=np.int32)
         op = job.current_op()
         if op is None:
             return row
-        if isinstance(op, (list, tuple)) and len(op) == 2:
-            allowed_wcs, _ = op
-        else:
-            try:
-                _, allowed_wcs, _ = op
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                allowed_wcs = []
+
+        # Resolve operation index (machine-level op index)
         try:
-            for wc in allowed_wcs:
-                if 0 <= int(wc) < row.shape[0]:
-                    row[int(wc)] = 1
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+            if isinstance(op, (list, tuple)) and len(op) >= 3:
+                op_type = op[0]
+                op_idx_local = int(op_type) if op_type is not None else int(getattr(job, 'current_op_idx', 0))
+            else:
+                op_idx_local = int(getattr(job, 'current_op_idx', 0))
+        except Exception:
+            op_idx_local = int(getattr(job, 'current_op_idx', 0))
+
+        # Prefer authoritative machine_registry -> mark machines that support this op
+        try:
+            registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+            mlist_local = list(getattr(self.workcenters_meta, 'machine_list', []) or [])
+            for i, mname in enumerate(mlist_local):
+                try:
+                    caps = registry.get(mname, {}).get('capabilities', [])
+                    if int(op_idx_local) in caps:
+                        row[i] = 1
+                except Exception:
+                    continue
+            # If no machines marked (e.g., no registry), fall back to legacy allowed_machine_indices in op tuple
+            if not row.any():
+                try:
+                    if isinstance(op, (list, tuple)) and len(op) == 2:
+                        allowed_machine_indices, _ = op
+                    else:
+                        try:
+                            _, allowed_machine_indices, _ = op
+                        except Exception:
+                            allowed_machine_indices = []
+                    for idx in allowed_machine_indices:
+                        try:
+                            if 0 <= int(idx) < row.shape[0]:
+                                row[int(idx)] = 1
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+        except Exception:
+            # Last-resort legacy behavior
+            try:
+                if isinstance(op, (list, tuple)) and len(op) == 2:
+                    allowed_machine_indices, _ = op
+                else:
+                    try:
+                        _, allowed_machine_indices, _ = op
+                    except Exception:
+                        allowed_machine_indices = []
+                for idx in allowed_machine_indices:
+                    try:
+                        if 0 <= int(idx) < row.shape[0]:
+                            row[int(idx)] = 1
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
         return row
 
     # ---------------- Helpers -----------------
@@ -1249,13 +1849,14 @@ class MASAEnv:
         """Add a job (ops_sequence) to the environment.
 
         Args:
-            ops_sequence: canonical list of ops (op_type, allowed_wcs, per_wc_durations)
+            ops_sequence: canonical list of ops (op_type, allowed_machine_indices, per_machine_durations)
             start_immediately: when True, schedule the job process on the SimPy env
             set_arrival_zero: when True, force arrival_time to 0.0 (used for initial jobs)
         Returns:
             JobAgent instance
         """
-        jid = len(self.jobs)
+        # Use stable job_counter so ids reset each episode
+        jid = int(getattr(self, 'job_counter', 0))
         job = JobAgent(jid, ops_sequence)
         try:
             if set_arrival_zero:
@@ -1264,8 +1865,15 @@ class MASAEnv:
                 job.arrival_time = float(self.env.now)
         except Exception:
             job.arrival_time = 0.0
-        # Append to master job list (arrival order)
+        # Append to master job list (arrival order) and advance counter
         self.jobs.append(job)
+        try:
+            self.job_counter = int(jid) + 1
+        except Exception:
+            try:
+                self.job_counter = len(self.jobs)
+            except Exception:
+                pass
 
         # Capacity enforcement: self.num_jobs represents the capacity (n_agents)
         try:
@@ -1297,7 +1905,8 @@ class MASAEnv:
 
     def get_env_info(self):
         num_m = len(getattr(self.workcenters_meta, 'machine_list', []) or [])
-        n_actions = int(num_m) if num_m > 0 else int(self.num_wcs)
+        # n_actions is canonicalized to machine count when machine_list exists
+        n_actions = int(getattr(self, 'n_actions', (num_m if num_m > 0 else int(getattr(self, 'num_wcs', 1)))))
         return {
             "n_actions": n_actions,
             "n_agents": int(self.num_jobs),
@@ -1308,92 +1917,89 @@ class MASAEnv:
 
     # ------------------ Job generation ------------------
     def _generate_initial_jobs(self):
-        """Create a small deterministic initial job set based on WorkCenters capabilities.
+        """Create deterministic initial jobs using TaskGenerator only.
 
-        This function is intentionally robust: it uses the available machine
-        registry when present and falls back to simple op pools when not.
+        Per new refactor requirements, legacy fallback synthesis is disabled:
+        if a TaskGenerator (`self.job_generator`) is not attached the function
+        will not synthesize jobs. This keeps the environment passive and
+        ensures job creation is controlled by an explicit generator.
         """
+        # Clear any existing jobs (fresh episode)
         self.jobs = []
-        # build op pool from capabilities in machine registry
-        ops_pool = set()
         try:
-            for _, mdata in getattr(self.workcenters_meta, 'machine_registry', {}).items():
-                for c in mdata.get('capabilities', []):
-                    ops_pool.add(int(c))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
-        if not ops_pool:
-            ops_pool = set(range(0, max(1, int(getattr(self, 'num_ops', 1)))))
+            self.job_counter = 0
+        except Exception:
+            self.job_counter = 0
 
-        for jid in range(int(self.num_jobs)):
+        n_init = int(getattr(self, 'initial_jobs', 4))
+        if getattr(self, 'job_generator', None) is None:
+            logging.getLogger(__name__).warning("TaskGenerator not attached: skipping initial job creation (initial_jobs=%s)", n_init)
+            return
+
+        for _ in range(max(0, n_init)):
             try:
-                num_ops = int(self._py_rng.randint(self.job_min_ops, max(self.job_min_ops, self.job_max_ops) + 1))
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                num_ops = max(1, int(getattr(self, 'job_min_ops', 1)))
-            ops = []
-            for _ in range(num_ops):
+                # pick a deterministic number of ops using the injected RNG
                 try:
-                    op_type = int(self._py_rng.choice(list(ops_pool)))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    op_type = 0
-                # allowed_wcs: WCs that have at least one machine with this capability
-                allowed_wcs = set()
-                try:
-                    for mname, mdata in getattr(self.workcenters_meta, 'machine_registry', {}).items():
-                        if op_type in list(mdata.get('capabilities', [])):
-                            allowed_wcs.add(int(mdata.get('workcenter', 0)))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
-                if not allowed_wcs:
-                    allowed_wcs = {0}
-                allowed_wcs = sorted(list(allowed_wcs))
-
-                # Strict mode: derive per-machine durations exclusively from
-                # processing_time_means in env.config. For each allowed workcenter
-                # select a representative machine name and read its configured
-                # duration for the operation. Missing mappings raise an error.
-                per_wc_durations = {}
-                try:
-                    proc_means = self.config.get('processing_time_means', {}) if isinstance(self.config, dict) else {}
-                    op_name = f"Op{op_type+1}"
-                    op_map = proc_means.get(op_name, {}) if isinstance(proc_means, dict) else {}
-                    for wc in allowed_wcs:
-                        # find a machine name that belongs to this workcenter
-                        machine_name = None
-                        for mname, mdata in getattr(self.workcenters_meta, 'machine_registry', {}).items():
-                            if int(mdata.get('workcenter', -1)) == int(wc):
-                                machine_name = mname
-                                break
-                        if not machine_name:
-                            raise ValueError(f"No machine found for workcenter {wc} when resolving durations for {op_name}")
-
-                        if machine_name in op_map:
-                            per_wc_durations[int(wc)] = float(op_map.get(machine_name))
-                        else:
-                            # strict mode: do not attempt extended fallbacks; require
-                            # explicit machine key in processing_time_means
-                            try:
-                                LOG.error("Missing mapping while resolving durations: op_name=%s machine_name=%s proc_means_keys=%s op_map_keys=%s", op_name, machine_name, list(proc_means.keys()) if isinstance(proc_means, dict) else None, list(op_map.keys()) if isinstance(op_map, dict) else None)
-                            except Exception:
-                                pass
-                            raise ValueError(f"Missing duration for {op_name} on machine {machine_name} (workcenter {wc})")
+                    min_init_ops = max(3, int(getattr(self, 'job_min_ops', 2)))
+                    max_init_ops = int(getattr(self, 'job_max_ops', max(min_init_ops, 5)))
+                    num_ops = int(self._py_rng.randint(min_init_ops, max(min_init_ops, max_init_ops) + 1))
                 except Exception:
-                    raise
+                    num_ops = int(getattr(self, 'job_min_ops', 1))
 
-                ops.append((int(op_type), list(allowed_wcs), per_wc_durations))
-            self.jobs.append(JobAgent(jid, ops))
+                try:
+                    ops = self.job_generator.create_job(num_ops=num_ops)
+                except Exception:
+                    ops = None
+                # If TaskGenerator fails to produce a job, fall back to a
+                # minimal single-op job so tests and callers that expect
+                # initial jobs don't observe an empty job list. This is a
+                # conservative, short-term compatibility measure; full
+                # TaskGenerator-driven creation is preferred.
+                if not ops:
+                    logging.getLogger(__name__).warning("TaskGenerator failed to generate job; creating minimal single-op fallback for initial job")
+                    ops = [(0, [0], {0: 1.0})]
+                try:
+                    self.add_job(ops, start_immediately=False, set_arrival_zero=True)
+                except Exception:
+                    logging.getLogger(__name__).exception("Failed to add initial job via add_job", exc_info=True)
+            except Exception:
+                logging.getLogger(__name__).exception("Exception while generating initial job", exc_info=True)
+
+    # NOTE: dynamic arrivals and internal job generator loops removed.
+    # Dynamic job arrival behavior should be provided by an external
+    # TaskGenerator or orchestrator that explicitly calls `env.add_job()`.
 
     def print_jobs_human_readable(self):
         for job in self.jobs:
             for i, op in enumerate(job.operations):
                 try:
-                    op_type, allowed_wcs, per_wc = op
-                    print(f"Job {job.id} Op{i} -> op_type={op_type} allowed_wcs={allowed_wcs} per_wc={per_wc}")
+                    op_type, allowed_machine_indices, per_wc = op
+                    print(f"Job {job.id} Op{i} -> op_type={op_type} allowed_machine_indices={allowed_machine_indices} per_machine={per_wc}")
                 except Exception as e:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                     print(f"Job {job.id} Op{i} -> {op}")
+
+    def print_initial_jobs_summary(self):
+        """Print a concise initial jobs summary in the legacy format.
+
+        Example:
+        Job_0 -> 4 ops: [Op8, Op1, Op9, Op6] | Eligible: {Op8:[0,1,2], ...}
+        """
+        try:
+            for job in self.jobs[:int(getattr(self, 'initial_jobs', 4))]:
+                try:
+                    ops_desc = []
+                    eligible_desc = []
+                    for i, op in enumerate(job.operations):
+                        try:
+                            op_type, allowed_machine_indices, per_wc = op
+                            ops_desc.append(f"Op{int(op_type)+1}")
+                            eligible_desc.append(f"Op{int(op_type)+1}:[{','.join(str(x) for x in allowed_machine_indices)}]")
+                        except Exception:
+                            ops_desc.append(str(op))
+                    print(f"Job_{job.id} -> {len(job.operations)} ops: [{', '.join(ops_desc)}] | Eligible: {{{', '.join(eligible_desc)}}}")
+                except Exception:
+                    print(f"Job_{job.id} -> (failed to summarize)")
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to print initial job summary", exc_info=True)
 

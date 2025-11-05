@@ -145,11 +145,12 @@ def write_job_timeline(path: str, records: Iterable[Record]) -> None:
         return
 
 
-def append_selection_log(path: str, sim_time, job_id, allowed_wcs, avail_mask, chosen_idx, chosen_name, reason):
+def append_selection_log(path: str, sim_time, job_id, allowed_machine_indices, avail_actions, chosen_idx, chosen_name, reason):
     """Append a single selection event line to a scheduling_trace-like CSV.
 
-    Columns: time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason
+    Columns: time,job_id,allowed_machine_indices,avail_actions,chosen_machine_idx,chosen_machine_name,reason
     Creates file with header if it does not exist.
+    Note: `avail_actions` is the machine-major availability row (list-like).
     """
     try:
         header_needed = not Path(path).exists()
@@ -157,8 +158,8 @@ def append_selection_log(path: str, sim_time, job_id, allowed_wcs, avail_mask, c
             return
         with open(path, 'a', encoding='utf-8') as sf:
             if header_needed:
-                sf.write('time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason\n')
-            sf.write(f"{sim_time},{job_id},{allowed_wcs},{avail_mask},{chosen_idx},{repr(chosen_name)},{reason}\n")
+                sf.write('time,job_id,allowed_machine_indices,avail_actions,chosen_machine_idx,chosen_machine_name,reason\n')
+            sf.write(f"{sim_time},{job_id},{allowed_machine_indices},{avail_actions},{chosen_idx},{repr(chosen_name)},{reason}\n")
     except Exception:
         pass
 
@@ -230,16 +231,16 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                     try:
                         if isinstance(op, (list, tuple)) and len(op) >= 2:
                             op_type = int(op[0]) if isinstance(op[0], (int, float)) else None
-                            allowed_wcs = list(op[1])
+                            allowed_machine_indices = list(op[1])
                         else:
                             op_type = None
-                            allowed_wcs = []
+                            allowed_machine_indices = []
                     except Exception:
                         op_type = None
-                        allowed_wcs = []
+                        allowed_machine_indices = []
                     opname = f"Op{(op_type + 1) if op_type is not None else i+1}"
                     op_names.append(opname)
-                    eligible[opname] = list(allowed_wcs)
+                    eligible[opname] = list(allowed_machine_indices)
                 lines.append(f"Job_{jid} → {len(ops)} ops: [{', '.join(op_names)}] | Eligible: {{{', '.join([f'{k}:{v}' for k,v in eligible.items()])}}}")
             except Exception:
                 lines.append(str(job))
@@ -273,13 +274,13 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
             for idx, op in enumerate(ops):
                 try:
                     if isinstance(op, (list, tuple)) and len(op) >= 2:
-                        allowed_wcs = list(op[1])
+                        allowed_machine_indices = list(op[1])
                     else:
-                        allowed_wcs = []
+                        allowed_machine_indices = []
                 except Exception:
-                    allowed_wcs = []
+                    allowed_machine_indices = []
                 opname = f"Op{(int(op[0]) + 1) if isinstance(op, (list, tuple)) and isinstance(op[0], (int, float)) else idx+1}"
-                amap[opname] = list(allowed_wcs)
+                amap[opname] = list(allowed_machine_indices)
             jobs_allowed[jid] = amap
         except Exception:
             continue
@@ -288,16 +289,32 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     # For job completion detection, track counts per job
     job_op_seen = {}
     for rec in records:
+        # Support both dict-style records (new) and tuple/list legacy records
+        decision_trace = None
         try:
-            # rec layout in this module: (start, end, op, wc, job_id, op_grp, arrival, dur)
-            start, end, op_idx, wc_idx, job_id, op_grp, arrival, dur = rec[:8]
+            if isinstance(rec, dict):
+                start = float(rec.get('start', rec.get('s', 0.0)))
+                end = float(rec.get('end', rec.get('e', 0.0)))
+                op_idx = rec.get('op_idx', rec.get('op', None))
+                wc_idx = rec.get('wc_idx', rec.get('wc', None))
+                job_id = rec.get('job_id', rec.get('job_id', None))
+                op_grp = rec.get('op_grp', rec.get('operator_grp', None))
+                arrival = rec.get('arrival', None)
+                dur = rec.get('duration', None)
+                decision_trace = rec.get('decision_trace', None)
+            else:
+                try:
+                    # rec layout in this module: (start, end, op, wc, job_id, op_grp, arrival, dur)
+                    start, end, op_idx, wc_idx, job_id, op_grp, arrival, dur = rec[:8]
+                except Exception:
+                    # try other fallbacks
+                    try:
+                        start, end, op_idx, wc_idx, job_id = rec[:5]
+                        arrival = None; dur = None; op_grp = None
+                    except Exception:
+                        continue
         except Exception:
-            # try other fallbacks
-            try:
-                start, end, op_idx, wc_idx, job_id = rec[:5]
-                arrival = None; dur = None; op_grp = None
-            except Exception:
-                continue
+            continue
         try:
             op_name = f"Op{int(op_idx) + 1}" if isinstance(op_idx, (int, float)) and float(op_idx).is_integer() else str(op_idx)
         except Exception:
@@ -327,52 +344,186 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
 
         start_text = f"[t={start:.2f}] Job_{int(job_id)}.{op_name} started on {machine_name} by {op_label} (duration={float(dur) if dur is not None else (end - start):.2f}) | eligible={eligible_names}"
 
-        # Determine machine/operator busy state at start time by scanning other records
-        machine_busy = False
-        operator_busy = False
-        operator_unknown = op_label in (None, '', 'UNASSIGNED')
-        try:
-            for other in records:
-                try:
-                    os_ = float(other[0]); oe_ = float(other[1]); owc = other[3]
-                except Exception:
-                    continue
-                # skip self-record equality checks by identity if possible
-                try:
-                    same = (other is rec)
-                except Exception:
-                    same = False
-                if same:
-                    continue
-                # machine busy if another record overlaps start on same machine
-                try:
-                    if int(owc) == int(wc_idx) and os_ < float(start) and oe_ > float(start):
-                        machine_busy = True
-                except Exception:
-                    pass
-                # operator busy if operator identifier matches and overlaps start
-                try:
-                    other_op = other[5]
-                    if (not operator_unknown) and other_op is not None and str(other_op) == op_label and float(other[0]) < float(start) and float(other[1]) > float(start):
-                        operator_busy = True
-                except Exception:
-                    pass
-        except Exception:
-            pass
 
-        if not machine_busy and not operator_busy:
-            if operator_unknown:
-                reason = "selected machine available (operator unknown)"
-            else:
-                reason = "selected machine and operator available"
-        elif machine_busy and not operator_busy:
-            reason = "waiting for available machine"
-        elif not machine_busy and operator_busy:
-            reason = "waiting for available operator"
+        # If the record contains a decision_trace created at decision time,
+        # prefer that structured explanation. Otherwise fall back to the
+        # historical heuristic computed from records.
+        if decision_trace:
+            try:
+                # decision_trace is expected as a dict (from asdict)
+                chosen_m = decision_trace.get('chosen_machine')
+                chosen_o = decision_trace.get('chosen_operator')
+                pol = decision_trace.get('policy_reason', '')
+                elig = decision_trace.get('eligibilities', []) or []
+
+                # build top-level phrase
+                if chosen_o:
+                    reason = f"selected {chosen_m} & {chosen_o} ({pol})"
+                else:
+                    reason = f"selected {chosen_m} ({pol})"
+
+                # build other-machine explanations
+                other_parts = []
+                for e in elig:
+                    try:
+                        mid = str(e.get('machine_id'))
+                        if mid == str(chosen_m):
+                            continue
+                        mstate = 'busy' if bool(e.get('machine_busy')) else 'free'
+                        opid = e.get('operator_id')
+                        qual = e.get('qualified')
+                        opbusy = e.get('operator_busy')
+                        op_av = e.get('operator_available_at')
+                        if qual is False:
+                            note = f"{mid} no qualified operator"
+                        else:
+                            if opid is None:
+                                note = f"{mid} {mstate} / operator unknown"
+                            else:
+                                if opbusy is True:
+                                    if op_av is not None:
+                                        note = f"{mid} {mstate} / {opid} busy (avail@ t={float(op_av):.2f})"
+                                    else:
+                                        note = f"{mid} {mstate} / {opid} busy"
+                                elif opbusy is False:
+                                    note = f"{mid} {mstate} / {opid} free but not chosen"
+                                else:
+                                    note = f"{mid} {mstate} / {opid} unknown"
+                        other_parts.append(note)
+                    except Exception:
+                        continue
+                if other_parts:
+                    reason = reason + " | Other: " + "; ".join(other_parts)
+                start_text = start_text + f"\n  Reason: {reason}"
+            except Exception:
+                # if anything goes wrong while decoding trace, fall back
+                start_text = start_text + "\n  Reason: (decision_trace present but failed to render)"
         else:
-            reason = "waiting for available machine and operator"
+            # Determine machine/operator busy state at start time by scanning other records
+            machine_busy = False
+            operator_busy = False
+            operator_unknown = op_label in (None, '', 'UNASSIGNED')
+            try:
+                for other in records:
+                    try:
+                        os_ = float(other[0]); oe_ = float(other[1]); owc = other[3]
+                    except Exception:
+                        continue
+                    # skip self-record equality checks by identity if possible
+                    try:
+                        same = (other is rec)
+                    except Exception:
+                        same = False
+                    if same:
+                        continue
+                    # machine busy if another record overlaps start on same machine
+                    try:
+                        if int(owc) == int(wc_idx) and os_ < float(start) and oe_ > float(start):
+                            machine_busy = True
+                    except Exception:
+                        pass
+                    # operator busy if operator identifier matches and overlaps start
+                    try:
+                        other_op = other[5]
+                        if (not operator_unknown) and other_op is not None and str(other_op) == op_label and float(other[0]) < float(start) and float(other[1]) > float(start):
+                            operator_busy = True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-        start_text = start_text + f"\n  Reason: {reason}"
+            # Build per-eligible-machine reasons to explain why other eligible
+            # machines were or were not chosen. For each eligible machine, indicate
+            # whether the machine was busy at the op start time and whether any
+            # qualified operator appeared busy (when operator metadata is present).
+            others_reasons = []
+            try:
+                env_obj = env
+                # iterate over indices and friendly names together
+                for midx, mname in zip(eligible_idxs, eligible_names):
+                    try:
+                        # determine if this machine was busy at `start`
+                        m_busy = False
+                        for other in records:
+                            try:
+                                os_ = float(other[0]); oe_ = float(other[1]); owc = other[3]
+                            except Exception:
+                                continue
+                            try:
+                                if int(owc) == int(midx) and os_ < float(start) and oe_ > float(start):
+                                    m_busy = True
+                                    break
+                            except Exception:
+                                continue
+
+                        # determine operator busy state for operators qualified for this machine
+                        op_busy_for_machine = False
+                        try:
+                            ops_mgr = getattr(env_obj, 'operators', None)
+                            if ops_mgr is not None:
+                                # inspect known operator objects and their historical records
+                                for op_obj in getattr(ops_mgr, 'operators_object_list', []) or []:
+                                    try:
+                                        # check whether this operator is qualified for the machine
+                                        qual_machines = getattr(op_obj, 'qualified_machines', []) or []
+                                        # fall back to qualified_workcenters mapping if present
+                                        if mname in qual_machines:
+                                            # look for overlapping gantt records that used this operator
+                                            for other in records:
+                                                try:
+                                                    other_op = other[5]
+                                                    if str(other_op) == str(getattr(op_obj, 'operator_id', '')) and float(other[0]) < float(start) and float(other[1]) > float(start):
+                                                        op_busy_for_machine = True
+                                                        break
+                                                except Exception:
+                                                    continue
+                                        if op_busy_for_machine:
+                                            break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            op_busy_for_machine = False
+
+                        # compose short reason
+                        try:
+                            if m_busy:
+                                txt = f"{mname} busy"
+                            else:
+                                txt = f"{mname} available"
+                                if op_busy_for_machine:
+                                    txt += " (operator busy)"
+                        except Exception:
+                            txt = str(mname)
+                        others_reasons.append(txt)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # top-level reason for the chosen machine/operator (preserve existing phrasing)
+            if not machine_busy and not operator_busy:
+                if operator_unknown:
+                    reason = "selected machine available (operator unknown)"
+                else:
+                    reason = "selected machine and operator available"
+            elif machine_busy and not operator_busy:
+                reason = "waiting for available machine"
+            elif not machine_busy and operator_busy:
+                reason = "waiting for available operator"
+            else:
+                reason = "waiting for available machine and operator"
+
+            # append per-eligible-machine details when we were able to compute them
+            try:
+                if others_reasons:
+                    # avoid repeating the chosen machine in the 'others' list
+                    filtered = [r for r in others_reasons if not r.startswith(machine_name)]
+                    if filtered:
+                        reason = reason + " | Other eligibilities: " + "; ".join(filtered)
+            except Exception:
+                pass
+
+            start_text = start_text + f"\n  Reason: {reason}"
         events.append((float(start), 1, start_text))
 
         # finish event (priority 2) — always show verbatim operator label
@@ -423,7 +574,10 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     max_end = 0.0
     for rec in records:
         try:
-            end = float(rec[1])
+            if isinstance(rec, dict):
+                end = float(rec.get('end', rec.get('e', 0.0)))
+            else:
+                end = float(rec[1])
             if end > max_end:
                 max_end = end
         except Exception:
@@ -437,7 +591,12 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     job_last_end = {}
     for rec in records:
         try:
-            s, e, op_idx, wc_idx, job_id = rec[:5]
+            if isinstance(rec, dict):
+                s = float(rec.get('start', rec.get('s', 0.0)))
+                e = float(rec.get('end', rec.get('e', 0.0)))
+                job_id = rec.get('job_id', rec.get('job_id', None))
+            else:
+                s, e, op_idx, wc_idx, job_id = rec[:5]
             jid = int(job_id)
             job_last_end[jid] = max(job_last_end.get(jid, 0.0), float(e))
         except Exception:
@@ -456,40 +615,56 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     report = "\n".join(lines)
 
     # Optionally write to disk when the caller explicitly asked for it.
-    # The authoritative `scheduling_timeline.txt` is still gated by the
-    # central IO control (allow_history_writes()). However, when the
-    # caller supplied `write_if_allowed=True` we make a best-effort to
-    # produce a deterministic always-overwrite copy
-    # `scheduling_timeline.latest.txt` so debug/inspection tools can
-    # rely on a stable filename even when the central gate denies full
-    # history writes (e.g., in CI/tests).
+    # The authoritative `scheduling_timeline.txt` is gated by the central
+    # IO control (`allow_history_writes()`). To ensure the timeline file is
+    # meaningful and only created when runtime data exists, we only write
+    # the authoritative timeline when there are gantt records present for
+    # the requested episode(s). The legacy deterministic `.latest` copy has
+    # been removed — we no longer write or reference any `scheduling_timeline.latest.txt`.
     if write_if_allowed:
         try:
             import os
             # prefer provided out_dir, otherwise default to project historydata
             out_dir = out_dir or os.path.join('my_data_and_graph', 'historydata')
             os.makedirs(out_dir, exist_ok=True)
+            # Ensure any legacy `.latest` snapshot is removed so only the
+            # authoritative `scheduling_timeline.txt` remains. We no longer
+            # produce `.latest` files; remove any old copies left on disk.
+            try:
+                latest_path = os.path.join(out_dir, 'scheduling_timeline.latest.txt')
+                if os.path.exists(latest_path):
+                    try:
+                        os.remove(latest_path)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-            # Write the authoritative timeline only when history writes are allowed.
+            # Only write the authoritative timeline when history writes are allowed
+            # and when there are gantt records to report. This prevents creating
+            # placeholder timeline files before simulation data exists.
             if allow_history_writes():
                 try:
                     out_path = os.path.join(out_dir, 'scheduling_timeline.txt')
+
                     # If records include per-record episode stamps and caller
                     # did not provide an episode_id, write grouped per-episode
-                    # sections by invoking this generator for each episode.
+                    # sections by invoking this generator for each episode. Only
+                    # write an episode block if there are records for that episode.
                     if episode_id is None and has_ep_stamp:
                         try:
                             ep_ids = sorted({int(r[8]) for r in records if isinstance(r, (list, tuple)) and len(r) >= 9 and r[8] is not None})
                         except Exception:
                             ep_ids = []
-                        combined_latest_parts = []
                         for i, ep in enumerate(ep_ids):
                             try:
                                 # produce per-episode text without triggering writes
                                 ep_report = generate_scheduling_timeline(env, episode_id=ep, episode_reward=None, write_if_allowed=False, out_dir=out_dir)
                             except Exception:
                                 ep_report = ''
-                            # Decide mode: overwrite if first episode and file missing or ep==0 requested as fresh
+                            # Skip writing empty episode reports
+                            if not ep_report or ep_report.strip() == '':
+                                continue
                             mode = 'a'
                             if (i == 0 and (episode_id == 0 or not os.path.exists(out_path))) or (ep == 0 and not os.path.exists(out_path)):
                                 mode = 'w'
@@ -498,7 +673,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                     f.write(f"=== EPISODE {ep} ===\n")
                                     f.write(ep_report)
                                     f.write("\n")
-                                    # Append some conservative episode-level metadata
+                                    # Append conservative episode-level metadata
                                     try:
                                         f.write("--- EPISODE METADATA ---\n")
                                         f.write(f"episode_reward = {None}\n")
@@ -512,74 +687,43 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                             except Exception:
                                 # best-effort: continue with other episodes
                                 pass
-                            # collect for the deterministic latest copy
-                            try:
-                                combined_latest_parts.append(f"=== EPISODE {ep} ===\n" + ep_report + "\n" + "--- EPISODE METADATA ---\n" + f"episode_reward = {None}\n" + f"total_jobs_generated = {total_jobs_generated}\n" + f"total_operations_executed = {total_operations_executed}\n" + f"average_wait_time = {avg_wait:.2f}\n" + f"average_makespan = {avg_makespan:.2f}\n")
-                            except Exception:
-                                pass
-                        # replace report with combined for latest file write below
-                        try:
-                            report_for_latest = "\n".join(combined_latest_parts)
-                        except Exception:
-                            report_for_latest = report
                     else:
-                        # legacy behavior: single-block write
-                        mode = 'a'
-                        if episode_id == 0 or not os.path.exists(out_path):
-                            mode = 'w'
-                        try:
-                            with open(out_path, mode, encoding='utf-8') as f:
-                                # Episode header
-                                if episode_id is not None:
-                                    f.write(f"=== EPISODE {episode_id} ===\n")
-                                else:
-                                    f.write("=== EPISODE (unknown) ===\n")
-                                # Write the report (initial jobs, timeline, summary)
-                                f.write(report)
-                                f.write("\n")
-                                # Append episode-level metadata
-                                try:
-                                    f.write("--- EPISODE METADATA ---\n")
-                                    f.write(f"episode_reward = {episode_reward}\n")
-                                except Exception:
-                                    pass
-                                f.write(f"total_jobs_generated = {total_jobs_generated}\n")
-                                f.write(f"total_operations_executed = {total_operations_executed}\n")
-                                f.write(f"average_wait_time = {avg_wait:.2f}\n")
-                                f.write(f"average_makespan = {avg_makespan:.2f}\n")
-                                f.write("\n")
-                        except Exception:
-                            # don't fail the outer writer when the authoritative write fails
+                        # Single-block write for the provided episode_id or unknown
+                        # episode – only write if there are records present.
+                        if not records:
+                            # no runtime records -> skip writing to avoid placeholders
                             pass
+                        else:
+                            mode = 'a'
+                            if episode_id == 0 or not os.path.exists(out_path):
+                                mode = 'w'
+                            try:
+                                with open(out_path, mode, encoding='utf-8') as f:
+                                    # Episode header
+                                    if episode_id is not None:
+                                        f.write(f"=== EPISODE {episode_id} ===\n")
+                                    else:
+                                        f.write("=== EPISODE (unknown) ===\n")
+                                    # Write the report (initial jobs, timeline, summary)
+                                    f.write(report)
+                                    f.write("\n")
+                                    # Append episode-level metadata
+                                    try:
+                                        f.write("--- EPISODE METADATA ---\n")
+                                        f.write(f"episode_reward = {episode_reward}\n")
+                                    except Exception:
+                                        pass
+                                    f.write(f"total_jobs_generated = {total_jobs_generated}\n")
+                                    f.write(f"total_operations_executed = {total_operations_executed}\n")
+                                    f.write(f"average_wait_time = {avg_wait:.2f}\n")
+                                    f.write(f"average_makespan = {avg_makespan:.2f}\n")
+                                    f.write("\n")
+                            except Exception:
+                                # don't fail the outer writer when the authoritative write fails
+                                pass
                 except Exception:
                     # don't fail the outer writer when the authoritative write fails
                     pass
-
-            # Always attempt to write the deterministic latest copy when the
-            # caller requested writing. This is best-effort and will not
-            # raise on failure.
-            try:
-                latest_path = os.path.join(out_dir, 'scheduling_timeline.latest.txt')
-                with open(latest_path, 'w', encoding='utf-8') as lf:
-                    if episode_id is not None:
-                        lf.write(f"=== EPISODE {episode_id} ===\n")
-                    else:
-                        lf.write("=== EPISODE (unknown) ===\n")
-                    lf.write(report)
-                    lf.write("\n")
-                    try:
-                        lf.write("--- EPISODE METADATA ---\n")
-                        lf.write(f"episode_reward = {episode_reward}\n")
-                    except Exception:
-                        pass
-                    lf.write(f"total_jobs_generated = {total_jobs_generated}\n")
-                    lf.write(f"total_operations_executed = {total_operations_executed}\n")
-                    lf.write(f"average_wait_time = {avg_wait:.2f}\n")
-                    lf.write(f"average_makespan = {avg_makespan:.2f}\n")
-                    lf.write("\n")
-            except Exception:
-                # best-effort: do not fail main writer on errors writing latest copy
-                pass
         except Exception:
             # do not fail on write errors; return report anyway
             pass

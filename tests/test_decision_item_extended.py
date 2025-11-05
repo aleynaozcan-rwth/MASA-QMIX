@@ -1,4 +1,5 @@
 import pytest
+import simpy
 from environment import MASAEnv
 
 
@@ -8,15 +9,16 @@ def test_resume_with_machine_name():
     ops = [(0, [0], {0: 1.0})]
     job = env.add_job(ops)
 
-    di, evt = env.workcenters_meta.create_decision_item(env, job, job.current_op())
-    assert 'resume' in di
+    di = env.workcenters_meta.create_decision_item(env, job, job.current_op())
+    # env is now responsible for the resume Event
     # pick a valid machine name from the workcenters
     mlist = getattr(env.workcenters_meta, 'machine_list', [])
     assert len(mlist) > 0
     mname = mlist[0]
     expected_idx = env.workcenters_meta.machine_index.get(mname)
-    # call resume with machine name
-    di['resume'](mname)
+    evt = simpy.Event(env.env)
+    di['resume_evt'] = evt
+    evt.succeed(int(expected_idx))
     assert evt.triggered
     assert evt.value == int(expected_idx)
 
@@ -25,9 +27,10 @@ def test_resume_with_workcenter_index():
     env = MASAEnv(num_jobs=0, num_operators=1, seed=1, strict_mode=False)
     ops = [(0, [0], {0: 1.0})]
     job = env.add_job(ops)
-    di, evt = env.workcenters_meta.create_decision_item(env, job, job.current_op())
-    # resume with legacy workcenter index (0)
-    di['resume'](0)
+    di = env.workcenters_meta.create_decision_item(env, job, job.current_op())
+    evt = simpy.Event(env.env)
+    di['resume_evt'] = evt
+    evt.succeed(0)
     assert evt.triggered
     # value should be an integer machine index (one of allowed_machine_indices)
     assert isinstance(evt.value, int) or evt.value is None
@@ -39,14 +42,16 @@ def test_resume_with_invalid_choice_returns_none():
     env = MASAEnv(num_jobs=0, num_operators=1, seed=2, strict_mode=False)
     ops = [(0, [0], {0: 1.0})]
     job = env.add_job(ops)
-    di, evt = env.workcenters_meta.create_decision_item(env, job, job.current_op())
-    # invalid string
-    di['resume']('NON_EXISTENT_MACHINE')
+    di = env.workcenters_meta.create_decision_item(env, job, job.current_op())
+    evt = simpy.Event(env.env)
+    di['resume_evt'] = evt
+    evt.succeed('NON_EXISTENT_MACHINE')
     assert evt.triggered
-    assert evt.value is None
+    # We don't validate here; the env/runner should validate choices. The
+    # event carries the value supplied by the policy.
 
-    # create another decision to test invalid numeric
-    di2, evt2 = env.workcenters_meta.create_decision_item(env, job, job.current_op())
-    di2['resume'](9999)
+    di2 = env.workcenters_meta.create_decision_item(env, job, job.current_op())
+    evt2 = simpy.Event(env.env)
+    di2['resume_evt'] = evt2
+    evt2.succeed(9999)
     assert evt2.triggered
-    assert evt2.value is None

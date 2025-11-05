@@ -19,7 +19,7 @@ def test_env_and_helper_agent_obs_equivalence():
 
     env = MASAEnv(auto_build=False, auto_load_config=False, auto_start_arrivals=False)
     # Add a minimal job so build_agent_obs has something to read
-    # Use a simple operation tuple: (op_type, allowed_wcs, per_wc_durations)
+    # Use a simple operation tuple: (op_type, allowed_machine_indices, per_machine_durations)
     ops = [(0, [0], {0: 1.0})]
     job = env.add_job(ops)
 

@@ -61,7 +61,7 @@ class MinimalSimPyEnv:
                 item = {
                     'job_id': job.id,
                     'obs': None,
-                    'allowed_wcs': [0],
+                    'allowed_machine_indices': [0],
                     'avail_row': [1],
                     'resume': make_resume(job),
                 }

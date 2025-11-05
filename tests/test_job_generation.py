@@ -1,8 +1,8 @@
 from environment import MASAEnv
 
 
-def test_allowed_wcs_subset_of_registry():
-    """Pytest: ensure allowed_wcs reported in jobs is a subset of the registry-derived eligible WCs."""
+def test_allowed_machine_indices_subset_of_registry():
+    """Pytest: ensure allowed_machine_indices reported in jobs is a subset of the registry-derived eligible WCs."""
     env = MASAEnv(num_jobs=50, num_operators=2, num_wcs=3)
     # build true wc->machines mapping from registry
     wc_to_machines = {}
@@ -13,7 +13,7 @@ def test_allowed_wcs_subset_of_registry():
     mismatches = []
     for job in env.jobs:
         for i, op in enumerate(job.operations):
-            op_type, allowed_wcs, per_wc = op
+            op_type, allowed_machine_indices, per_wc = op
             op_idx = int(op_type)
             true_allowed = []
             for wc_idx, machines in wc_to_machines.items():
@@ -22,8 +22,8 @@ def test_allowed_wcs_subset_of_registry():
                     if op_idx in caps:
                         true_allowed.append(wc_idx)
                         break
-            # allowed_wcs must be subset of true_allowed (after deterministic fallback)
-            if not set(allowed_wcs).issubset(set(true_allowed)):
-                mismatches.append((job.id, i, op_type, allowed_wcs, true_allowed))
+            # allowed_machine_indices must be subset of true_allowed (after deterministic fallback)
+            if not set(allowed_machine_indices).issubset(set(true_allowed)):
+                mismatches.append((job.id, i, op_type, allowed_machine_indices, true_allowed))
 
-    assert not mismatches, f"Found allowed_wcs values not subset of registry-eligible WCs: {mismatches}"
+    assert not mismatches, f"Found allowed_machine_indices values not subset of registry-eligible WCs: {mismatches}"

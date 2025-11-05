@@ -220,14 +220,17 @@ class TaskGenerator:
             for jobobj in ops_objs:
                 op_type = int(getattr(jobobj, 'index_id', 0))
                 op_name = f"Op{op_type+1}"
-                allowed_wcs = list(sorted(set(capability_map.get(op_type, []))))
-                if not allowed_wcs:
+                # Resolve allowed machines (machine indices) from capability_map
+                allowed_machine_indices = list(sorted(set(capability_map.get(op_type, []))))
+                if not allowed_machine_indices:
                     raise ValueError(f"No allowed workcenters for operation {op_name}; check machine capabilities")
+                # Convert allowed workcenters -> allowed_machine_indices and build per-machine durations
+                per_machine_indices = []
                 per_wc = {}
                 # For each allowed WC, resolve a machine name and lookup the
                 # processing_time_means entry for that machine. Missing entries
                 # are errors in strict mode.
-                for wc in allowed_wcs:
+                for wc in allowed_machine_indices:
                     # try to find a machine name that belongs to this workcenter
                     machine_name = None
                     try:
@@ -261,12 +264,25 @@ class TaskGenerator:
                     # for the exact canonical machine name. We do not accept
                     # legacy or derived fallback keys here.
                     if machine_name in op_map:
-                        per_wc[int(wc)] = float(op_map.get(machine_name))
+                        # map machine name -> machine index when emitting per-machine durations
+                        try:
+                            mi = int(getattr(getattr(self, '_owner_env', None), 'workcenters_meta', None).machine_index.get(machine_name)) if getattr(self, '_owner_env', None) is not None else None
+                        except Exception:
+                            try:
+                                # fallback: derive index from machines_cfg ordering
+                                mi = int(self.machine_name_by_wc.get(int(wc), 0))
+                            except Exception:
+                                mi = None
+                        if mi is None:
+                            # best-effort: do not fail here, attempt to use 0
+                            mi = 0
+                        per_machine_indices.append(int(mi))
+                        per_wc[int(mi)] = float(op_map.get(machine_name))
                     else:
                         # Strict behaviour: only YAML-provided mappings allowed.
                         raise ValueError(f"Missing duration for {op_name} on {machine_name} (workcenter {wc})")
 
-                converted_ops.append((op_type, allowed_wcs, per_wc))
+                converted_ops.append((op_type, per_machine_indices, per_wc))
 
             try:
                 # Prefer owner_env callback (set by MASAEnv) so we can call
@@ -307,7 +323,7 @@ class TaskGenerator:
         # Generate raw job objects (ops sequence)
         ops_objs = self.generate_constrained_task(num_ops=num_ops, jobagent_id=(len(getattr(env, 'jobs', [])) if env is not None else None))
 
-        # Convert ops_objs into (op_type, allowed_wcs, per_wc) tuples
+        # Convert ops_objs into (op_type, allowed_machine_indices, per_machine) tuples
         converted_ops = []
         capability_map = {op: [] for op in range(0, 32)}
         try:
@@ -322,11 +338,13 @@ class TaskGenerator:
         for jobobj in ops_objs:
             op_type = int(getattr(jobobj, 'index_id', 0))
             op_name = f"Op{op_type+1}"
-            allowed_wcs = list(sorted(set(capability_map.get(op_type, []))))
-            if not allowed_wcs:
+            allowed_machine_indices = list(sorted(set(capability_map.get(op_type, []))))
+            if not allowed_machine_indices:
                 raise ValueError(f"No allowed workcenters for operation {op_name}; check machine capabilities")
+            # Convert allowed workcenters -> allowed_machine_indices and build per-machine durations
+            per_machine_indices = []
             per_wc = {}
-            for wc in allowed_wcs:
+            for wc in allowed_machine_indices:
                 machine_name = None
                 try:
                     for mname, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
@@ -351,10 +369,20 @@ class TaskGenerator:
                     op_map = self.proc_time_means.get(op_name, {})
 
                 if machine_name in op_map:
-                    per_wc[int(wc)] = float(op_map.get(machine_name))
+                    try:
+                        mi = int(getattr(getattr(self, '_owner_env', None), 'workcenters_meta', None).machine_index.get(machine_name)) if getattr(self, '_owner_env', None) is not None else None
+                    except Exception:
+                        try:
+                            mi = int(self.machine_name_by_wc.get(int(wc), 0))
+                        except Exception:
+                            mi = None
+                    if mi is None:
+                        mi = 0
+                    per_machine_indices.append(int(mi))
+                    per_wc[int(mi)] = float(op_map.get(machine_name))
                 else:
                     raise ValueError(f"Missing duration for {op_name} on {machine_name} (workcenter {wc})")
 
-            converted_ops.append((op_type, allowed_wcs, per_wc))
+            converted_ops.append((op_type, per_machine_indices, per_wc))
 
         return converted_ops

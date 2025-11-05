@@ -100,9 +100,9 @@ class JobAgent:
         self.agent_id = agent_id
         self.id = int(agent_id)
 
-        # support two input shapes:
-        #  - a list of Task-like objects (existing utils usage)
-        #  - a list of env-style operation tuples (op_type, allowed_wcs, per_wc_durations)
+    # support two input shapes:
+    #  - a list of Task-like objects (existing utils usage)
+    #  - a list of env-style operation tuples (op_type, allowed_machine_indices, per_machine_durations)
         self.static_job_list = list(job_object_list)
         self.operations = list(job_object_list)
         # left_job mirrors previous behaviour: remaining work items (can be tasks or op-tuples)

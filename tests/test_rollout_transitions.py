@@ -41,8 +41,8 @@ class Args:
 def make_batch():
     # Two decision items with simple obs vectors and per-machine avail_row
     return [
-        {"job_id": 0, "obs": [0.1, 0.2, 0.3], "avail_row": [1, 0], "allowed_wcs": [0]},
-        {"job_id": 1, "obs": [0.4, 0.5, 0.6], "avail_row": [0, 1], "allowed_wcs": [1]},
+        {"job_id": 0, "obs": [0.1, 0.2, 0.3], "avail_row": [1, 0], "allowed_machine_indices": [0]},
+        {"job_id": 1, "obs": [0.4, 0.5, 0.6], "avail_row": [0, 1], "allowed_machine_indices": [1]},
     ]
 
 
