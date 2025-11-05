@@ -4,9 +4,9 @@ Step 8A.5.3 — Machine-level Decision Integration
 ------------------------------------------------
 Enhancements vs Step 8A.3:
 - JobAgent can now choose and record actions at the Machine level.
-- Each JobAgent tracks its last chosen Machine ID and speed factor.
-- execute_task() accepts (machine_id, workcenter_id, speed_factor).
-- Machine and WorkCenter histories stored separately for explainable logs.
+- execute_task() accepts (machine_id, workcenter_id) and expects an
+    env-style op tuple with explicit per-machine durations. Legacy
+    `time_span` semantics have been removed.
 """
 
 from typing import Optional
@@ -119,7 +119,7 @@ class JobAgent:
         self.last_chosen_machine = None
         self.machine_history = []     # Stores chosen machine IDs
         self.workcenter_history = []  # Still stored for compatibility
-        self.speed_factor_history = []  # For performance explainability
+    # legacy speed tracking removed
 
         # --- Arrival / activity control ---
         self.arrival_time = float(arrival_time)
@@ -151,35 +151,36 @@ class JobAgent:
     # ------------------------------------------------------------------
     # Task execution
     # ------------------------------------------------------------------
-    def execute_task(self, job_object, machine_id, workcenter_id=None, speed_factor: float = 1.0):
+    def execute_task(self, job_object, machine_id, workcenter_id=None):
         """
         Execute next job and update internal state.
         Machine-level integration (Step 8A.5.3):
           - Records selected machine and speed factor.
           - Returns actual processing time after speed adjustment.
         """
-        # Accept either a Task-like object (with time_span/index_id) or an
-        # env-style operation tuple. If given an op-tuple, treat base_time as
-        # the estimated duration supplied by the env tuple (third element or
-        # mean of per-wc durations). This keeps compatibility with both uses.
+        # Strict mode: expect env-style op tuple with explicit per-machine
+        # durations as the third element (dict mapping machine_index -> duration).
+        # Legacy job_object.time_span support has been removed.
         base_time = None
-        try:
-            # Task-like object
-            base_time = float(getattr(job_object, 'time_span'))
-        except Exception:
-            # env-style op tuple: try to derive base duration
-            try:
-                if isinstance(job_object, (list, tuple)) and len(job_object) >= 2:
-                    third = job_object[2] if len(job_object) >= 3 else None
-                    if isinstance(third, dict):
-                        vals = [float(v) for v in third.values() if v is not None]
-                        base_time = (sum(vals) / len(vals)) if vals else float(job_object[1])
-                    else:
-                        base_time = float(job_object[1])
-            except Exception:
-                base_time = 1.0
+        if isinstance(job_object, (list, tuple)) and len(job_object) >= 3:
+            third = job_object[2]
+            if isinstance(third, dict):
+                # machine_id is an integer index into per-machine durations
+                if int(machine_id) in third:
+                    base_time = float(third.get(int(machine_id)))
+                else:
+                    raise ValueError(f"Missing explicit duration for machine {machine_id} in op tuple")
+            else:
+                # third element is a scalar duration
+                try:
+                    base_time = float(third)
+                except Exception:
+                    raise ValueError("Operation tuple third element must be a duration or a dict of per-machine durations")
+        else:
+            raise ValueError("JobAgent.execute_task expects op tuples with explicit per-machine durations.")
 
-        adjusted_time = float(base_time) * (1.0 / max(1e-6, float(speed_factor)))
+        # In strict mode, adjusted_time is the explicit duration (no speed scaling)
+        adjusted_time = float(base_time)
 
         # Update internal metrics
         self.time_spent += adjusted_time
@@ -198,9 +199,7 @@ class JobAgent:
         self.machine_history.append(machine_id)
         if workcenter_id is not None:
             self.workcenter_history.append(workcenter_id)
-        self.speed_factor_history.append(speed_factor)
-
-        print(f"[JobAgent {self.agent_id}] Executed task on Machine {machine_id} (WC {workcenter_id}) speed×{speed_factor} | duration={adjusted_time:.2f}")
+        print(f"[JobAgent {self.agent_id}] Executed task on Machine {machine_id} (WC {workcenter_id}) | duration={adjusted_time:.2f}")
 
         # mark finished flag if no left jobs remain
         if not self.left_job:
@@ -224,7 +223,7 @@ class JobAgent:
         self.time_spent = 0.0
         self.machine_history.clear()
         self.workcenter_history.clear()
-        self.speed_factor_history.clear()
+    # legacy speed history cleared implicitly by removing list
         self.last_chosen_machine = None
         self.is_active = False
         self.completed_at = None

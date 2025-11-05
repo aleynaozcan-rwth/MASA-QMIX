@@ -104,14 +104,22 @@ def main():
         'concurrency_same_wc_examples': examples,
     }
     print(json.dumps(out, indent=2, default=float))
-    # also write to artifacts
     try:
-        import os
-        os.makedirs('artifacts', exist_ok=True)
-        with open('artifacts/test_concurrency_out.json','w') as f:
-            json.dump(out, f, indent=2, default=float)
-    except Exception as e:
-        print('[WARN] Could not write artifacts:', e)
+        from utils.io_control import allow_history_writes
+    except Exception:
+        def allow_history_writes():
+            return False
+
+    if allow_history_writes():
+        try:
+            import os
+            os.makedirs('artifacts', exist_ok=True)
+            with open('artifacts/test_concurrency_out.json','w') as f:
+                json.dump(out, f, indent=2, default=float)
+        except Exception as e:
+            print('[WARN] Could not write artifacts:', e)
+    else:
+        print('[INFO] history writes disabled; skipping artifacts/test_concurrency_out.json')
 
 if __name__ == '__main__':
     main()

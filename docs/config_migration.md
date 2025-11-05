@@ -3,7 +3,7 @@
 | work_centers | YAML | `workcenter.py:DEFAULT_WORKCENTERS` | fully internal |
 | jobs | YAML | `job.py:DEFAULT_JOBS` | fully internal |
 | task_generator | YAML | `task_generator.py:DEFAULT_TASKGEN_PARAMS` | fully internal |
-| processing_time_means | YAML | `task_generator.py:DEFAULT_PROCESSING_TIME_MEANS` | fully internal |
+| processing_time_means | YAML | `configs/*.yaml` (YAML-only) | No longer provided as an in-module default; supply via YAML/config |
 | operators | YAML | `operator.py:DEFAULT_OPERATORS` | fully internal |
 | reward_params, training_defaults | YAML | `environment.py:DEFAULT_ENV_PARAMS` | fully internal |
 

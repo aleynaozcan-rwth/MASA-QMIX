@@ -11,6 +11,7 @@ sys.path.append(dirname(dirname(abspath(__file__))))
 from MARL.runner import Runner
 from MARL.common.arguments import (
     get_common_args,
+    get_mutable_args,
     get_coma_args,
     get_mixer_args,
     get_centralv_args,
@@ -73,9 +74,15 @@ def marl_agent_wrapper(args):
     print("====================================")
 
     runner = Runner(env, args)
-
     if args.learn:
         runner.run(num=1)
+        # Post-run quick summary for developer visibility
+        try:
+            for idx, r in enumerate(getattr(runner, 'episode_rewards', [])):
+                print(f"Episode {idx} | Total reward: {r:.4f}")
+        except Exception:
+            pass
+        print("Episode finished")
     else:
         win_rate, reward, _ = runner.evaluate([], 0)
         print(f"Avg reward for {args.alg}: {reward}")
@@ -133,7 +140,27 @@ def random_agent_wrapper(args):
 
 if __name__ == "__main__":
     # Centralized argument parsing
-    args = get_common_args()
+    # Use a mutable args object here so we can override values for the
+    # developer mini-run without hitting ReadOnlyArgs protections.
+    args = get_mutable_args()
+
+    # --- Mini-run override for quick QMIX smoke test ---
+    # These in-code overrides are intentional for the developer quick-run
+    # requested: reproducible short training session.
+    args.seed = getattr(args, 'seed', 0) if args.seed is None else 42
+    args.n_epoch = 1
+    args.n_episodes = 3
+    args.learn = True
+    args.evaluate_cycle = 1
+    args.n_agents = 4
+    args.initial_jobs = 2
+    args.episode_limit = 64
+    args.history_dir = getattr(args, 'history_dir', None) or "./my_data_and_graph/historydata"
+
+    print(f"[Mini-run] Overriding args for quick test: seed={args.seed}, n_epoch={args.n_epoch}, n_episodes={args.n_episodes}, n_agents={args.n_agents}, initial_jobs={args.initial_jobs}")
+    # Allow writing artifacts for this quick developer run so we can inspect outputs
+    # (this is safe for local developer runs; CI/test harnesses rely on the default False)
+    args.allow_history_writes = True
 
     # Select execution mode
     if getattr(args, 'mode', 'marl') == "marl":

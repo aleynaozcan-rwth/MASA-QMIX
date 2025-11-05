@@ -2,32 +2,32 @@
 
  work_centers:
    WC1:
-     machines: [M1, M2]
+     machines: [M0, M1]
    WC2:
-     machines: [M3, M4]
+     machines: [M2, M3]
    WC3:
-     machines: [M5]
+     machines: [M4]
 
  machines:
    # Machine entries name the machine and the WorkCenter they belong to.
    # 'capable_ops' lists operation types (Op0..Op8) that the machine can process.
-   M1:
+   M0:
      wc: WC1
      capable_ops: [Op1, Op2, Op3, Op5, Op9]
      speed_factor: 1.0
-   M2:
+   M1:
      wc: WC1
      capable_ops: [Op4, Op5, Op8]
      speed_factor: 1.0
-   M3:
+   M2:
      wc: WC2
      capable_ops: [Op1, Op2, Op4, Op6, Op9]
      speed_factor: 1.0
-   M4:
+   M3:
      wc: WC2
      capable_ops: [Op1, Op3, Op7, Op8]
      speed_factor: 1.0
-   M5:
+   M4:
      wc: WC3
      capable_ops: [Op1, Op3, Op4, Op6, Op8, Op9]
      speed_factor: 1.0
@@ -45,37 +45,42 @@
  processing_time_means:
    # mean processing time per (op type, machine). Use Op1..Op9 to map to indices 0..8
    Op1:
-     M1: 1.225
-     M3: 1.575
-     M4: 1.4
-     M5: 1.05
-   Op2:
-     M1: 1.05
-     M3: 1.75
-   Op3:
-     M1: 1.575
-     M4: 1.75
-     M5: 1.925
-   Op4:
+     M0: 1.225
      M2: 1.575
-     M3: 1.68
-     M5: 2.1
-   Op5:
+     M3: 1.4
+     M4: 1.05
+   Op2:
+     M0: 1.05
      M2: 1.75
-     M1: 2.275
+   Op3:
+    M0: 1.575
+    M2: 1.575
+    M3: 1.75
+    M4: 1.925
+   Op4:
+    M0: 1.575
+    M1: 1.575
+    M2: 1.68
+    M4: 2.1
+   Op5:
+     M1: 1.75
+     M0: 2.275
    Op6:
-     M3: 2.1
-     M5: 2.8
+     M2: 2.1
+     M4: 2.8
    Op7:
-     M4: 1.82
+    M3: 1.82
+    M2: 2.10
    Op8:
-     M5: 1.575
-     M4: 2.625
-     M2: 2.975
+    M0: 1.575
+    M2: 2.625
+    M4: 1.575
+    M3: 2.625
+    M1: 2.975
    Op9:
-     M5: 1.925
-     M1: 2.975
-     M3: 3.15
+     M4: 1.925
+     M0: 2.975
+     M2: 3.15
 
  task_generator:
    arrival_lambda: 0.05   # base interarrival rate (Exponential) — tune to target load

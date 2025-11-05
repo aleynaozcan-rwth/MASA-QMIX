@@ -231,6 +231,13 @@ class Runner:
             run_args = self.args
         self.run_args = run_args
 
+        # Central flag to control whether Runner writes history/artifact files.
+        # Default: False. Set args.allow_history_writes = True to enable.
+        try:
+            self.allow_history_writes = bool(getattr(self.run_args, 'allow_history_writes', False))
+        except Exception:
+            self.allow_history_writes = False
+
         # ---------------------------
         # Environment-derived shapes
         # ---------------------------
@@ -514,83 +521,97 @@ class Runner:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
 
+        # Ensure a fresh scheduling_timeline.txt is created at the start of a
+        # run when history writes are allowed. This uses episode_id==0 so the
+        # generator will open the timeline in 'w' mode (overwrite) and avoid
+        # mixing legacy timeline entries from previous runs.
+        try:
+            if getattr(self, 'allow_history_writes', False):
+                try:
+                    if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                        gantt_utils.generate_scheduling_timeline(self.env, episode_id=0, write_if_allowed=True, out_dir=self.history_dir)
+                    else:
+                        # fallback to local import
+                        from utils.gantt import generate_scheduling_timeline as _gst
+                        _gst(self.env, episode_id=0, write_if_allowed=True, out_dir=self.history_dir)
+                    print(f"[Runner] Initialized/overwrote scheduling_timeline.txt at {self.history_dir}")
+                except Exception:
+                    logging.getLogger(__name__).exception("Exception caught while initializing scheduling_timeline", exc_info=True)
+        except Exception:
+            logging.getLogger(__name__).exception("Exception caught when attempting to initialize scheduling_timeline", exc_info=True)
+
         print(f"[Runner 8A.6.6] Initialized | alg={self.args.alg} | buffer={getattr(self.args,'buffer_size','-')} | batch={getattr(self.args,'batch_size','-')}")
         # Write initial job -> operations mapping for easy inspection
+        # Optionally append initial job -> operations mapping for inspection.
+        # This is opt-in only via run_args.log_initial_jobs (default False)
         try:
-            init_path = os.path.join(self.history_dir, "initial_jobs.txt")
-            with open(init_path, 'w') as hf:
-                hf.write("Initial Job -> Operation mapping\n")
-                hf.write("Format: JobID | OpIdx | OpType | Allowed_WCs | OpGroups | BaseDur\n\n")
-                for job in getattr(self.env, 'jobs', []):
-                    hf.write(f"Job {int(job.id)}:\n")
-                    for idx, op in enumerate(getattr(job, 'operations', [])):
-                        try:
-                            # canonical formats:
-                            # legacy: (allowed_wcs, dur)
-                            # old: (op_type, allowed_wcs, base_dur)
-                            # new canonical: (op_type, allowed_wcs, per_wc_durations_dict)
-                            if isinstance(op, (list, tuple)) and len(op) == 2:
-                                allowed_wcs, dur = op
-                                op_type = 'legacy'
-                                hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Dur {float(dur):.3f}\n")
-                            else:
-                                op_type = op[0]
-                                allowed_wcs = op[1]
-                                third = op[2]
-                                # if third is dict, print per-WC durations and both coarse/eligible operator info
-                                if isinstance(third, dict):
-                                    per_wc = third
-                                    groups_by_wc = []
-                                    for wc in allowed_wcs:
-                                        try:
-                                            eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            eligible = []
-                                        groups_by_wc.append({'wc': int(wc), 'eligible_ops': eligible})
-                                    hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_by_wc} | base_per_wc_durations:\n")
-                                    for wc in allowed_wcs:
-                                        try:
-                                            dur_wc = float(per_wc.get(int(wc), 0.0))
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            dur_wc = 0.0
-                                        try:
-                                            eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            eligible = []
-                                        hf.write(f"    WC{wc} -> dur={dur_wc:.3f} | eligible_ops={eligible}\n")
-                                else:
-                                    # legacy-ish third numeric
-                                    base_dur = float(third)
-                                    groups_info = []
-                                    for wc in allowed_wcs:
-                                        try:
-                                            eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            eligible = []
-                                        groups_info.append({'wc': int(wc), 'eligible_ops': eligible})
-                                    hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_info} | base_dur {base_dur:.3f}\n")
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            hf.write(f"  Op {idx} | malformed: {op}\n")
-                    hf.write("\n")
-            if getattr(self.args, 'enable_logs', True):
+            if bool(getattr(self.run_args, 'log_initial_jobs', False)):
+                init_path = os.path.join(self.history_dir, "initial_jobs.txt")
+                # Append-only: do not overwrite or read this file. Treat it as a runtime log.
                 try:
-                    with open(init_path, 'r') as hf_read:
-                        # log initial mapping at INFO level
-                        logging.getLogger(__name__).info(hf_read.read())
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
-            # Append human-readable job list produced by env helper if available
-            try:
-                if hasattr(self.env, 'print_jobs_human_readable') and callable(getattr(self.env, 'print_jobs_human_readable')):
+                    # write a short header with timestamp for traceability
+                    import datetime
+                    header = f"\n=== Initial Job -> Operation mapping (appended {datetime.datetime.utcnow().isoformat()}Z) ===\n"
                     with open(init_path, 'a') as hf:
-                        hf.write('\nHuman-readable job list:\n')
-                        # capture print output by redirecting stdout temporarily
+                        hf.write(header)
+                        hf.write("Format: JobID | OpIdx | OpType | Allowed_WCs | OpGroups | BaseDur\n\n")
+                        for job in getattr(self.env, 'jobs', []):
+                            hf.write(f"Job {int(job.id)}:\n")
+                            for idx, op in enumerate(getattr(job, 'operations', [])):
+                                try:
+                                    # canonical formats:
+                                    # legacy: (allowed_wcs, dur)
+                                    # old: (op_type, allowed_wcs, base_dur)
+                                    # new canonical: (op_type, allowed_wcs, per_wc_durations_dict)
+                                    if isinstance(op, (list, tuple)) and len(op) == 2:
+                                        allowed_wcs, dur = op
+                                        op_type = 'legacy'
+                                        hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Dur {float(dur):.3f}\n")
+                                    else:
+                                        op_type = op[0]
+                                        allowed_wcs = op[1]
+                                        third = op[2]
+                                        # if third is dict, print per-WC durations and both coarse/eligible operator info
+                                        if isinstance(third, dict):
+                                            per_wc = third
+                                            groups_by_wc = []
+                                            for wc in allowed_wcs:
+                                                try:
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                except Exception:
+                                                    eligible = []
+                                                groups_by_wc.append({'wc': int(wc), 'eligible_ops': eligible})
+                                            hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_by_wc} | base_per_wc_durations:\n")
+                                            for wc in allowed_wcs:
+                                                try:
+                                                    dur_wc = float(per_wc.get(int(wc), 0.0))
+                                                except Exception:
+                                                    dur_wc = 0.0
+                                                try:
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                except Exception:
+                                                    eligible = []
+                                                hf.write(f"    WC{wc} -> dur={dur_wc:.3f} | eligible_ops={eligible}\n")
+                                        else:
+                                            # legacy-ish third numeric
+                                            base_dur = float(third)
+                                            groups_info = []
+                                            for wc in allowed_wcs:
+                                                try:
+                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc), [])
+                                                except Exception:
+                                                    eligible = []
+                                                groups_info.append({'wc': int(wc), 'eligible_ops': eligible})
+                                            hf.write(f"  Op {idx} | Type {op_type} | WCs {allowed_wcs} | Groups {groups_info} | base_dur {base_dur:.3f}\n")
+                                except Exception:
+                                    hf.write(f"  Op {idx} | malformed: {op}\n")
+                            hf.write("\n")
+                except Exception as e:
+                    logging.getLogger(__name__).exception("Exception caught while appending initial jobs mapping", exc_info=True)
+                    print(f"[WARN] Could not append initial job mapping: {e}")
+                # Append human-readable job list produced by env helper if available (append only)
+                try:
+                    if hasattr(self.env, 'print_jobs_human_readable') and callable(getattr(self.env, 'print_jobs_human_readable')):
                         try:
                             import io, sys as _sys
                             buf = io.StringIO()
@@ -600,18 +621,24 @@ class Runner:
                                 self.env.print_jobs_human_readable()
                             finally:
                                 _sys.stdout = old
-                            hf.write(buf.getvalue())
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            # fallback: call without capture
+                            with open(init_path, 'a') as hf:
+                                hf.write('\nHuman-readable job list:\n')
+                                hf.write(buf.getvalue())
+                        except Exception:
+                            # best-effort: attempt to append without capture
                             try:
-                                self.env.print_jobs_human_readable()
-                            except Exception as e:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                with open(init_path, 'a') as hf:
+                                    hf.write('\nHuman-readable job list (partial):\n')
+                                    try:
+                                        self.env.print_jobs_human_readable()
+                                    except Exception:
+                                        hf.write('  <could not capture human-readable output>\n')
+                            except Exception:
+                                logging.getLogger(__name__).exception("Exception caught while appending human-readable jobs", exc_info=True)
                                 pass
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
+                except Exception:
+                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    pass
         except Exception as e:
             print(f"[WARN] Could not write initial job mapping: {e}")
 
@@ -623,6 +650,9 @@ class Runner:
         not append the exact same line twice).
         """
         try:
+            # Respect central gating: skip metric writes when history writes are disabled
+            if not getattr(self, 'allow_history_writes', False):
+                return
             os.makedirs(self.history_dir, exist_ok=True)
             metrics_path = os.path.join(self.history_dir, 'learning_metrics.csv')
 
@@ -710,7 +740,7 @@ class Runner:
                     png_path = os.path.join(self.history_dir, f"gantt_epoch{epoch}.png")
                     plot_gantt(combined, filename=png_path)
                     # optionally also write a CSV for detailed inspection
-                    if getattr(self.args, 'gantt_csv', False):
+                    if getattr(self.args, 'gantt_csv', False) and getattr(self, 'allow_history_writes', False):
                         csv_path = os.path.join(self.history_dir, f"gantt_epoch{epoch}.csv")
                         # prefer centralized writer to ensure consistent formatting
                         try:
@@ -727,38 +757,40 @@ class Runner:
                             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                             # fallback: legacy per-record normalization/writer
                             try:
-                                with open(csv_path, 'w') as cf:
-                                    cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
-                                    for r in combined:
-                                        try:
-                                            if not isinstance(r, (list, tuple)):
-                                                continue
-                                            if len(r) >= 8:
-                                                start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
-                                            elif len(r) == 6:
-                                                start, end, op_idx, wc, job_id, op_grp = r
-                                                arrival = ''
-                                                duration = ''
-                                            elif len(r) == 5:
-                                                start, end, op_idx, wc, job_id = r
-                                                op_grp = ''
-                                                arrival = ''
-                                                duration = ''
-                                            else:
-                                                continue
+                                # ensure history writes enabled before fallback write
+                                if getattr(self, 'allow_history_writes', False):
+                                    with open(csv_path, 'w') as cf:
+                                        cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
+                                        for r in combined:
                                             try:
-                                                if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
-                                                    op_name = f"Op{int(op_idx) + 1}"
+                                                if not isinstance(r, (list, tuple)):
+                                                    continue
+                                                if len(r) >= 8:
+                                                    start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                                                elif len(r) == 6:
+                                                    start, end, op_idx, wc, job_id, op_grp = r
+                                                    arrival = ''
+                                                    duration = ''
+                                                elif len(r) == 5:
+                                                    start, end, op_idx, wc, job_id = r
+                                                    op_grp = ''
+                                                    arrival = ''
+                                                    duration = ''
                                                 else:
+                                                    continue
+                                                try:
+                                                    if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
+                                                        op_name = f"Op{int(op_idx) + 1}"
+                                                    else:
+                                                        op_name = str(op_idx)
+                                                except Exception as e:
+                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                                                     op_name = str(op_idx)
+                                                vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
+                                                cf.write(','.join([str(x) for x in vals]) + '\n')
                                             except Exception as e:
                                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                op_name = str(op_idx)
-                                            vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
-                                            cf.write(','.join([str(x) for x in vals]) + '\n')
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            pass
+                                                pass
                             except Exception as e:
                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                                 pass
@@ -775,6 +807,16 @@ class Runner:
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
+
+                # Record per-training-episode reward for visibility and post-run summaries.
+                # Runner previously only appended rewards from evaluation runs; include
+                # training episodes here as well so entrypoints (like main.py) can
+                # print a concise per-episode summary after runner.run() completes.
+                try:
+                    self.episode_rewards.append(float(ep_r))
+                except Exception:
+                    # best-effort: ignore if unable to append (shouldn't happen)
+                    pass
 
                 # Append per-episode metrics via single writer method
                 try:
@@ -799,6 +841,30 @@ class Runner:
                     except Exception as e:
                         logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                         self.wait_time_records.append({0: ep_r / 20.0})
+
+                # Optionally append a human-readable scheduling timeline for this episode
+                try:
+                    if getattr(self, 'allow_history_writes', False):
+                        timeline = None
+                        if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                            try:
+                                timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                            except Exception:
+                                timeline = None
+                        if timeline is None:
+                            try:
+                                from utils.gantt import generate_scheduling_timeline
+                                timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                            except Exception:
+                                timeline = None
+                        if timeline:
+                            try:
+                                print(f"[Runner] Scheduling timeline appended for episode {global_ep_idx-1} to {self.history_dir}/scheduling_timeline.txt")
+                            except Exception:
+                                pass
+                except Exception:
+                    logging.getLogger(__name__).exception("Exception caught while appending scheduling_timeline", exc_info=True)
+                    pass
 
             # === Training updates (Replay-based) ===
             if self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
@@ -839,54 +905,56 @@ class Runner:
                                     snapshot_gantt = list(all_gantt_data)
                                     if hasattr(self.env, 'gantt_records'):
                                         snapshot_gantt.extend(list(self.env.gantt_records))
-                                    plot_gantt(snapshot_gantt, filename=os.path.join(self.history_dir, snap_name))
-                                    if getattr(self.args, 'gantt_csv', False):
-                                        csv_path = os.path.join(self.history_dir, f"gantt_snapshot_step{train_steps}.csv")
-                                        # prefer centralized writer
-                                        try:
-                                            if gantt_utils is not None:
-                                                gantt_utils.write_scheduling_trace(csv_path, snapshot_gantt)
-                                            else:
-                                                raise RuntimeError("gantt_utils unavailable")
-                                        except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                            # fallback: legacy writer
+                                    # Only write snapshots if allowed
+                                    if getattr(self, 'allow_history_writes', False):
+                                        plot_gantt(snapshot_gantt, filename=os.path.join(self.history_dir, snap_name))
+                                        if getattr(self.args, 'gantt_csv', False):
+                                            csv_path = os.path.join(self.history_dir, f"gantt_snapshot_step{train_steps}.csv")
+                                            # prefer centralized writer
                                             try:
-                                                with open(csv_path, 'w') as cf:
-                                                    cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
-                                                    for r in snapshot_gantt:
-                                                        try:
-                                                            if not isinstance(r, (list, tuple)):
-                                                                continue
-                                                            if len(r) >= 8:
-                                                                start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
-                                                            elif len(r) == 6:
-                                                                start, end, op_idx, wc, job_id, op_grp = r
-                                                                arrival = ''
-                                                                duration = ''
-                                                            elif len(r) == 5:
-                                                                start, end, op_idx, wc, job_id = r
-                                                                op_grp = ''
-                                                                arrival = ''
-                                                                duration = ''
-                                                            else:
-                                                                continue
-                                                            try:
-                                                                if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
-                                                                    op_name = f"Op{int(op_idx) + 1}"
-                                                                else:
-                                                                    op_name = str(op_idx)
-                                                            except Exception as e:
-                                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                                op_name = str(op_idx)
-                                                            vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
-                                                            cf.write(','.join([str(x) for x in vals]) + '\n')
-                                                        except Exception as e:
-                                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                            pass
+                                                if gantt_utils is not None:
+                                                    gantt_utils.write_scheduling_trace(csv_path, snapshot_gantt)
+                                                else:
+                                                    raise RuntimeError("gantt_utils unavailable")
                                             except Exception as e:
                                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                pass
+                                                # fallback: legacy writer
+                                                try:
+                                                    with open(csv_path, 'w') as cf:
+                                                        cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
+                                                        for r in snapshot_gantt:
+                                                            try:
+                                                                if not isinstance(r, (list, tuple)):
+                                                                    continue
+                                                                if len(r) >= 8:
+                                                                    start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                                                                elif len(r) == 6:
+                                                                    start, end, op_idx, wc, job_id, op_grp = r
+                                                                    arrival = ''
+                                                                    duration = ''
+                                                                elif len(r) == 5:
+                                                                    start, end, op_idx, wc, job_id = r
+                                                                    op_grp = ''
+                                                                    arrival = ''
+                                                                    duration = ''
+                                                                else:
+                                                                    continue
+                                                                try:
+                                                                    if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
+                                                                        op_name = f"Op{int(op_idx) + 1}"
+                                                                    else:
+                                                                        op_name = str(op_idx)
+                                                                except Exception as e:
+                                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                                    op_name = str(op_idx)
+                                                                vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
+                                                                cf.write(','.join([str(x) for x in vals]) + '\n')
+                                                            except Exception as e:
+                                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                                pass
+                                                except Exception as e:
+                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                    pass
                                         # also write a human-readable summary for easier inspection
                                         def _unpack_rec(rec):
                                             # robustly unpack records of length 8, 6 or 5
@@ -1002,32 +1070,35 @@ class Runner:
                             pass
 
             # === KPI LOGGING (Step 8A.6.6) ===
+            # KPI logging (opt-in)
             try:
-                avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)
-                util_m = self.env._util_machines()
-                util_o = self.env._util_ops()
-                makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
-                makespan = getattr(self.env, "t", makespan)
-                with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
-                    f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+                if getattr(self, 'allow_history_writes', False):
+                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)
+                    util_m = self.env._util_machines()
+                    util_o = self.env._util_ops()
+                    makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
+                    makespan = getattr(self.env, "t", makespan)
+                    with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
+                        f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
             except Exception as e:
                 print(f"[WARN] KPI logging failed: {e}")
 
         # === Save episode statistics ===
         try:
-            with open(os.path.join(self.history_dir, "episode_rewards.txt"), "w") as f_r:
-                for ep_idx, ep_r in enumerate(self.episode_rewards):
-                    f_r.write(f"{ep_idx},{ep_r:.2f}\n")
+            if getattr(self, 'allow_history_writes', False):
+                with open(os.path.join(self.history_dir, "episode_rewards.txt"), "w") as f_r:
+                    for ep_idx, ep_r in enumerate(self.episode_rewards):
+                        f_r.write(f"{ep_idx},{ep_r:.2f}\n")
 
-            with open(os.path.join(self.history_dir, "times.txt"), "w") as f_t:
-                for ep_idx, dur in enumerate(self.episode_durations):
-                    f_t.write(f"{ep_idx},{dur:.2f}\n")
+                with open(os.path.join(self.history_dir, "times.txt"), "w") as f_t:
+                    for ep_idx, dur in enumerate(self.episode_durations):
+                        f_t.write(f"{ep_idx},{dur:.2f}\n")
 
-            with open(os.path.join(self.history_dir, "waittimes.txt"), "w") as f_w:
-                for ep_idx, waits in enumerate(self.wait_time_records):
-                    for job_id, wait_val in waits.items():
-                        f_w.write(f"Episode {ep_idx} | JobAgent J{job_id} | Wait {wait_val:.2f}\n")
-            print("[Runner] Reward/time/wait logs saved for analysis.")
+                with open(os.path.join(self.history_dir, "waittimes.txt"), "w") as f_w:
+                    for ep_idx, waits in enumerate(self.wait_time_records):
+                        for job_id, wait_val in waits.items():
+                            f_w.write(f"Episode {ep_idx} | JobAgent J{job_id} | Wait {wait_val:.2f}\n")
+                print("[Runner] Reward/time/wait logs saved for analysis.")
         except Exception as e:
             print("[WARN] Could not save episode stats:", e)
 
@@ -1048,27 +1119,59 @@ class Runner:
             jt_path = os.path.join(self.history_dir, 'job_timeline.csv')
 
             # delegate CSV formatting/writing to utils.gantt to centralize logic
-            if gantt_utils is not None:
-                try:
-                    gantt_utils.write_scheduling_trace(sched_path, combined)
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
-                try:
-                    gantt_utils.write_job_timeline(jt_path, combined)
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
-            else:
-                # fallback: write a minimal scheduling_trace if utils unavailable
-                try:
-                    with open(sched_path, 'w') as sf:
-                        sf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
+            if getattr(self, 'allow_history_writes', False):
+                if gantt_utils is not None:
+                    try:
+                        gantt_utils.write_scheduling_trace(sched_path, combined)
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        pass
+                    try:
+                        gantt_utils.write_job_timeline(jt_path, combined)
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        pass
+                else:
+                    # fallback: write a minimal scheduling_trace if utils unavailable
+                    try:
+                        with open(sched_path, 'w') as sf:
+                            sf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
+                    except Exception as e:
+                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        pass
 
-            print(f"[Runner] Scheduling trace and job timelines written to {self.history_dir}")
+                print(f"[Runner] Scheduling trace and job timelines written to {self.history_dir}")
+                # Optionally generate a plain-text scheduling timeline for easy human inspection.
+                try:
+                    if getattr(self, 'allow_history_writes', False):
+                        try:
+                            # Prefer the centralized gantt_utils wrapper if available
+                            timeline = None
+                            if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
+                                try:
+                                    timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                except Exception:
+                                    # fall through to direct import fallback
+                                    timeline = None
+                            if timeline is None:
+                                try:
+                                    # direct import fallback
+                                    from utils.gantt import generate_scheduling_timeline
+                                    timeline = generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                except Exception:
+                                    timeline = None
+                            # If the generator returned text, log a short message indicating where it was written.
+                            if timeline:
+                                try:
+                                    tl_path = os.path.join(self.history_dir, 'scheduling_timeline.txt')
+                                    print(f"[Runner] Scheduling timeline generated and written to {tl_path}")
+                                except Exception:
+                                    print("[Runner] Scheduling timeline generated.")
+                        except Exception:
+                            logging.getLogger(__name__).exception("Exception caught while generating scheduling_timeline", exc_info=True)
+                except Exception:
+                    # non-fatal: do not break the runner if timeline generation fails
+                    pass
         except Exception as e:
             print("[WARN] Could not write scheduling/job timeline files:", e)
 
@@ -1167,35 +1270,37 @@ class Runner:
                 summary['avg_machine_utilization'] = None
                 summary['avg_operator_utilization'] = None
 
-            # write summary
+            # write summary (opt-in)
             try:
-                summary_path = os.path.join(self.history_dir, 'run_summary.json')
-                with open(summary_path, 'w') as sf:
-                    json.dump(summary, sf, indent=2)
-                print(f"[Runner] run_summary.json written to {summary_path}")
-                print("system fully functional")
+                if getattr(self, 'allow_history_writes', False):
+                    summary_path = os.path.join(self.history_dir, 'run_summary.json')
+                    with open(summary_path, 'w') as sf:
+                        json.dump(summary, sf, indent=2)
+                    print(f"[Runner] run_summary.json written to {summary_path}")
+                    print("system fully functional")
             except Exception as e:
                 print("[WARN] Could not write run_summary.json:", e)
         except Exception as e:
             print("[WARN] Exception while creating run_summary:", e)
 
-        # === Post-training moving average plot ===
+        # === Post-training moving average plot (opt-in) ===
         try:
-            loss = np.loadtxt(f"{self.history_dir}/loss.txt")
-            td = np.loadtxt(f"{self.history_dir}/td_error.txt")
-            window = 50
-            if len(loss) > window:
-                loss_smooth = np.convolve(loss, np.ones(window)/window, mode='valid')
-                td_smooth = np.convolve(td, np.ones(window)/window, mode='valid')
-                plt.figure()
-                plt.plot(loss_smooth, label="Loss (avg)")
-                plt.plot(td_smooth, label="TD Error (avg)", alpha=0.7)
-                plt.legend(); plt.xlabel("Training Step"); plt.ylabel("Value")
-                plt.title("Step 8A.6.6 – Learning Stability Trends")
-                plt.tight_layout()
-                plt.savefig(f"{self.history_dir}/learning_stability.png", dpi=300)
-                plt.close()
-                print("[Runner] Learning stability plot saved.")
+            if getattr(self, 'allow_history_writes', False):
+                loss = np.loadtxt(f"{self.history_dir}/loss.txt")
+                td = np.loadtxt(f"{self.history_dir}/td_error.txt")
+                window = 50
+                if len(loss) > window:
+                    loss_smooth = np.convolve(loss, np.ones(window)/window, mode='valid')
+                    td_smooth = np.convolve(td, np.ones(window)/window, mode='valid')
+                    plt.figure()
+                    plt.plot(loss_smooth, label="Loss (avg)")
+                    plt.plot(td_smooth, label="TD Error (avg)", alpha=0.7)
+                    plt.legend(); plt.xlabel("Training Step"); plt.ylabel("Value")
+                    plt.title("Step 8A.6.6 – Learning Stability Trends")
+                    plt.tight_layout()
+                    plt.savefig(f"{self.history_dir}/learning_stability.png", dpi=300)
+                    plt.close()
+                    print("[Runner] Learning stability plot saved.")
         except Exception as e:
             print("[WARN] Could not plot learning stability:", e)
 
@@ -1206,6 +1311,8 @@ class Runner:
 
             # Loss raw plot
             try:
+                if not getattr(self, 'allow_history_writes', False):
+                    raise RuntimeError('History writes disabled')
                 loss_vals = np.loadtxt(os.path.join(self.history_dir, 'loss.txt'))
                 _plt.figure()
                 _plt.plot(loss_vals, label='Loss', color='tab:blue')
@@ -1220,6 +1327,8 @@ class Runner:
 
             # TD error raw plot
             try:
+                if not getattr(self, 'allow_history_writes', False):
+                    raise RuntimeError('History writes disabled')
                 td_vals = np.loadtxt(os.path.join(self.history_dir, 'td_error.txt'))
                 _plt.figure()
                 _plt.plot(td_vals, label='TD Error', color='tab:orange')

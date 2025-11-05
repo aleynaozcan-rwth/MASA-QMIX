@@ -6,9 +6,9 @@ default topology that reflects the user's current deployment:
 
   - 3 WorkCenters (indices 0..2)
   - 5 machines distributed as:
-      WorkCenter 0: Machine M_0_0 (machine 1), Machine M_0_1 (machine 2)
-      WorkCenter 1: Machine M_1_0 (machine 3), Machine M_1_1 (machine 4)
-      WorkCenter 2: Machine M_2_0 (machine 5)
+      WorkCenter 0: Machine M0 (machine 1), Machine M1 (machine 2)
+      WorkCenter 1: Machine M2 (machine 3), Machine M3 (machine 4)
+      WorkCenter 2: Machine M4 (machine 5)
 
 Operators and other components should consult `workcenters_list` and
 `machine_registry` for authoritative topology information. The old
@@ -30,11 +30,11 @@ DEFAULT_WORKCENTERS = {
     # Synchronized to configs/env_config_enabled.yaml so default topology
     # matches the canonical enabled config (3 work centers, 5 machines).
     "machines": {
-        "M1": {"wc": "WC1", "capable_ops": ["Op1", "Op2", "Op3", "Op5", "Op9"], "speed_factor": 1.0},
-        "M2": {"wc": "WC1", "capable_ops": ["Op4", "Op5", "Op8"], "speed_factor": 1.0},
-        "M3": {"wc": "WC2", "capable_ops": ["Op1", "Op2", "Op4", "Op6", "Op9"], "speed_factor": 1.0},
-        "M4": {"wc": "WC2", "capable_ops": ["Op1", "Op3", "Op7", "Op8"], "speed_factor": 1.0},
-        "M5": {"wc": "WC3", "capable_ops": ["Op1", "Op3", "Op4", "Op6", "Op8", "Op9"], "speed_factor": 1.0},
+    "M0": {"wc": "WC1", "capable_ops": ["Op1", "Op2", "Op3", "Op5", "Op9"]},
+    "M1": {"wc": "WC1", "capable_ops": ["Op4", "Op5", "Op8"]},
+    "M2": {"wc": "WC2", "capable_ops": ["Op1", "Op2", "Op4", "Op6", "Op9"]},
+    "M3": {"wc": "WC2", "capable_ops": ["Op1", "Op3", "Op7", "Op8"]},
+    "M4": {"wc": "WC3", "capable_ops": ["Op1", "Op3", "Op4", "Op6", "Op8", "Op9"]},
     },
     "work_centers": {"WC1": {"id": 0}, "WC2": {"id": 1}, "WC3": {"id": 2}},
     # Operators are defined separately in utils.operator; keep a mirror here
@@ -43,37 +43,77 @@ DEFAULT_WORKCENTERS = {
         {"id": "O2", "qualified_machines": ["M2", "M3", "M5"]},
     ],
 }
+# Optional internal fallback for processing times (machine -> {OpN: mean})
+# VALUES ARE TRANSPOSED FROM configs/env_config_enabled.yaml and MUST MATCH
+# those YAML values exactly so the fallback is deterministic and consistent
+# with the canonical config. This is the single in-code fallback source for
+# ⚠️ Keep DEFAULT_PROCESSING_TIMES in sync with configs/env_config_enabled.yaml
+# Validated automatically by tests/test_processing_times_sync.py
+DEFAULT_PROCESSING_TIMES = {
+    "M0": {
+        "Op1": 1.225,
+        "Op2": 1.05,
+        "Op3": 1.575,
+        "Op4": 1.575,
+        "Op5": 2.275,
+        "Op8": 1.575,
+        "Op9": 2.975,
+    },
+    "M1": {
+        "Op4": 1.575,
+        "Op5": 1.75,
+        "Op8": 2.975,
+    },
+    "M2": {
+        "Op1": 1.575,
+        "Op2": 1.75,
+        "Op3": 1.575,
+        "Op4": 1.68,
+        "Op6": 2.1,
+        "Op7": 2.10,
+        "Op8": 2.625,
+        "Op9": 3.15,
+    },
+    "M3": {
+        "Op1": 1.4,
+        "Op3": 1.75,
+        "Op7": 1.82,
+        "Op8": 2.625,
+    },
+    "M4": {
+        "Op1": 1.05,
+        "Op3": 1.925,
+        "Op4": 2.1,
+        "Op6": 2.8,
+        "Op8": 1.575,
+        "Op9": 1.925,
+    },
+}
 class WorkCenter:
     def __init__(self, wc_id: int, machine_names: List[str]):
         self.id = int(wc_id)
         # dictionary of machine_name -> metadata
         self.machines: Dict[str, Dict] = {}
         for mid in machine_names:
-            # Prefer speed_factor and capability info from module-level
+            # Prefer capability info from module-level
             # DEFAULT_WORKCENTERS (synchronized to YAML). If an entry exists
             # for this machine name, copy its metadata (normalizing capable
             # op names like 'Op1' -> index 0). Otherwise fall back to a
             # deterministic default (no randomness) so runs are reproducible.
-            speed = 1.0
             caps_idx = list(range(0, 9))
             default_machines = DEFAULT_WORKCENTERS.get('machines', {}) if isinstance(DEFAULT_WORKCENTERS, dict) else {}
             meta = default_machines.get(mid)
-            # try mapping names like M_0_0 -> M1..M5 used in DEFAULT_WORKCENTERS
+            # try mapping names like M_0_0 -> M0..M4 used in DEFAULT_WORKCENTERS
             if meta is None:
                 m = re.match(r"M_(\d+)_(\d+)$", mid)
                 if m:
                     a = int(m.group(1))
                     b = int(m.group(2))
-                    idx = a * 2 + b + 1
+                    idx = a * 2 + b
                     key = f"M{idx}"
                     meta = default_machines.get(key)
 
             if isinstance(meta, dict):
-                # extract speed_factor
-                try:
-                    speed = float(meta.get('speed_factor', 1.0))
-                except Exception:
-                    speed = 1.0
                 # extract capabilities, support both 'capable_ops' (YAML) and 'capabilities'
                 raw_caps = meta.get('capable_ops', None) or meta.get('capabilities', None)
                 if isinstance(raw_caps, (list, tuple)):
@@ -91,7 +131,6 @@ class WorkCenter:
             self.machines[mid] = {
                 "workcenter": int(wc_id),
                 "capabilities": caps_idx,
-                "speed_factor": float(speed),
             }
 
     def machine_list(self) -> List[str]:
@@ -104,15 +143,15 @@ class WorkCenters:
         # Default topology (3 WCs, 5 machines) — this is the canonical mapping
         # used when no external YAML config overrides it.
         self.workcenters_list: List[WorkCenter] = []
-        # machine_registry: machine_name -> {workcenter, capabilities, speed_factor}
+        # machine_registry: machine_name -> {workcenter, capabilities}
         self.machine_registry: Dict[str, Dict] = {}
 
         # default machine naming consistent with the environment code
         # ordering corresponds to user-visible machine numbers 1..5
         default_map = {
-            0: ["M_0_0", "M_0_1"],  # WorkCenter 1 -> machine 1,2
-            1: ["M_1_0", "M_1_1"],  # WorkCenter 2 -> machine 3,4
-            2: ["M_2_0"],            # WorkCenter 3 -> machine 5
+            0: ["M0", "M1"],  # WorkCenter 1 -> machine 0,1
+            1: ["M2", "M3"],  # WorkCenter 2 -> machine 2,3
+            2: ["M4"],          # WorkCenter 3 -> machine 4
         }
 
         for wc_idx in sorted(default_map.keys()):
@@ -124,7 +163,7 @@ class WorkCenters:
                 self.machine_registry[mname] = mmeta.copy()
 
         # explicit helper: machine order -> machine name (1-based machine numbers)
-        self.machine_order = ["M_0_0", "M_0_1", "M_1_0", "M_1_1", "M_2_0"]
+        self.machine_order = ["M0", "M1", "M2", "M3", "M4"]
 
         # operator-group eligibility mapping (by WorkCenter index)
         # default: each WorkCenter has its own operator-group membership list; this
@@ -218,7 +257,6 @@ class WorkCenters:
                 machine_registry[mname] = {
                     'workcenter': int(wci),
                     'capabilities': caps_idx,
-                    'speed_factor': float(mconf.get('speed_factor', 1.0)),
                 }
                 wc_to_machines[int(wci)].append(mname)
 
@@ -322,62 +360,37 @@ class WorkCenters:
                 except Exception:
                     continue
 
-            # extract processing_time_means from env.config if present
+            # extract processing_time_means from env.config if present and
+            # require explicit durations in strict mode
             if getattr(env, 'config', None):
                 try:
                     proc_means = env.config.get('processing_time_means', {})
                     op_name = f"Op{op_idx_local+1}"
                     op_means = proc_means.get(op_name, {}) if isinstance(proc_means, dict) else {}
                     for m in allowed_machines:
+                        mi = int(mindex.get(m, 0))
                         if m in op_means:
-                            per_machine_durations[int(mindex.get(m))] = float(op_means.get(m))
+                            per_machine_durations[mi] = float(op_means.get(m))
+                        else:
+                            raise ValueError(f"Missing duration for {op_name} on machine {m} (workcenter {mi}) - add to processing_time_means")
                 except Exception:
-                    pass
-
-            # fallback: estimate per-machine durations using base and speed_factor
-            for m in allowed_machines:
-                mi = int(mindex.get(m, 0))
-                if mi in per_machine_durations:
-                    continue
-                try:
-                    speed = float(self.machine_registry.get(m, {}).get('speed_factor', 1.0))
-                    # base_duration_val will be computed below; use placeholder if missing
-                    per_machine_durations[mi] = float(0.0)
-                except Exception:
-                    per_machine_durations[mi] = float(0.0)
+                    raise
         except Exception:
             allowed_machines = []
             allowed_machine_indices = []
             per_machine_durations = {}
 
-        # compute base_duration_val similar to environment logic
-        if base_dur is not None:
+        # In strict mode, we expect per_machine_durations to have been
+        # populated from processing_time_means. For compatibility expose a
+        # base_duration as the mean of per-machine durations when present.
+        if per_machine_durations:
             try:
-                base_duration_val = float(base_dur)
-            except Exception:
-                base_duration_val = 0.0
-        elif per_wc_durations:
-            try:
-                vals = [float(v) for v in per_wc_durations.values() if v is not None]
+                vals = [float(v) for v in per_machine_durations.values() if v is not None]
                 base_duration_val = sum(vals) / len(vals) if vals else 0.0
             except Exception:
                 base_duration_val = 0.0
         else:
             base_duration_val = 0.0
-
-        # Fill in per_machine_durations that were placeholders
-        try:
-            mindex = getattr(self, 'machine_index', {})
-            for m in allowed_machines:
-                mi = int(mindex.get(m, 0))
-                if mi in per_machine_durations and per_machine_durations[mi] == 0.0:
-                    try:
-                        speed = float(self.machine_registry.get(m, {}).get('speed_factor', 1.0))
-                        per_machine_durations[mi] = round(float(base_duration_val) / max(1e-6, speed), 6)
-                    except Exception:
-                        per_machine_durations[mi] = float(base_duration_val)
-        except Exception:
-            pass
 
         # resume callable that will validate choice and succeed the resume_evt
         def _resume_with(choice, _resume_evt=resume_evt):

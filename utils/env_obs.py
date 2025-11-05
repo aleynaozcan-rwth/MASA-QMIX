@@ -33,9 +33,9 @@ def build_agent_obs(env: Any, job: Any) -> np.ndarray:
         progress, wait_norm, rem_norm, util_m, util_o, wip_norm,
         time_norm, reward_norm, completed_norm, n_ops_norm, finished_flag
     ], dtype=np.float32)
-    if obs.shape[0] < getattr(env, 'obs_dim_agent', obs.shape[0]):
-        obs = np.concatenate([obs, np.zeros(getattr(env, 'obs_dim_agent', obs.shape[0]) - obs.shape[0])])
-    return obs[: getattr(env, 'obs_dim_agent', obs.shape[0])]
+    # Ensure the returned observation has exactly env.obs_dim_agent elements
+    obs = np.pad(obs, (0, max(0, getattr(env, 'obs_dim_agent', obs.shape[0]) - len(obs))))[: getattr(env, 'obs_dim_agent', obs.shape[0])]
+    return obs
 
 
 def build_state_vector(env: Any) -> np.ndarray:
@@ -50,6 +50,6 @@ def build_state_vector(env: Any) -> np.ndarray:
     reward_recent = np.clip((np.mean(env._recent_rewards) if env._recent_rewards else 0) / 10.0, 0, 1)
     idle_ratio = 1.0 - 0.5 * (util_m + util_o)
     core = np.array([util_m, util_o, avg_wait, wip, completed, reward_recent, idle_ratio], dtype=np.float32)
-    if core.shape[0] < getattr(env, 'state_dim', core.shape[0]):
-        core = np.concatenate([core, np.zeros(getattr(env, 'state_dim', core.shape[0]) - core.shape[0])])
-    return core[: getattr(env, 'state_dim', core.shape[0])]
+    # Ensure the returned state vector has exactly env.state_dim elements
+    core = np.pad(core, (0, max(0, getattr(env, 'state_dim', core.shape[0]) - len(core))))[: getattr(env, 'state_dim', core.shape[0])]
+    return core

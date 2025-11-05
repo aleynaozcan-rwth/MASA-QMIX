@@ -46,12 +46,21 @@ def main():
     }
     print(json.dumps(out, indent=2))
     try:
-        import os
-        os.makedirs('artifacts', exist_ok=True)
-        with open('artifacts/test_arrivals_out.json','w') as f:
-            json.dump(out, f, indent=2)
-    except Exception as e:
-        print('[WARN] write artifacts failed:', e)
+        from utils.io_control import allow_history_writes
+    except Exception:
+        def allow_history_writes():
+            return False
+
+    if allow_history_writes():
+        try:
+            import os
+            os.makedirs('artifacts', exist_ok=True)
+            with open('artifacts/test_arrivals_out.json','w') as f:
+                json.dump(out, f, indent=2)
+        except Exception as e:
+            print('[WARN] write artifacts failed:', e)
+    else:
+        print('[INFO] history writes disabled; skipping artifacts/test_arrivals_out.json')
 
 if __name__ == '__main__':
     main()

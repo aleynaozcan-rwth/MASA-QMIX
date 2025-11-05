@@ -77,8 +77,6 @@ def get_mutable_args():
     # ============================================================
     # === MASA-QMIX environment parameters =======================
     # ============================================================
-    parser.add_argument('--start_planes', type=int, default=4)
-    parser.add_argument('--max_planes', type=int, default=12)
     parser.add_argument('--arrival_prob', type=float, default=0.25)
     parser.add_argument('--variable_ops', type=bool, default=True)
     parser.add_argument('--num_operators', type=int, default=4)
@@ -99,6 +97,8 @@ def get_mutable_args():
     # ============================================================
     parser.add_argument('--episode_limit', type=int, default=200)
     parser.add_argument('--n_agents', type=int, default=10)
+    parser.add_argument('--initial_jobs', type=int, default=4,
+                        help='Number of jobs created at the start of the simulation (default 4)')
     # allow overriding training loop sizes from CLI
     parser.add_argument('--n_epoch', type=int, default=5)
     parser.add_argument('--n_episodes', type=int, default=4)
@@ -181,6 +181,24 @@ def get_mutable_args():
     args.reward_gamma = getattr(args, 'reward_gamma', 0.2)
     args.reward_delta = getattr(args, 'reward_delta', 0.1)
     args.reward_c_time = getattr(args, 'reward_c_time', 0.0)
+
+    # Short-run / quick-sanity defaults (override for fast local runs)
+    # These can be overridden by CLI flags, but provide a compact default
+    # for developer quick-sanity checks.
+    args.n_episodes = getattr(args, 'n_episodes', 10)
+    args.episode_limit = getattr(args, 'episode_limit', 128)
+    args.batch_size = getattr(args, 'batch_size', 32)
+    args.lr = getattr(args, 'lr', 0.0005)
+    args.rnn_hidden_dim = getattr(args, 'rnn_hidden_dim', 64)
+    args.seed = getattr(args, 'seed', 42)
+    # use_gpu maps to the existing 'cuda' flag
+    args.cuda = getattr(args, 'cuda', False)
+    # Exploration schedule (we expose a simple decay factor for convenience)
+    args.epsilon_start = getattr(args, 'epsilon_start', 1.0)
+    args.epsilon_end = getattr(args, 'epsilon_end', 0.05)
+    # A simple multiplicative decay parameter (not currently used by all policies,
+    # but stored for convenience). Existing code uses epsilon_anneal_steps.
+    args.epsilon_decay = getattr(args, 'epsilon_decay', 0.95)
 
     return args
 

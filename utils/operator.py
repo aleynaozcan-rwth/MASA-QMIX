@@ -15,18 +15,44 @@ Operators now:
 # Example operator list with qualified machines and group mapping
 # TODO(Phase3C.1): integrate with Operators.__init__() via merge_config(DEFAULT_OPERATORS, cfg)
 DEFAULT_OPERATORS = [
-    {"id": "O1", "qualified_machines": ["M1", "M4", "M5"]},
-    {"id": "O2", "qualified_machines": ["M2", "M3", "M5"]},
+    {"id": "O1", "qualified_machines": ["M0", "M3", "M4"]},
+    {"id": "O2", "qualified_machines": ["M1", "M2", "M4"]},
 ]
 
 class Operator:
-    """Single operator who can work on specific machine names."""
+    """Single operator who can work on specific machine names.
 
-    def __init__(self, operator_id, qualified_machines, workcenters_ref):
-        self.operator_id = operator_id
-        # qualified_machines: list of machine name strings (e.g., 'M_0_0')
+    Now owns a per-operator SimPy Resource so operator-level concurrency
+    is enforced by the simulation (no more relying only on is_busy flags).
+    """
+
+    def __init__(self, operator_id, qualified_machines, workcenters_ref, env=None):
+        # Normalize operator IDs to stable textual labels.
+        # If callers pass an int (legacy code paths) convert to 'O{n}' to
+        # ensure timeline/gantt output is always human-readable and
+        # non-ambiguous (avoid naked numeric ids like '0').
+        try:
+            if isinstance(operator_id, int):
+                self.operator_id = f"O{int(operator_id)}"
+            elif operator_id is None:
+                self.operator_id = "UNKNOWN"
+            else:
+                # keep stringy ids as-is but ensure type is str
+                self.operator_id = str(operator_id)
+        except Exception:
+            self.operator_id = str(operator_id)
+        # qualified_machines: list of machine name strings (e.g., 'M0')
         self.qualified_machines = list(qualified_machines)
         self.workcenters_ref = workcenters_ref  # Reference to WorkCenters() environment object
+        # SimPy resource for this concrete operator. If env is None the
+        # resource will be created lazily when an env is provided (fallback).
+        self.resource = None
+        if env is not None:
+            try:
+                import simpy
+                self.resource = simpy.Resource(env, capacity=1)
+            except Exception:
+                self.resource = None
         self.is_busy = False
         self.current_job = None
         self.current_workcenter = None
@@ -110,7 +136,7 @@ class Operator:
 class Operators:
     """Manages all Operator objects."""
 
-    def __init__(self, workcenters_ref):
+    def __init__(self, workcenters_ref, env=None):
         # Attempt to merge in-module DEFAULT_OPERATORS with any provided
         # operator configuration present on the WorkCenters object or its
         # attached config. This fills missing fields while remaining
@@ -184,7 +210,7 @@ class Operators:
                 return fallback
 
         # fallback default names if we couldn't build an order
-        fallback_names = ["M_0_0", "M_0_1", "M_1_0", "M_1_1", "M_2_0"]
+        fallback_names = ["M0", "M1", "M2", "M3", "M4"]
         m1 = machine_for_num(1, fallback_names[0])
         m2 = machine_for_num(2, fallback_names[1])
         m3 = machine_for_num(3, fallback_names[2])
@@ -207,20 +233,20 @@ class Operators:
                         if oid is None:
                             # try to infer id from position
                             oid = len(objs) + 1
-                        objs.append(Operator(oid, q, workcenters_ref))
+                        objs.append(Operator(oid, q, workcenters_ref, env=env))
                     except Exception:
                         continue
                 self.operators_object_list = objs
             else:
                 self.operators_object_list = [
-                    Operator(1, op1_machines, workcenters_ref),
-                    Operator(2, op2_machines, workcenters_ref),
+                    Operator(1, op1_machines, workcenters_ref, env=env),
+                    Operator(2, op2_machines, workcenters_ref, env=env),
                 ]
         except Exception:
             # fallback to original explicit default
             self.operators_object_list = [
-                Operator(1, op1_machines, workcenters_ref),
-                Operator(2, op2_machines, workcenters_ref),
+                Operator(1, op1_machines, workcenters_ref, env=env),
+                Operator(2, op2_machines, workcenters_ref, env=env),
             ]
 
         # Compute and attach qualified_workcenters for convenience: map each
@@ -239,7 +265,7 @@ class Operators:
                 # 2) try using machine_order index -> registry key convention
                 try:
                     idx = order.index(mname)
-                    candidate = f'M{idx+1}'
+                    candidate = f'M{idx}'
                     if candidate in registry:
                         return candidate
                 except ValueError:
@@ -250,7 +276,7 @@ class Operators:
                 digits = re.findall(r"\d+", mname)
                 if digits:
                     # try the first number as ordinal
-                    candidate = f'M{int(digits[0]) + 1}' if len(order) == len(registry) else f'M{digits[0]}'
+                    candidate = f'M{int(digits[0])}' if len(order) == len(registry) else f'M{digits[0]}'
                     if candidate in registry:
                         return candidate
                 # nothing matched

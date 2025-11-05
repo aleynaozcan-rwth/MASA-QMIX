@@ -9,6 +9,11 @@ import numpy as np
 
 p='my_data_and_graph/historydata/gantt_epoch1.csv'
 out='my_data_and_graph/historydata/gantt_epoch1_pretty.png'
+try:
+    from utils.io_control import allow_history_writes
+except Exception:
+    def allow_history_writes():
+        return False
 if not os.path.exists(p):
     print('CSV missing', p); sys.exit(1)
 rows=[]
@@ -94,6 +99,9 @@ ax.grid(True, linestyle='--', alpha=0.3)
 ax.set_xlabel('Simulation Time (SimPy clock)')
 ax.set_ylabel('JobAgent (ID)')
 plt.tight_layout()
-plt.savefig(out, dpi=300)
-plt.close()
-print('Saved pretty PNG', out)
+if allow_history_writes():
+    plt.savefig(out, dpi=300)
+    plt.close()
+    print('Saved pretty PNG', out)
+else:
+    print('[INFO] history writes disabled; skipping pretty gantt PNG save')

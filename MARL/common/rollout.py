@@ -18,12 +18,18 @@ except Exception as e:
     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
     build_index_map = None
     build_mask_for_job = None
-# gantt helpers (selection logging)
+# gantt helpers (selection logging) and IO control
 try:
     from utils import gantt as gantt_utils
 except Exception as e:
     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
     gantt_utils = None
+try:
+    # io_control provides central allow flag
+    from utils.io_control import allow_history_writes
+except Exception:
+    def allow_history_writes():
+        return False
 
 
 class RolloutWorker:
@@ -51,17 +57,19 @@ class RolloutWorker:
         self.buffer = buffer
         self.args = args or type("A", (), {})()
         # Use episode_limit coming from runner-provided args when available.
-        # Fall back to the explicit constructor value or 200 as a safe default.
+        # Fall back to the explicit constructor value or 300 as a safe default.
         try:
             if hasattr(self.args, "episode_limit") and getattr(self.args, "episode_limit") is not None:
                 self.episode_limit = int(getattr(self.args, "episode_limit"))
             elif episode_limit is not None:
                 self.episode_limit = int(episode_limit)
             else:
-                self.episode_limit = int(getattr(self.args, 'episode_limit', 200))
+                # extend default rollout episode_limit to match environment
+                # default (300) so short runs include initial arrivals.
+                self.episode_limit = int(getattr(self.args, 'episode_limit', 300))
         except Exception as e:
             logging.getLogger(__name__).exception("RolloutWorker init: failed to determine episode_limit", exc_info=True)
-            self.episode_limit = 200
+            self.episode_limit = 300
 
         if hasattr(self.args, "device") and getattr(self.args, "device") is not None:
             self.device = getattr(self.args, "device")
@@ -500,22 +508,26 @@ class RolloutWorker:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                     reason = reason or ''
 
-                if gantt_utils is not None:
-                    try:
-                        gantt_utils.append_selection_log(sched_path, sim_time, job_id, allowed_wcs, avail_mask, chosen_idx, chosen_name, reason)
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                if not allow_history_writes():
+                    # history writes disabled; skip logging
+                    pass
                 else:
-                    try:
-                        header_needed = not os.path.exists(sched_path)
-                        with open(sched_path, 'a') as sf:
-                            if header_needed:
-                                sf.write('time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason\n')
-                            sf.write(f"{sim_time},{job_id},{allowed_wcs},{avail_mask},{chosen_idx},{repr(chosen_name)},{reason}\n")
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                    if gantt_utils is not None:
+                        try:
+                            gantt_utils.append_selection_log(sched_path, sim_time, job_id, allowed_wcs, avail_mask, chosen_idx, chosen_name, reason)
+                        except Exception as e:
+                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            pass
+                    else:
+                        try:
+                            header_needed = not os.path.exists(sched_path)
+                            with open(sched_path, 'a') as sf:
+                                if header_needed:
+                                    sf.write('time,job_id,allowed_wcs,avail_mask,chosen_machine_idx,chosen_machine_name,reason\n')
+                                sf.write(f"{sim_time},{job_id},{allowed_wcs},{avail_mask},{chosen_idx},{repr(chosen_name)},{reason}\n")
+                        except Exception as e:
+                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            pass
             except Exception as e:
                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                 pass
@@ -926,6 +938,17 @@ class RolloutWorker:
             obs_init = self.env.reset()
             info = {}
 
+        # Stamp the env with the current episode index so environment-level
+        # appenders can record which episode a gantt record belongs to.
+        try:
+            try:
+                self.env.current_episode = int(global_ep_idx)
+            except Exception:
+                # best-effort: if conversion fails, still attach raw value
+                setattr(self.env, 'current_episode', global_ep_idx)
+        except Exception:
+            pass
+
         episode = {"r": []}
         gantt = []
         # collect per-decision transitions for replay
@@ -1051,6 +1074,19 @@ class RolloutWorker:
                 gantt.extend(list(self.env.gantt_records))
         except Exception as e:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            pass
+
+        # Clear the temporary episode stamp so other callers are not confused
+        try:
+            if hasattr(self.env, 'current_episode'):
+                try:
+                    delattr(self.env, 'current_episode')
+                except Exception:
+                    try:
+                        del self.env.current_episode
+                    except Exception:
+                        setattr(self.env, 'current_episode', None)
+        except Exception:
             pass
 
         return episode, ep_reward, bool(win_tag), gantt

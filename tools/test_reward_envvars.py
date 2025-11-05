@@ -33,11 +33,20 @@ def main():
     }
     print(json.dumps(out, indent=2))
     try:
-        os.makedirs('artifacts', exist_ok=True)
-        with open('artifacts/reward_envcheck.json','w') as f:
-            json.dump(out, f, indent=2)
-    except Exception as e:
-        print('[WARN] write artifacts failed:', e)
+        from utils.io_control import allow_history_writes
+    except Exception:
+        def allow_history_writes():
+            return False
+
+    if allow_history_writes():
+        try:
+            os.makedirs('artifacts', exist_ok=True)
+            with open('artifacts/reward_envcheck.json','w') as f:
+                json.dump(out, f, indent=2)
+        except Exception as e:
+            print('[WARN] write artifacts failed:', e)
+    else:
+        print('[INFO] history writes disabled; skipping artifacts/reward_envcheck.json')
 
 if __name__ == '__main__':
     main()

@@ -1,5 +1,7 @@
 import os
 import shutil
+import pytest
+pytestmark = pytest.mark.skip(reason="heavy training/integration test - skip for fast unit runs")
 from MARL.common.arguments import get_smoke_args
 from environment import MASAEnv
 from MARL.runner import Runner

@@ -53,9 +53,9 @@ Full operator/gantt details: `artifacts/test_concurrency_out.json` (gantt_record
 - sample dynamic add stdout recorded in `artifacts/test_arrivals_out.json` and console logs.
 
 ## Initial jobs comparison
-The historical `my_data_and_graph/historydata/initial_jobs.txt` was in the older (per-WorkCenter) format and has been archived to `archive/initial_jobs_history_old.txt` to avoid accidental usage. The reset-produced (current) initial jobs are the authoritative source and were used during the recent checks (printed to `artifacts/initial_jobs_dump.txt`).
+Historical per-WorkCenter initial-job dumps have been archived (see `archive/initial_jobs_history_old.txt`) and are no longer considered input artifacts. Initial jobs are now produced dynamically by the TaskGenerator / `MASAEnv.reset()` and serve as the authoritative runtime source. This avoids accidental reliance on legacy text dumps.
 
-Action taken: archived old dump to `archive/initial_jobs_history_old.txt`.
+Action taken: archived legacy dumps to `archive/initial_jobs_history_old.txt` and switched to dynamic generation as the canonical source.
 
 ## Notes & Warnings
 - MASAEnv instantiated and exercised by multiple small tests (`tools/test_concurrency.py`, `tools/test_arrivals.py`, `tools/test_reward_envvars.py`).
