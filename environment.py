@@ -2,13 +2,18 @@
 
 This file provides an environment surface that:
 - Accepts a centralized `args` namespace (from MARL.common.arguments) and
-  maps canonical fields (n_agents, num_operators, n_actions, episode_limit,
-  obs/state dims, job generation bounds, reward params) into the runtime.
-- Respects auto_* flags (auto_load_config, auto_build, auto_start_arrivals)
-  so construction is pure by default and eager behaviors are opt-in.
+    maps canonical fields (n_agents, num_operators, n_actions, episode_limit,
+    obs/state dims, job generation bounds, reward params) into the runtime.
 - Delegates YAML parsing / machine registry building to utils when available,
-  and keeps minimal safe fallbacks so tests can import the module during
-  staged refactor.
+    and keeps minimal safe fallbacks so tests can import the module during
+    staged refactor.
+
+Config-based loading has been fully removed as of this version. The
+environment and all subsystems now rely exclusively on in-module defaults
+(WorkCenters, Operators, TaskGenerator). Deprecated constructor flags such
+as `auto_load_config`, `config_path`, and `use_yaml_config` are accepted for
+backwards compatibility but have no effect — they will be ignored at runtime
+and may emit a deprecation warning when provided.
 
 The implementation intentionally keeps side-effects low (logging only) and
 tries to use `utils` components when present. The goal is to be a stable
@@ -162,6 +167,22 @@ class MASAEnv:
                 args = None
         self.args = args
 
+        # Deprecation warnings: config-related flags (kept for API compatibility)
+        # are accepted but ignored. Log a single warning if any deprecated
+        # flags are supplied so callers can migrate away from YAML-based flows.
+        try:
+            deprecated_flags = []
+            if config_path:
+                deprecated_flags.append('config_path')
+            if auto_load_config:
+                deprecated_flags.append('auto_load_config')
+            if use_yaml_config:
+                deprecated_flags.append('use_yaml_config')
+            if deprecated_flags:
+                LOG.warning("Deprecated config flags provided (ignored): %s", ','.join(deprecated_flags))
+        except Exception:
+            pass
+
         # -----------------------
         # Safe seed initialization
         # -----------------------
@@ -169,13 +190,13 @@ class MASAEnv:
             # prefer seed from args if provided
             if args is not None and hasattr(args, 'seed') and getattr(args, 'seed') is not None:
                 self.seed = int(getattr(args, 'seed'))
-                print(f"[Env Init] Using provided seed: {self.seed}")
+                LOG.info("[Env Init] Using provided seed: %s", self.seed)
             else:
                 # fallback: use constructor seed if given
                 if seed is not None:
                     try:
                         self.seed = int(seed)
-                        print(f"[Env Init] Using constructor seed: {self.seed}")
+                        LOG.info("[Env Init] Using constructor seed: %s", self.seed)
                     except Exception:
                         self.seed = None
                 else:
@@ -184,8 +205,8 @@ class MASAEnv:
             if self.seed is None:
                 # deterministic generation from system clock
                 self.seed = int(time.time() * 1000) % (2 ** 32)
-                print(f"[Env Init] No seed provided — generated new seed: {self.seed}")
-                print(f"[Reproducibility Tip] To reproduce this exact run, re-launch with --seed {self.seed}")
+                LOG.info("[Env Init] No seed provided — generated new seed: %s", self.seed)
+                LOG.info("[Reproducibility Tip] To reproduce this exact run, re-launch with --seed %s", self.seed)
 
         except Exception:
             self.seed = int(seed) if seed is not None else int(time.time() * 1000) % (2 ** 32)
@@ -214,62 +235,14 @@ class MASAEnv:
         except Exception:
             self.dump_config = bool(kwargs.get('dump_config', False))
 
-        # If a config_path is provided, attempt to load YAML and populate
-        # common missing kwargs so callers can pass only config_path in tests.
-        # This is optional and defensive: if PyYAML is not available or the
-        # file cannot be read, we silently continue and leave resolution to
-        # explicit kwargs or args.
-        if config_path and isinstance(config_path, str):
-            try:
-                try:
-                    import yaml  # type: ignore
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    yaml = None
-                cfg = None
-                if yaml is not None and os.path.exists(config_path):
-                    with open(config_path, 'r') as fh:
-                        cfg = yaml.safe_load(fh) or {}
-                if isinstance(cfg, dict):
-                    # infer number of operators
-                    if 'num_operators' not in kwargs and 'num_ops' not in kwargs:
-                        ops = cfg.get('operators')
-                        if isinstance(ops, list):
-                            kwargs['num_operators'] = int(len(ops))
-
-                    # infer number of workcenters / actions
-                    if 'num_wcs' not in kwargs and 'n_actions' not in kwargs:
-                        wcs = cfg.get('work_centers') or cfg.get('workcenters')
-                        if isinstance(wcs, dict):
-                            kwargs['num_wcs'] = int(len(wcs))
-                        else:
-                            machines = cfg.get('machines', {})
-                            if isinstance(machines, dict):
-                                wc_set = set()
-                                for mdata in machines.values():
-                                    if isinstance(mdata, dict):
-                                        wc = mdata.get('wc') or mdata.get('workcenter') or mdata.get('work_center')
-                                        if wc is not None:
-                                            wc_set.add(str(wc))
-                                if wc_set:
-                                    kwargs['num_wcs'] = int(len(wc_set))
-
-                    # task generator seq length -> job_min_ops / job_max_ops
-                    tg = cfg.get('task_generator', {}) or {}
-                    seq = tg.get('seq_length') if isinstance(tg, dict) else None
-                    if isinstance(seq, dict):
-                        if 'job_min_ops' not in kwargs:
-                            kwargs['job_min_ops'] = int(seq.get('min', 1))
-                        if 'job_max_ops' not in kwargs:
-                            kwargs['job_max_ops'] = int(seq.get('max', max(1, kwargs.get('job_min_ops', 5))))
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                # keep behavior robust for environments without yaml or malformed files
-                try:
-                    self.logger.debug("config_path load skipped or failed: %s", config_path)
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    pass
+        # Config-free mode: ignore any provided config_path or YAML parsing.
+        # The system relies solely on in-module defaults (WorkCenters, DEFAULT_PROCESSING_TIMES).
+        cfg = {}
+        # Announce config-free operation for visibility
+        try:
+            LOG.info("[Init] Config-free mode active (WorkCenters/TaskGenerator defaults in use)")
+        except Exception:
+            pass
 
         # At this point `cfg` may contain the parsed YAML (if any). Merge the
         # in-module DEFAULT_ENV_PARAMS with the provided config/YAML when the
@@ -415,6 +388,14 @@ class MASAEnv:
         self.auto_build = bool(auto_build)
         self.auto_start_arrivals = bool(auto_start_arrivals)
 
+        # If CLI args provided an arrival lambda, persist it on the env
+        try:
+            if args is not None and hasattr(args, 'arrival_lambda'):
+                self.arrival_lambda = float(getattr(args, 'arrival_lambda'))
+        except Exception:
+            # leave arrival_lambda unset on failure
+            pass
+
         # logging (do not configure root logger here)
         self.logger = LOG
 
@@ -503,7 +484,7 @@ class MASAEnv:
                 # if num_wcs was set differently, correct it (num_wcs is legacy / fallback)
                 if int(getattr(self, 'num_wcs', 0)) != int(self.n_actions):
                     try:
-                        print(f"[WARN] CLI/num_wcs ({getattr(self,'num_wcs',None)}) differs from machine_list length ({self.n_actions}); aligning to machine_list")
+                        LOG.warning("[WARN] CLI/num_wcs (%s) differs from machine_list length (%s); aligning to machine_list", getattr(self,'num_wcs',None), self.n_actions)
                     except Exception:
                         pass
                     self.num_wcs = int(self.n_actions)
@@ -564,6 +545,8 @@ class MASAEnv:
 
         # generator/process lifecycle flag to avoid leaked processes across resets
         self._generator_shutdown = False
+        # Interval (seconds) between periodic summary logs
+        self.summary_interval = 20
 
         # initial_jobs: independent from n_agents (max capacity)
         try:
@@ -573,37 +556,35 @@ class MASAEnv:
 
         # Ensure TaskGenerator exists and is owner-aware. Try several
         # constructor signatures for backward compatibility with older
-        # TaskGenerator implementations.
+        # TaskGenerator implementations. Prefer the modern signature that
+        # accepts explicit RNG objects so create_job() is deterministic.
         try:
             from utils.task_generator import TaskGenerator  # type: ignore
-            # Try the modern signature first (seed + py_rng). If that fails
-            # due to a TypeError (older TaskGenerator that doesn't accept
-            # these kwargs), fall back to simpler signatures. This preserves
-            # compatibility with external test fakes that accept only seed.
+            self.job_generator = None
             try:
-                # Preferred: provide deterministic RNG objects
-                self.job_generator = TaskGenerator(seed=self.seed, py_rng=self._py_rng)
+                # Modern preferred signature: pass deterministic RNGs
+                self.job_generator = TaskGenerator(py_rng=self._py_rng, np_rng=self._np_rng)
             except TypeError:
                 try:
-                    # Older/alternate signature: only seed
-                    self.job_generator = TaskGenerator(seed=self.seed)
-                except TypeError:
+                    # Alternate: accepts injected Python RNG only
+                    self.job_generator = TaskGenerator(py_rng=self._py_rng)
+                except Exception:
                     try:
-                        # Legacy signature: config_path + rngs
-                        self.job_generator = TaskGenerator(config_path=self.config_path)
+                        # Fallback: parameterless ctor
+                        self.job_generator = TaskGenerator()
                     except Exception:
-                        # final fallback: attempt the original call that may work
-                        try:
-                            self.job_generator = TaskGenerator(config_path=self.config_path, py_rng=self._py_rng, np_rng=self._np_rng)
-                        except Exception:
-                            self.job_generator = None
+                        self.job_generator = None
 
-            # Attach owner and RNGs when possible for deterministic behavior
+            # Attach owner and deterministic RNG if available
             try:
                 if self.job_generator is not None:
-                    setattr(self.job_generator, '_owner_env', self)
                     try:
-                        setattr(self.job_generator, '_py_rng', self._py_rng)
+                        setattr(self.job_generator, '_owner_env', self)
+                    except Exception:
+                        pass
+                    try:
+                        if not getattr(self.job_generator, '_py_rng', None):
+                            setattr(self.job_generator, '_py_rng', self._py_rng)
                     except Exception:
                         pass
             except Exception:
@@ -644,7 +625,7 @@ class MASAEnv:
             }
             # print concise startup summary to stdout for visibility
             try:
-                print(f"[Env Summary] seed={summary['seed']} capacity={summary['n_agents_capacity']} initial_created={summary['initial_jobs_created']}")
+                LOG.info("[Env Summary] seed=%s capacity=%s initial_created=%s", summary['seed'], summary['n_agents_capacity'], summary['initial_jobs_created'])
             except Exception:
                 pass
 
@@ -774,20 +755,38 @@ class MASAEnv:
         try:
             tg_cfg = (self.config or {}).get('task_generator', {}) or {}
             lam = float(tg_cfg.get('arrival_lambda', 0.0)) if tg_cfg is not None else 0.0
+            # Allow enabling arrivals via constructor/attributes when YAML/config is not used
+            if not lam and getattr(self, 'auto_start_arrivals', False):
+                lam = float(getattr(self, 'arrival_lambda', 0.0) or 0.0)
             if lam and lam > 0.0:
-                try:
-                    from utils.task_generator import TaskGenerator  # type: ignore
-                    # Use a permissive construction call to support older or
-                    # test fakes that accept only config_path.
                     try:
-                        tg = TaskGenerator(config_path=self.config_path)
-                    except TypeError:
+                        from utils.task_generator import TaskGenerator  # type: ignore
                         try:
-                            tg = TaskGenerator(seed=self.seed)
-                        except Exception:
-                            tg = TaskGenerator(config_path=self.config_path) if 'TaskGenerator' in locals() else None
+                            tg = TaskGenerator(config_path=self.config_path, py_rng=self._py_rng, np_rng=self._np_rng)
+                        except TypeError:
+                            try:
+                                tg = TaskGenerator(py_rng=self._py_rng)
+                            except TypeError:
+                                try:
+                                    tg = TaskGenerator(config_path=self.config_path)
+                                except TypeError:
+                                    try:
+                                        tg = TaskGenerator(seed=self.seed)
+                                    except Exception:
+                                        tg = None
+                    except Exception:
+                        tg = None
                     try:
-                        setattr(tg, '_owner_env', self)
+                        if tg is not None:
+                            try:
+                                setattr(tg, '_owner_env', self)
+                            except Exception:
+                                pass
+                            try:
+                                if not getattr(tg, '_py_rng', None):
+                                    setattr(tg, '_py_rng', self._py_rng)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     # start the generator with the env and lambda
@@ -799,9 +798,6 @@ class MASAEnv:
                         except Exception:
                             pass
                     self._task_generator = tg
-                except Exception:
-                    # don't fail reset just because TaskGenerator isn't available
-                    self._task_generator = None
         except Exception:
             self._task_generator = None
 
@@ -812,7 +808,17 @@ class MASAEnv:
             logging.getLogger(__name__).exception("Failed to generate initial jobs on reset", exc_info=True)
 
         try:
-            print(f"[Env] Episode time limit set to {self.episode_limit} seconds")
+            LOG.info("[Env] Episode time limit set to %s seconds", self.episode_limit)
+        except Exception:
+            pass
+        # Start periodic summary logger (helps track job counts during long sims)
+        try:
+            # schedule periodic summary process on the current simpy env
+            try:
+                self.env.process(self._periodic_summary())
+            except Exception:
+                # fallback: if self.env not ready or process failed, ignore
+                pass
         except Exception:
             pass
         # DEBUG: print machine counts for tracing unexpected machine totals
@@ -821,12 +827,12 @@ class MASAEnv:
             mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
             ml_len = len(mlist)
             n_actions = getattr(self, 'n_actions', None)
-            print(f"[DEBUG] num_wcs={getattr(self,'num_wcs',None)}, len(machine_list)={ml_len}, n_actions={n_actions}")
+            LOG.debug("[DEBUG] num_wcs=%s, len(machine_list)=%s, n_actions=%s", getattr(self,'num_wcs',None), ml_len, n_actions)
             # If num_wcs and machine_list disagree, align to machine_list
             try:
                 if ml_len > 0 and int(getattr(self, 'num_wcs', 0)) != ml_len:
                     try:
-                        print(f"[WARN] Correcting num_wcs ({getattr(self,'num_wcs',None)}) -> {ml_len} to match machine_list")
+                        LOG.warning("[WARN] Correcting num_wcs (%s) -> %s to match machine_list", getattr(self,'num_wcs',None), ml_len)
                     except Exception:
                         pass
                     self.num_wcs = int(ml_len)
@@ -952,7 +958,20 @@ class MASAEnv:
         while not job.finished and self.env.now < self.episode_limit:
             op = job.current_op()
             if op is None:
-                job.finished = True
+                # No current op -> mark job completed (idempotent)
+                now_t = float(getattr(self.env, 'now', 0.0))
+                try:
+                    if job.mark_completed(now_t):
+                        self.completed_jobs += 1
+                        self._completed_now_cache += 1
+                        try:
+                            if job in self.active_jobs:
+                                self.active_jobs.remove(job)
+                        except Exception:
+                            pass
+                except Exception:
+                    # Best-effort: ignore failures to mark completion
+                    pass
                 break
 
             # normalize op formats: support legacy (allowed_machine_indices, dur) and
@@ -1054,10 +1073,10 @@ class MASAEnv:
                 except Exception:
                     allowed_list = [0]
                 # DEBUG: report what total_machines and allowed_list were resolved to
-                try:
-                    print(f"[DEBUG _job_process] total_machines={total_machines}, allowed_list={allowed_list}, len(machine_resources)={len(getattr(self, 'machine_resources', []) or [])}, num_wcs={getattr(self,'num_wcs', None)}")
-                except Exception:
-                    pass
+                    try:
+                        LOG.debug("[DEBUG _job_process] total_machines=%s, allowed_list=%s, len(machine_resources)=%s, num_wcs=%s", total_machines, allowed_list, len(getattr(self, 'machine_resources', []) or []), getattr(self,'num_wcs', None))
+                    except Exception:
+                        pass
 
                 # map to machine names when possible
                 mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
@@ -1409,9 +1428,8 @@ class MASAEnv:
                                 # Persist a gantt record using the concrete operator id
                                 op_id_for_record = str(getattr(available_operator, 'operator_id', 'UNKNOWN'))
                                 try:
-                                    # Print to stdout to ensure instrumentation is visible
-                                    # in captured console output during test/dev runs.
-                                    print(f"[GANTT-APPEND] concrete branch -> op_id_for_record={op_id_for_record!r} type={type(op_id_for_record)}")
+                                    # Log instrumentation so it's visible in test/dev logs.
+                                    LOG.info("[GANTT-APPEND] concrete branch -> op_id_for_record=%r type=%s", op_id_for_record, type(op_id_for_record))
                                     # Also write a small debug trace to the history directory so
                                     # it's persistent even if stdout is buffered or truncated.
                                     try:
@@ -1490,9 +1508,8 @@ class MASAEnv:
                                 op_end = float(self.env.now)
                                 op_id_for_record = 'UNASSIGNED'
                                 try:
-                                    # Print to stdout to ensure instrumentation is visible
-                                    # in captured console output during test/dev runs.
-                                    print(f"[GANTT-APPEND] unassigned branch -> op_id_for_record={op_id_for_record!r} type={type(op_id_for_record)}")
+                                    # Log instrumentation so it's visible in test/dev logs.
+                                    LOG.info("[GANTT-APPEND] unassigned branch -> op_id_for_record=%r type=%s", op_id_for_record, type(op_id_for_record))
                                     # Persist debug append info to disk as well so we can
                                     # inspect appended values regardless of stdout capture.
                                     try:
@@ -1551,17 +1568,23 @@ class MASAEnv:
             job.current_op_idx += 1
             job.remaining_time = 0.0
             if job.current_op_idx >= len(job.operations):
-                job.finished = True
-                self.completed_jobs += 1
-                self._completed_now_cache += 1
-                # Capacity management: when a job finishes, free an active slot
+                # mark completion and only increment counters once
+                now_t = float(getattr(self.env, 'now', 0.0))
                 try:
-                    if job in self.active_jobs:
+                    if job.mark_completed(now_t):
+                        self.completed_jobs += 1
+                        self._completed_now_cache += 1
+                        # Capacity management: when a job finishes, free an active slot
                         try:
-                            self.active_jobs.remove(job)
+                            if job in self.active_jobs:
+                                try:
+                                    self.active_jobs.remove(job)
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                 except Exception:
+                    # best-effort: continue even if mark_completed fails
                     pass
                 # If there are pending jobs, start the next one deterministically
                 try:
@@ -1572,6 +1595,10 @@ class MASAEnv:
                                 # schedule and mark active
                                 self.env.process(self._job_process(next_job))
                                 self.active_jobs.append(next_job)
+                                try:
+                                    next_job.is_active = True
+                                except Exception:
+                                    pass
                             except Exception:
                                 logging.getLogger(__name__).exception("Failed to start pending job", exc_info=True)
                 except Exception:
@@ -1845,6 +1872,27 @@ class MASAEnv:
             except Exception:
                 return np.zeros((int(getattr(self, 'state_dim', 0)),), dtype=np.float32)
 
+    def _periodic_summary(self):
+        """Periodically log job statistics during simulation."""
+        # This is a SimPy generator-based process (yields timeouts)
+        while True:
+            try:
+                yield self.env.timeout(self.summary_interval)
+            except Exception:
+                # If env is gone or summary_interval invalid, stop the process
+                return
+            try:
+                total = len(getattr(self, 'jobs', []) or [])
+                completed = sum(1 for j in getattr(self, 'jobs', []) if getattr(j, 'is_finished', False))
+                active = sum(1 for j in getattr(self, 'jobs', []) if getattr(j, 'is_active', False))
+                LOG.info("[Summary] t=%.2f → total=%d | completed=%d | active=%d",
+                         float(getattr(self.env, 'now', 0.0)), int(total), int(completed), int(active))
+            except Exception:
+                try:
+                    LOG.exception("[Summary] failed to emit periodic summary", exc_info=True)
+                except Exception:
+                    pass
+
     def add_job(self, ops_sequence: List, start_immediately: bool = True, set_arrival_zero: bool = False):
         """Add a job (ops_sequence) to the environment.
 
@@ -1868,6 +1916,17 @@ class MASAEnv:
         # Append to master job list (arrival order) and advance counter
         self.jobs.append(job)
         try:
+            # Live runtime visibility: log new arrivals as they are added so
+            # callers and users can see dynamic job injections in real-time
+            # (the gantt timeline generator produces 'New job arrived' only
+            # when invoked and is not a live arrival trace).
+            LOG.info("[Env] New job %s arrived at t=%.4f with %s ops", job.id, float(getattr(job, 'arrival_time', 0.0)), len(getattr(job, 'operations', []) or []))
+        except Exception:
+            try:
+                LOG.debug("[Env] New job added id=%s arrival=%s", getattr(job, 'id', None), getattr(job, 'arrival_time', None))
+            except Exception:
+                pass
+        try:
             self.job_counter = int(jid) + 1
         except Exception:
             try:
@@ -1890,16 +1949,33 @@ class MASAEnv:
                     try:
                         self.env.process(self._job_process(job))
                         self.active_jobs.append(job)
+                        try:
+                            job.is_active = True
+                        except Exception:
+                            pass
                     except Exception:
-                        logging.getLogger(__name__).exception("Exception caught while starting job", exc_info=True)
+                        # Diagnostic: surface add_job startup failures with sim time
+                        try:
+                            logging.getLogger(__name__).exception("Exception caught while starting job", exc_info=True)
+                            logging.getLogger(__name__).info("[Diag] add_job() failed at t=%.4f when starting job id=%s", float(getattr(self, 'env', simpy.Environment()).now if getattr(self, 'env', None) is not None else 0.0), getattr(job, 'id', None))
+                        except Exception:
+                            logging.getLogger(__name__).exception("Exception caught while starting job (secondary)", exc_info=True)
                 else:
                     # queue for later start
                     try:
                         self.pending_jobs.append(job)
                     except Exception:
                         logging.getLogger(__name__).exception("Failed to queue pending job", exc_info=True)
+                        try:
+                            logging.getLogger(__name__).info("[Diag] add_job() failed to append pending job id=%s at t=%.4f", getattr(job, 'id', None), float(getattr(self, 'env', simpy.Environment()).now if getattr(self, 'env', None) is not None else 0.0))
+                        except Exception:
+                            pass
             except Exception:
                 logging.getLogger(__name__).exception("Exception caught in capacity check", exc_info=True)
+                try:
+                    logging.getLogger(__name__).info("[Diag] add_job() capacity check failed at t=%.4f", float(getattr(self, 'env', simpy.Environment()).now if getattr(self, 'env', None) is not None else 0.0))
+                except Exception:
+                    pass
 
         return job
 
@@ -1959,7 +2035,10 @@ class MASAEnv:
                     logging.getLogger(__name__).warning("TaskGenerator failed to generate job; creating minimal single-op fallback for initial job")
                     ops = [(0, [0], {0: 1.0})]
                 try:
-                    self.add_job(ops, start_immediately=False, set_arrival_zero=True)
+                    # Start initial jobs immediately at t=0 so the simpy
+                    # environment has scheduled processes and time can
+                    # advance deterministically.
+                    self.add_job(ops, start_immediately=True, set_arrival_zero=True)
                 except Exception:
                     logging.getLogger(__name__).exception("Failed to add initial job via add_job", exc_info=True)
             except Exception:
@@ -1974,10 +2053,10 @@ class MASAEnv:
             for i, op in enumerate(job.operations):
                 try:
                     op_type, allowed_machine_indices, per_wc = op
-                    print(f"Job {job.id} Op{i} -> op_type={op_type} allowed_machine_indices={allowed_machine_indices} per_machine={per_wc}")
+                    LOG.info("Job %s Op%s -> op_type=%s allowed_machine_indices=%s per_machine=%s", job.id, i, op_type, allowed_machine_indices, per_wc)
                 except Exception as e:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    print(f"Job {job.id} Op{i} -> {op}")
+                    LOG.debug("Job %s Op%s -> %s", job.id, i, op)
 
     def print_initial_jobs_summary(self):
         """Print a concise initial jobs summary in the legacy format.
@@ -1997,9 +2076,9 @@ class MASAEnv:
                             eligible_desc.append(f"Op{int(op_type)+1}:[{','.join(str(x) for x in allowed_machine_indices)}]")
                         except Exception:
                             ops_desc.append(str(op))
-                    print(f"Job_{job.id} -> {len(job.operations)} ops: [{', '.join(ops_desc)}] | Eligible: {{{', '.join(eligible_desc)}}}")
+                    LOG.info("Job_%s -> %s ops: [%s] | Eligible: {%s}", job.id, len(job.operations), ', '.join(ops_desc), ', '.join(eligible_desc))
                 except Exception:
-                    print(f"Job_{job.id} -> (failed to summarize)")
+                    LOG.warning("Job_%s -> (failed to summarize)", job.id)
         except Exception:
             logging.getLogger(__name__).exception("Failed to print initial job summary", exc_info=True)
 

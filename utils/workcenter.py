@@ -204,106 +204,22 @@ class WorkCenters:
 
         Returns (workcenters_meta, num_wcs, num_ops).
         """
-        # Merge provided config into module-level defaults so callers may omit
-        # sections. This keeps YAML and in-module DEFAULT_WORKCENTERS consistent.
-        try:
-            from utils.config_loader import merge_config  # local import to avoid cycles
-            config = merge_config(DEFAULT_WORKCENTERS, config)
-        except Exception:
-            # if merge fails, continue with whatever config was passed
-            pass
-
+        # Deprecated: config-driven construction. Always return a WorkCenters
+        # instance built from in-module defaults so the system is config-free.
         inst = cls()
-        num_wcs = 1
-        num_ops = 1
         try:
-            machines_cfg = config.get('machines', {}) or {}
-            wc_cfg = config.get('work_centers', {}) or {}
-
-            if wc_cfg:
-                wc_names = list(wc_cfg.keys())
-            else:
-                seen = {}
-                for mname, mconf in machines_cfg.items():
-                    wcn = mconf.get('wc')
-                    if wcn and wcn not in seen:
-                        seen[wcn] = True
-                wc_names = list(seen.keys())
-
-            wc_name_to_idx = {name: idx for idx, name in enumerate(wc_names)}
-
-            machine_registry = {}
-            wc_to_machines = {idx: [] for idx in range(len(wc_names))}
-            for mname, mconf in machines_cfg.items():
-                wcn = mconf.get('wc')
-                if wcn is None:
-                    wci = len(wc_name_to_idx)
-                    wc_name_to_idx[mname] = wci
-                    wc_names.append(mname)
-                    wc_to_machines[wci] = []
-                wci = wc_name_to_idx.get(wcn, wc_name_to_idx.get(mname, 0))
-
-                caps = mconf.get('capable_ops', []) or []
-                caps_idx = []
-                for c in caps:
-                    try:
-                        if isinstance(c, str) and c.lower().startswith('op'):
-                            caps_idx.append(int(c[2:]) - 1)
-                        else:
-                            caps_idx.append(int(c))
-                    except Exception:
-                        pass
-
-                machine_registry[mname] = {
-                    'workcenter': int(wci),
-                    'capabilities': caps_idx,
-                }
-                wc_to_machines[int(wci)].append(mname)
-
-            eligible = {}
-            ops_cfg = config.get('operators', []) or []
-            for idx in range(len(wc_names)):
-                eligible[idx] = []
-                for op_idx, opconf in enumerate(ops_cfg):
-                    q = opconf.get('qualified_machines', []) or []
-                    for mname in wc_to_machines.get(idx, []):
-                        if mname in q:
-                            eligible[idx].append(op_idx)
-                            break
-
-            inst.machine_registry = machine_registry
-            try:
-                inst.machine_list = list(machine_registry.keys())
-                inst.machine_index = {m: i for i, m in enumerate(inst.machine_list)}
-            except Exception:
-                inst.machine_list = list(machine_registry.keys())
-                inst.machine_index = {m: i for i, m in enumerate(inst.machine_list)}
-
-            # build WorkCenter objects grouping their machines
-            try:
-                wc_list = []
-                for wc_idx in range(len(wc_names)):
-                    machine_names = wc_to_machines.get(wc_idx, [])
-                    wc_obj = WorkCenter(wc_idx, list(machine_names))
-                    wc_obj.machines = {}
-                    for mi, mname in enumerate(machine_names):
-                        wc_obj.machines[mname] = machine_registry.get(mname, {}).copy()
-                    wc_list.append(wc_obj)
-                inst.workcenters_list = wc_list
-            except Exception:
-                pass
-
-            try:
-                inst.eligible_operator_groups_by_wc = eligible
-            except Exception:
-                pass
-
-            num_wcs = max(1, len(wc_names))
-            num_ops = max(1, len(ops_cfg))
+            num_wcs = int(len(getattr(inst, 'workcenters_list', []) or []))
         except Exception:
-            num_wcs = getattr(inst, 'num_workcenters', lambda: 1)()
+            num_wcs = 1
+        # Derive num_ops from operations_map (max op index + 1) when possible
+        try:
+            ops_keys = list(getattr(inst, 'operations_map', {}).keys())
+            if ops_keys:
+                num_ops = int(max(ops_keys) + 1)
+            else:
+                num_ops = 1
+        except Exception:
             num_ops = 1
-
         return inst, int(num_wcs), int(num_ops)
     # ------------------------------------------------------------------
     def create_decision_item(self, env: Any, job: Any, op: Any) -> Dict:

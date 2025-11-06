@@ -1,3 +1,4 @@
+
 """
 utils/jobagent.py
 Step 8A.5.3 — Machine-level Decision Integration
@@ -10,6 +11,9 @@ Enhancements vs Step 8A.3:
 """
 
 from typing import Optional
+import logging
+
+LOG = logging.getLogger(__name__)
 
 
 # ======================================================================
@@ -72,8 +76,7 @@ class JobAgents:
     def add_new_agent(self, agent):
         """Add a new JobAgent object (for dynamic arrivals)."""
         self.agents_object_list.append(agent)
-        print(f"[JobAgents] Added new JobAgent {agent.agent_id} at t={agent.arrival_time}, "
-              f"{len(agent.left_job)} jobs.")
+        LOG.info("[JobAgents] Added new JobAgent %s at t=%s, %s jobs.", agent.agent_id, agent.arrival_time, len(agent.left_job))
 
     def active_agent_ids(self):
         """Return IDs of currently active JobAgents."""
@@ -199,11 +202,13 @@ class JobAgent:
         self.machine_history.append(machine_id)
         if workcenter_id is not None:
             self.workcenter_history.append(workcenter_id)
-        print(f"[JobAgent {self.agent_id}] Executed task on Machine {machine_id} (WC {workcenter_id}) | duration={adjusted_time:.2f}")
+        LOG.info("[JobAgent %s] Executed task on Machine %s (WC %s) | duration=%.2f", self.agent_id, machine_id, workcenter_id, adjusted_time)
 
         # mark finished flag if no left jobs remain
         if not self.left_job:
-            self.finished = True
+            # Record completion via mark_completed (idempotent). We don't
+            # always have a simpy time reference here, so pass None.
+            self.mark_completed(None)
 
         return adjusted_time
 
@@ -211,10 +216,36 @@ class JobAgent:
     # Lifecycle helpers
     # ------------------------------------------------------------------
     def mark_completed(self, sim_time: Optional[float] = None):
-        """Mark JobAgent as completed (for replay/log credit)."""
-        self.is_active = False
-        self.completed_at = sim_time
-        print(f"[JobAgent] JobAgent {self.agent_id} completed all jobs at t={sim_time}")
+        """Mark JobAgent as completed (for replay/log credit).
+
+        Idempotent: returns True on the first time the agent is marked completed,
+        False if it was already completed.
+        """
+        # If already completed, do nothing
+        if getattr(self, 'completed_at', None) is not None:
+            return False
+
+        # record completion state
+        try:
+            self.is_active = False
+            self.completed_at = float(sim_time) if sim_time is not None else None
+        except Exception:
+            # defensive: fall back to raw assignment
+            self.is_active = False
+            self.completed_at = sim_time
+
+        # mark finished flag as well for compatibility
+        try:
+            self.finished = True
+        except Exception:
+            pass
+
+        # Log the event and return success
+        try:
+            LOG.info("[JobAgent] JobAgent %s completed all jobs at t=%s", self.agent_id, self.completed_at)
+        except Exception:
+            pass
+        return True
 
     def reset(self):
         """Reset internal state (used on environment reset)."""

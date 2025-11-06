@@ -39,7 +39,7 @@ def test_no_runtime_reads_of_legacy_files(monkeypatch):
     monkeypatch.setattr(builtins, 'open', OpenGuard(orig_open))
 
     # Construct a minimal MASAEnv without enabling dumps or arrivals and call reset
-    env = MASAEnv(auto_build=False, auto_load_config=False, auto_start_arrivals=False, dump_config=False)
+    env = MASAEnv(auto_build=False, auto_start_arrivals=False, dump_config=False)
     env.reset()
     # If construction completed without AssertionError, test passes
     assert True

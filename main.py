@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import pickle
 import os
-from environment import MASAEnv
+from environment import MASAEnv, LOG
 import sys
 from os.path import dirname, abspath
 
@@ -35,10 +35,17 @@ def marl_agent_wrapper(args):
     # pass them into MASAEnv so it can load/merge runtime configuration.
     # Construct environment without auto-loading YAML/config to ensure
     # the environment runs purely from its module defaults and injected args.
+    auto_arrivals = getattr(args, 'arrival_lambda', 0.0) > 0.0
+    try:
+        if auto_arrivals:
+            LOG.info("[Main] Auto-starting TaskGenerator (arrival_lambda=%.3f)", float(getattr(args, 'arrival_lambda', 0.0)))
+    except Exception:
+        pass
     env = MASAEnv(
         args=args,
         config_path=getattr(args, 'config_path', None),
         auto_load_config=False,
+        auto_start_arrivals=auto_arrivals,
     )
     # Runner will query the environment and initialize any runtime-derived
     # shapes (n_actions, n_agents, obs/state dims, episode_limit). Keep
@@ -97,10 +104,17 @@ def marl_agent_wrapper(args):
 def random_agent_wrapper(args):
     episodes = 10
     # For the random baseline use a pure environment (no YAML/config auto-load)
+    auto_arrivals = getattr(args, 'arrival_lambda', 0.0) > 0.0
+    try:
+        if auto_arrivals:
+            LOG.info("[Main] Auto-starting TaskGenerator (arrival_lambda=%.3f)", float(getattr(args, 'arrival_lambda', 0.0)))
+    except Exception:
+        pass
     env = MASAEnv(
         args=args,
         config_path=getattr(args, 'config_path', None),
         auto_load_config=False,
+        auto_start_arrivals=auto_arrivals,
     )
     EATs = []
     schedule_processes = []

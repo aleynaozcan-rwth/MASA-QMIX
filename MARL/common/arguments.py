@@ -6,6 +6,7 @@
 # -------------------------------------------------
 
 import argparse
+import logging
 import copy
 from types import SimpleNamespace
 
@@ -78,6 +79,8 @@ def get_mutable_args():
     # === MASA-QMIX environment parameters =======================
     # ============================================================
     parser.add_argument('--arrival_prob', type=float, default=0.25)
+    parser.add_argument('--arrival_lambda', type=float, default=0.2,
+                        help='Average job arrival rate λ (jobs per simulation time unit)')
     parser.add_argument('--variable_ops', type=bool, default=True)
     parser.add_argument('--num_operators', type=int, default=4)
     parser.add_argument('--job_min_ops', type=int, default=2,
@@ -161,7 +164,7 @@ def get_mutable_args():
     try:
         if getattr(args, 'n_actions', None) == 18:
             try:
-                print('[WARN] CLI --n_actions=18 detected. MASAEnv will override n_actions to match actual machine_list length if available.')
+                logging.getLogger(__name__).warning('[WARN] CLI --n_actions=18 detected. MASAEnv will override n_actions to match actual machine_list length if available.')
             except Exception:
                 pass
     except Exception:

@@ -20,3 +20,4 @@ tools/config_diff_report.json
 
 # Local historydata artifacts generated during env runs
 my_data_and_graph/historydata/*
+!my_data_and_graph/historydata/scheduling_timeline.txt

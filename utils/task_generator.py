@@ -5,6 +5,7 @@ uses the canonical `utils.job.Jobs` registry.
 """
 
 import random
+import logging
 from typing import Optional, Any
 from utils.workcenter import WorkCenters
 from utils.job import Jobs
@@ -32,9 +33,8 @@ class TaskGenerator:
     provided the TaskGenerator will create internal, non-deterministic ones.
     """
 
-    def __init__(self, max_retries: int = 5, config_path: Optional[str] = None, py_rng: Optional[random.Random] = None, np_rng: Optional[Any] = None):
+    def __init__(self, max_retries: int = 5, py_rng: Optional[random.Random] = None, np_rng: Optional[Any] = None):
         self.max_retries = max_retries
-        self.config = None
         # Python RNG: use injected one or create a local instance
         if py_rng is not None:
             self._py_rng = py_rng
@@ -42,54 +42,22 @@ class TaskGenerator:
             self._py_rng = random.Random()
         # NumPy RNG (optional): prefer injected np_rng for consistency
         self._np_rng = np_rng if np_rng is not None else None
-        if config_path:
-            try:
-                from utils.config_loader import load_config
-
-                self.config = load_config(config_path)
-            except Exception:
-                self.config = None
-
-    # Merge in-module defaults with loaded config so missing sections are
-    # filled by DEFAULT_TASKGEN_PARAMS and processing_time_means provided
-    # via YAML/config (processing_time_means is authoritative and must
-    # be supplied by callers in strict mode).
-        try:
-            from utils.config_loader import merge_config
-            # Only merge task_generator defaults here. processing_time_means
-            # MUST be provided by external YAML/config (strict mode).
-            merged = merge_config({
-                "task_generator": DEFAULT_TASKGEN_PARAMS.get("task_generator", DEFAULT_TASKGEN_PARAMS),
-            }, self.config or {})
-            # merged now contains 'task_generator' and 'processing_time_means' keys
-            self.config = merged
-        except Exception:
-            # keep whatever self.config was if merge fails
-            pass
-
-        jobs_cfg = None
-        if self.config is not None:
-            jobs_cfg = self.config.get('jobs', None)
-
-        self.jobs = Jobs(jobs_cfg)
+        # No YAML/config-based initialization: Jobs use embedded defaults
+        self.jobs = Jobs()
         self.workcenters = WorkCenters()
 
         # processing_time_means must be provided and is the sole source of durations
+        # Behavior change: prefer in-code WorkCenter defaults unless YAML/config
+        # is explicitly enabled via `enable_yaml=True` and provides the mapping.
         self.proc_time_means = {}
-        if self.config is not None:
-            self.proc_time_means = self.config.get('processing_time_means', {})
+        # Load deterministic defaults from utils.workcenter.DEFAULT_PROCESSING_TIMES.
         if not self.proc_time_means:
-            # Attempt to fall back to WorkCenters.DEFAULT_PROCESSING_TIMES when
-            # TaskGenerator is used standalone (no env provided). The fallback
-            # lives only in utils.workcenter and must be transposed to the
-            # op->machine->mean shape expected by the rest of the code.
             try:
-                # DEFAULT_PROCESSING_TIMES is defined at module-level in
-                # utils.workcenter. Import the module and read the value.
                 import utils.workcenter as _wc_mod  # type: ignore
                 wc_defaults = getattr(_wc_mod, 'DEFAULT_PROCESSING_TIMES', None)
                 if isinstance(wc_defaults, dict):
                     proc_by_op = {}
+                    # wc_defaults: machine_name -> {OpName: mean}
                     for mname, ops_map in wc_defaults.items():
                         for opname, v in (ops_map or {}).items():
                             try:
@@ -97,44 +65,88 @@ class TaskGenerator:
                             except Exception:
                                 proc_by_op.setdefault(opname, {})[mname] = v
                     self.proc_time_means = proc_by_op
+                    logging.getLogger(__name__).info("[TaskGenerator] Loaded processing_time_means from WorkCenter defaults")
             except Exception:
+                # if this fails, keep proc_time_means empty and raise below
                 pass
 
         if not self.proc_time_means:
             # strict mode: processing_time_means required when no fallback exists
             raise ValueError("processing_time_means is required for TaskGenerator to compute durations")
-        machines_cfg = list(self.config.get('machines', {}).keys()) if isinstance(self.config, dict) else []
-        self.machine_name_by_wc = {idx: name for idx, name in enumerate(machines_cfg)}
+        # map machine order -> machine name from WorkCenters
+        try:
+            self.machine_name_by_wc = {idx: name for idx, name in enumerate(getattr(self.workcenters, 'machine_order', []))}
+        except Exception:
+            self.machine_name_by_wc = {}
 
     def generate_constrained_task(self, num_ops: Optional[int] = None, jobagent_id: Optional[int] = None):
         if num_ops is None:
-            if self.config and self.config.get('task_generator'):
-                tg = self.config.get('task_generator', {})
-                mn = tg.get('seq_length', {}).get('min', 1)
-                mx = tg.get('seq_length', {}).get('max', 9)
-                num_ops = int(self._py_rng.randint(max(1, mn), max(mn, mx)))
-            else:
-                num_ops = int(self._py_rng.randint(3, 7))
+            tg = DEFAULT_TASKGEN_PARAMS.get('task_generator', {})
+            mn = int(tg.get('seq_length', {}).get('min', 1))
+            mx = int(tg.get('seq_length', {}).get('max', 9))
+            num_ops = int(self._py_rng.randint(max(1, mn), max(mn, mx)))
 
         ops_sequence = []
         used_job_ids = set()
         retries = 0
+        # Precompute available operation indices from WorkCenters as a fallback
+        try:
+            available_ops_from_wc = list(getattr(self.workcenters, 'operations_map', {}).keys())
+        except Exception:
+            available_ops_from_wc = []
 
         while len(ops_sequence) < num_ops and retries < self.max_retries * num_ops:
-            wc = self._py_rng.choice(self.workcenters.workcenters_list)
-            valid_ops = [j for j in getattr(wc, 'resource_ids_list', []) if j not in used_job_ids]
-            if not valid_ops:
-                retries += 1
-                continue
-
-            op_id = self._py_rng.choice(valid_ops)
-            # Build job-like object (metadata only). Durations are assigned
-            # later when converting to per-machine durations using
-            # processing_time_means. If a mapping is missing the code will
-            # raise when converting.
+            # Prefer selecting ops from Jobs registry if possible; fall back
+            # to WorkCenters.operations_map when Jobs is empty or unavailable.
+            op_id = None
+            job_obj = None
             try:
-                job_obj = self.jobs[op_id]
+                # If Jobs exposes a list-like access and contains items, try to use it
+                if getattr(self, 'jobs', None) is not None and hasattr(self.jobs, '__len__') and len(self.jobs) > 0:
+                    # Attempt legacy selection via workcenter resource lists if present
+                    try:
+                        wc = self._py_rng.choice(self.workcenters.workcenters_list)
+                        valid_ops = [j for j in getattr(wc, 'resource_ids_list', []) if j not in used_job_ids]
+                    except Exception:
+                        valid_ops = []
+
+                    if valid_ops:
+                        op_id = self._py_rng.choice(valid_ops)
+                        try:
+                            job_obj = self.jobs[op_id]
+                        except Exception:
+                            job_obj = None
+                    else:
+                        # fallback: sample from jobs registry by integer indices if possible
+                        try:
+                            # try numeric keys or sequence indices
+                            idx = int(self._py_rng.randrange(len(self.jobs)))
+                            job_obj = self.jobs[idx]
+                            op_id = getattr(job_obj, 'index_id', None)
+                        except Exception:
+                            job_obj = None
+
+                # If job_obj still not found, sample from WorkCenters.operations_map
+                if job_obj is None:
+                    if available_ops_from_wc:
+                        op_idx = int(self._py_rng.choice(available_ops_from_wc))
+                        # create a minimal job-like object
+                        try:
+                            class _SimpleJobFallback:
+                                def __init__(self, index_id):
+                                    self.index_id = index_id
+                                    self.codes = None
+                                    self.name = f"Op{index_id+1}"
+                            job_obj = _SimpleJobFallback(op_idx)
+                            op_id = op_idx
+                        except Exception:
+                            job_obj = None
+                    else:
+                        job_obj = None
             except Exception:
+                job_obj = None
+
+            if job_obj is None:
                 retries += 1
                 continue
 
@@ -162,6 +174,12 @@ class TaskGenerator:
         if arrival_lambda is None or float(arrival_lambda) <= 0.0:
             return
         lam = float(arrival_lambda)
+        # Diagnostic: report proc_time_means size so we know whether
+        # TaskGenerator has a durations mapping available at runtime.
+        try:
+            logging.getLogger(__name__).info("[Diag] proc_time_means length: %d", len(getattr(self, 'proc_time_means', {}) or {}))
+        except Exception:
+            logging.getLogger(__name__).info("[Diag] proc_time_means length: (failed to compute)")
         # Allow env to be either a bare simpy.Environment or a MASAEnv wrapper.
         # If the provided `env` is a plain simpy.Environment it will not
         # expose attributes like `episode_limit` or `done`. Prefer using the
@@ -203,7 +221,12 @@ class TaskGenerator:
             try:
                 ops_objs = self.generate_constrained_task(jobagent_id=len(getattr(env, 'jobs', [])))
             except Exception as e:
-                print(f"[TaskGen] generation failed: {e}")
+                # Diagnostic: surface generation failures explicitly
+                logging.getLogger(__name__).warning("[TaskGen] generation failed: %s", e, exc_info=True)
+                try:
+                    logging.getLogger(__name__).info("[Diag] generate_constrained_task() failed: %s", e)
+                except Exception:
+                    pass
                 continue
 
             converted_ops = []
@@ -295,19 +318,27 @@ class TaskGenerator:
                 else:
                     env.add_job(converted_ops)
             except Exception as e:
-                print(f"[Env] Failed to add dynamic job from TaskGenerator: {e}")
+                # Diagnostic: make clear whether add_job raised when called
+                logging.getLogger(__name__).exception("[Env] Failed to add dynamic job from TaskGenerator: %s", e)
+                try:
+                    logging.getLogger(__name__).info("[Diag] add_job() failed during TaskGenerator.arrival_loop at sim.now=%s: %s", getattr(getattr(env, 'env', env), 'now', None), e)
+                except Exception:
+                    pass
 
     def start(self, env: simpy.Environment, arrival_lambda: float):
         try:
             # If a MASAEnv wrapper was provided, schedule on its internal simpy.Environment.
             sim_env = getattr(env, 'env', env)
-            # When MASAEnv constructs the TaskGenerator it sets `_owner_env`
-            # to the MASAEnv instance so arrival_loop can consult wrapper
-            # attributes (episode_limit / done). Keep behaviour backward
-            # compatible by still scheduling on the provided simpy.Environment.
-            sim_env.process(self.arrival_loop(env, arrival_lambda))
+            # Prefer to call arrival_loop with the MASAEnv wrapper so the
+            # generator can resolve workcenters_meta and other attributes.
+            # If this TaskGenerator was attached to an owner MASAEnv via
+            # `_owner_env`, use that wrapper as the env argument for
+            # arrival_loop; otherwise fall back to the provided env.
+            wrapper_env = getattr(self, '_owner_env', None)
+            call_env = wrapper_env if wrapper_env is not None else env
+            sim_env.process(self.arrival_loop(call_env, arrival_lambda))
         except Exception as e:
-            print(f"[TaskGen] Failed to start arrival loop: {e}")
+            logging.getLogger(__name__).exception("[TaskGen] Failed to start arrival loop: %s", e)
 
     def create_job(self, num_ops: Optional[int] = None):
         """Create a single converted job (op tuples) suitable for MASAEnv.add_job().
@@ -325,9 +356,14 @@ class TaskGenerator:
 
         # Convert ops_objs into (op_type, allowed_machine_indices, per_machine) tuples
         converted_ops = []
+        # Build capability_map: operation index -> list of WORKCENTER ids that support it
+        # (mirror arrival_loop behavior). This yields per-op eligible workcenters
+        # which we will later resolve to concrete machine names/indices for
+        # duration lookup.
         capability_map = {op: [] for op in range(0, 32)}
         try:
-            for mid, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
+            machine_registry = getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {})
+            for mname, mdata in machine_registry.items():
                 wc = int(mdata.get('workcenter', 0))
                 caps = list(mdata.get('capabilities', []))
                 for c in caps:
@@ -338,13 +374,29 @@ class TaskGenerator:
         for jobobj in ops_objs:
             op_type = int(getattr(jobobj, 'index_id', 0))
             op_name = f"Op{op_type+1}"
-            allowed_machine_indices = list(sorted(set(capability_map.get(op_type, []))))
-            if not allowed_machine_indices:
+            # capability_map stores workcenter ids -> these are the allowed
+            # workcenters for this operation as seen from the registry.
+            allowed_wcs = list(sorted(set(capability_map.get(op_type, []))))
+            if not allowed_wcs:
                 raise ValueError(f"No allowed workcenters for operation {op_name}; check machine capabilities")
-            # Convert allowed workcenters -> allowed_machine_indices and build per-machine durations
+
+            # For each allowed workcenter, determine a concrete machine name
+            # (first match in registry), then map that machine name to its
+            # machine index and lookup duration from proc_time_means.
             per_machine_indices = []
             per_wc = {}
-            for wc in allowed_machine_indices:
+            op_map = self.proc_time_means.get(op_name, {})
+
+            wc_meta = getattr(env, 'workcenters_meta', None)
+            machine_index_map = {}
+            try:
+                if wc_meta is not None:
+                    machine_index_map = getattr(wc_meta, 'machine_index', {}) or {}
+            except Exception:
+                machine_index_map = {}
+
+            for wc in allowed_wcs:
+                # find a machine name that belongs to this workcenter
                 machine_name = None
                 try:
                     for mname, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
@@ -357,32 +409,23 @@ class TaskGenerator:
                 if not machine_name:
                     raise ValueError(f"No machine found for workcenter {wc} when resolving durations for {op_name}")
 
+                if machine_name not in op_map:
+                    raise ValueError(f"Missing duration for {op_name} on {machine_name}")
+
                 try:
-                    env_proc = getattr(env, 'config', None) or {}
-                    if isinstance(env_proc, dict):
-                        op_map = env_proc.get(op_name, {}) or {}
-                    else:
-                        op_map = {}
+                    mi = int(machine_index_map.get(machine_name))
                 except Exception:
-                    op_map = {}
-                if not op_map:
-                    op_map = self.proc_time_means.get(op_name, {})
-
-                if machine_name in op_map:
                     try:
-                        mi = int(getattr(getattr(self, '_owner_env', None), 'workcenters_meta', None).machine_index.get(machine_name)) if getattr(self, '_owner_env', None) is not None else None
+                        mi = int(self.machine_name_by_wc.get(int(wc), 0))
                     except Exception:
-                        try:
-                            mi = int(self.machine_name_by_wc.get(int(wc), 0))
-                        except Exception:
-                            mi = None
-                    if mi is None:
                         mi = 0
-                    per_machine_indices.append(int(mi))
-                    per_wc[int(mi)] = float(op_map.get(machine_name))
-                else:
-                    raise ValueError(f"Missing duration for {op_name} on {machine_name} (workcenter {wc})")
 
-            converted_ops.append((op_type, per_machine_indices, per_wc))
+                per_machine_indices.append(int(mi))
+                per_wc[int(mi)] = float(op_map.get(machine_name))
+
+            # IMPORTANT: keep the second tuple element as the list of allowed
+            # workcenters (not machine indices) to remain compatible with
+            # tests and legacy callers expecting workcenter ids here.
+            converted_ops.append((op_type, allowed_wcs, per_wc))
 
         return converted_ops

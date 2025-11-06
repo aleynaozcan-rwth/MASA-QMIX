@@ -32,30 +32,9 @@ class Jobs:
         """
         self.jobs_object_list = []
 
-        # Merge in-module DEFAULT_JOBS with provided jobs_cfg so that
-        # callers may omit fields. Use merge_config to keep inputs immutable.
-        try:
-            from utils.config_loader import merge_config  # local import avoid cycles
-            # merge_config expects dicts; DEFAULT_JOBS is a list, so wrap it
-            if isinstance(DEFAULT_JOBS, list):
-                wrapped_defaults = {"jobs": DEFAULT_JOBS}
-                wrapped_cfg = {"jobs": jobs_cfg} if jobs_cfg is not None else None
-                merged = merge_config(wrapped_defaults, wrapped_cfg)
-                jobs_cfg = merged.get("jobs")
-            else:
-                jobs_cfg = merge_config(DEFAULT_JOBS, jobs_cfg)
-        except Exception:
-            # keep original jobs_cfg if merge fails
-            pass
-
+        # If no jobs_cfg provided, use embedded DEFAULT_JOBS so system is config-free
         if jobs_cfg is None:
-            # Legacy: removed hard-coded parallel-list job defaults in favor of
-            # dynamic job generation via TaskGenerator / MASAEnv._generate_initial_jobs.
-            # Keep an empty registry here for backward-compatibility; callers
-            # that rely on defaults should provide a `jobs_cfg` or allow the
-            # environment to generate jobs at runtime.
-            self.jobs_object_list = []
-            return
+            jobs_cfg = DEFAULT_JOBS
 
         # If jobs_cfg is a dict with parallel lists (codes/names)
         try:

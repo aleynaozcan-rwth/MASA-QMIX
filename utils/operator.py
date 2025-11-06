@@ -18,6 +18,8 @@ DEFAULT_OPERATORS = [
     {"id": "O1", "qualified_machines": ["M0", "M3", "M4"]},
     {"id": "O2", "qualified_machines": ["M1", "M2", "M4"]},
 ]
+import logging
+LOG = logging.getLogger(__name__)
 
 class Operator:
     """Single operator who can work on specific machine names.
@@ -93,7 +95,7 @@ class Operator:
                     return False
                 for m in candidate_machines:
                     caps = wc_obj.machines.get(m, {}).get('capabilities', [])
-                    if int(job_id) in caps:
+                    if int(op_idx) in caps:
                         return True
                 return False
             except Exception:
@@ -108,7 +110,7 @@ class Operator:
         self.is_busy = True
         self.current_job = job_id
         self.current_workcenter = workcenter_id
-        print(f"[Operator] Operator {self.operator_id} assigned job {job_id} at WorkCenter {workcenter_id}")
+        LOG.info("[Operator] Operator %s assigned job %s at WorkCenter %s", self.operator_id, job_id, workcenter_id)
         self.history.append({
             "job_id": job_id,
             "workcenter_id": workcenter_id,
@@ -119,7 +121,7 @@ class Operator:
     def release(self, end_time=None):
         """Free the operator after finishing the job. Safe to call multiple times."""
         if self.current_job is not None:
-            print(f"[Operator] Operator {self.operator_id} released from job {self.current_job}")
+            LOG.info("[Operator] Operator %s released from job %s", self.operator_id, self.current_job)
             if self.history and self.history[-1]["end_time"] is None:
                 self.history[-1]["end_time"] = end_time
         self.is_busy = False
@@ -143,23 +145,24 @@ class Operators:
         # operator configuration present on the WorkCenters object or its
         # attached config. This fills missing fields while remaining
         # non-destructive to inputs.
+        # Prefer explicit operator list provided on the WorkCenters object
+        # (workcenters_ref.operators) or in its config; otherwise fall back
+        # to the in-module DEFAULT_OPERATORS. This avoids depending on the
+        # YAML merge helper and keeps behavior deterministic in config-free
+        # mode.
         try:
-            from utils.config_loader import merge_config
+            provided = getattr(workcenters_ref, 'operators', None)
+        except Exception:
             provided = None
+        if provided is None:
             try:
-                provided = getattr(workcenters_ref, 'operators', None)
+                cfg = getattr(workcenters_ref, 'config', None) or {}
+                provided = cfg.get('operators') if isinstance(cfg, dict) else None
             except Exception:
                 provided = None
-            if provided is None:
-                try:
-                    cfg = getattr(workcenters_ref, 'config', None) or {}
-                    provided = cfg.get('operators') if isinstance(cfg, dict) else None
-                except Exception:
-                    provided = None
-            # merge expects dicts; wrap list into {'operators': [...]}
-            merged = merge_config({"operators": DEFAULT_OPERATORS}, {"operators": provided} if provided is not None else None)
-            merged_operators = merged.get('operators', DEFAULT_OPERATORS)
-        except Exception:
+        if isinstance(provided, (list, tuple)) and len(provided) > 0:
+            merged_operators = list(provided)
+        else:
             merged_operators = DEFAULT_OPERATORS
 
         # Default operator qualification mapping (user-specified topology):
@@ -307,10 +310,10 @@ class Operators:
             # if anything fails, leave attribute absent for backward compatibility
             pass
 
-        print("\n[Init] Operators created (derived from WorkCenters):")
+        LOG.info("\n[Init] Operators created (derived from WorkCenters):")
         for op in self.operators_object_list:
             qwcs = getattr(op, 'qualified_workcenters', None)
-            print(f"   - Operator {op.operator_id} → Machines {op.qualified_machines} qualified_workcenters={qwcs}")
+            LOG.info("   - Operator %s → Machines %s qualified_workcenters=%s", op.operator_id, op.qualified_machines, qwcs)
 
     # ============================================================
     # === Lookup / Utility =======================================

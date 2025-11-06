@@ -20,13 +20,18 @@ def _ensure_yaml():
         raise RuntimeError("PyYAML is required to load YAML configs. Install with: pip install pyyaml")
 
 def load_config(path: str = "configs/env_config.yaml"):
-    """Load and return configuration as a Python dict."""
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-    yaml = _ensure_yaml()
-    with p.open('r') as f:
-        return yaml.safe_load(f)
+    """Load and return configuration as a Python dict.
+
+    NOTE: YAML-based config loading has been deprecated for config-free
+    operation. This helper now returns an empty dict and logs a debug
+    message to preserve compatibility with callers that import it.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        logger.debug("load_config called for %s but YAML loading is disabled in config-free mode; returning {}", path)
+    except Exception:
+        pass
+    return {}
 
 
 def merge_config(defaults: dict, cfg: dict | None) -> dict:
@@ -53,24 +58,24 @@ def merge_config(defaults: dict, cfg: dict | None) -> dict:
                         logger.debug("Overriding config key %s", cur_path)
                 a[k] = copy.deepcopy(v)
 
-    base = copy.deepcopy(defaults) if defaults is not None else {}
-    if cfg is None:
-        return base
+    # In config-free mode we avoid applying external YAML overrides.
+    # For compatibility, return a deep copy of defaults regardless of `cfg`.
     try:
-        _merge(base, cfg)
+        return copy.deepcopy(defaults) if defaults is not None else {}
     except Exception:
-        logger.exception("merge_config failed; returning copy of defaults")
-        return base
-    return base
+        logger.exception("merge_config fallback: returning shallow copy of defaults")
+        return dict(defaults) if isinstance(defaults, dict) else defaults
 
 # TODO(Phase3C.2): Once YAML decoupling is complete, merge_config() will be
 # used as the sole source of defaults for in-module configuration mirrors.
 
 def print_config(path: str = "configs/env_config.yaml"):
     cfg = load_config(path)
-    print(json.dumps(cfg, indent=2))
+    logger = logging.getLogger(__name__)
+    logger.info("Config at %s: %s", path, json.dumps(cfg, indent=2))
 
 if __name__ == '__main__':
     import sys
     p = sys.argv[1] if len(sys.argv) > 1 else 'configs/env_config.yaml'
+    # When executed as a script, print the (debug) config via logging.
     print_config(p)
