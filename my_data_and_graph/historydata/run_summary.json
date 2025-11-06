@@ -1,0 +1,126 @@
+{
+  "evolutions": [
+    {
+      "avg_machine_utilization": 0.3046471054718478,
+      "avg_operator_utilization": 0.38080888183980977,
+      "average_makespan": 63.05,
+      "average_wait_time": 30.281481804062075,
+      "per_machine_utilization": {
+        "0": 0.6439333862014275,
+        "1": 0.4107850911974626,
+        "2": 0.266455194290246,
+        "3": 0.20206185567010312,
+        "4": 0.0
+      },
+      "per_operator_utilization": {
+        "O1": 0.7738302934179224,
+        "O2": 0.7494052339413168
+      },
+      "avg_epoch_reward": -176.20905482732098,
+      "timestamp": "2025-11-06T15:59:43.905058",
+      "avg_makespan": 63.05,
+      "avg_wait_time": 30.281481804062075,
+      "average_machine_utilization": 0.3046471054718478,
+      "average_operator_utilization": 0.38080888183980977
+    },
+    {
+      "avg_machine_utilization": 0.2762841530054646,
+      "avg_operator_utilization": 0.34535519125683073,
+      "average_makespan": 64.05,
+      "average_wait_time": 36.705370692950964,
+      "per_machine_utilization": {
+        "0": 0.6912568306010931,
+        "1": 0.3797814207650275,
+        "2": 0.19672131147540997,
+        "3": 0.11366120218579237,
+        "4": 0.0
+      },
+      "per_operator_utilization": {
+        "O1": 0.7338797814207654,
+        "O2": 0.6475409836065577
+      },
+      "avg_epoch_reward": -163.09100018251183,
+      "timestamp": "2025-11-06T15:59:46.068712",
+      "avg_makespan": 64.05,
+      "avg_wait_time": 36.705370692950964,
+      "average_machine_utilization": 0.2762841530054646,
+      "average_operator_utilization": 0.34535519125683073
+    },
+    {
+      "avg_machine_utilization": 0.3028707375099129,
+      "avg_operator_utilization": 0.3785884218873911,
+      "average_makespan": 63.05,
+      "average_wait_time": 27.720648470728733,
+      "per_machine_utilization": {
+        "0": 0.674464710547185,
+        "1": 0.4579698651863603,
+        "2": 0.26645519429024606,
+        "3": 0.11546391752577322,
+        "4": 0.0
+      },
+      "per_operator_utilization": {
+        "O1": 0.753846153846154,
+        "O2": 0.7605075337034104
+      },
+      "avg_epoch_reward": -177.46828543896555,
+      "timestamp": "2025-11-06T15:59:49.971777",
+      "avg_makespan": 63.05,
+      "avg_wait_time": 27.720648470728733,
+      "average_machine_utilization": 0.3028707375099129,
+      "average_operator_utilization": 0.3785884218873911
+    },
+    {
+      "avg_machine_utilization": 0.2667086461612981,
+      "avg_operator_utilization": 0.33338580770162257,
+      "average_makespan": 103.225,
+      "average_wait_time": 35.80795247278216,
+      "per_machine_utilization": {
+        "0": 0.5967546621457978,
+        "1": 0.39501089852264476,
+        "2": 0.18309518043109713,
+        "3": 0.15868248970695067,
+        "4": 0.0
+      },
+      "per_operator_utilization": {
+        "O1": 0.7113586824897065,
+        "O2": 0.6221845483167837
+      },
+      "avg_epoch_reward": -248.6408295208032,
+      "timestamp": "2025-11-06T15:59:54.141247",
+      "avg_makespan": 103.225,
+      "avg_wait_time": 35.80795247278216,
+      "average_machine_utilization": 0.2667086461612981,
+      "average_operator_utilization": 0.33338580770162257
+    },
+    {
+      "avg_machine_utilization": 0.2861062648691516,
+      "avg_operator_utilization": 0.3576328310864395,
+      "average_makespan": 63.05,
+      "average_wait_time": 37.03814847072873,
+      "per_machine_utilization": {
+        "0": 0.6494845360824744,
+        "1": 0.4080095162569392,
+        "2": 0.19984139571768453,
+        "3": 0.17319587628865982,
+        "4": 0.0
+      },
+      "per_operator_utilization": {
+        "O1": 0.7144329896907219,
+        "O2": 0.716098334655036
+      },
+      "avg_epoch_reward": -213.13208747350137,
+      "timestamp": "2025-11-06T15:59:59.048730",
+      "avg_makespan": 63.05,
+      "avg_wait_time": 37.03814847072873,
+      "average_machine_utilization": 0.2861062648691516,
+      "average_operator_utilization": 0.3576328310864395
+    }
+  ],
+  "avg_machine_utilization": 0.2861062648691516,
+  "avg_operator_utilization": 0.3576328310864395,
+  "avg_epoch_reward": -213.13208747350137,
+  "last_10_avg_reward": -221.192,
+  "last_10_avg_loss": 22.07554988861084,
+  "last_10_avg_td": 4.1033038139343265,
+  "avg_makespan": 63.05
+}
