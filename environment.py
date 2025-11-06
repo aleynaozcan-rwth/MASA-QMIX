@@ -612,7 +612,30 @@ class MASAEnv:
         # active learning agents. Prefer CLI args.n_agents when available,
         # otherwise fall back to configured num_jobs capacity.
         try:
-            self.max_active_agents = int(getattr(args, 'n_agents', int(getattr(self, 'num_jobs', 0))))
+            # allow explicit config or args (n_max_agents / max_active_agents)
+            cfg_max = None
+            try:
+                cfg_max = int(self.config.get('max_active_agents')) if isinstance(self.config, dict) and self.config.get('max_active_agents') is not None else None
+            except Exception:
+                cfg_max = None
+            arg_max = None
+            try:
+                # support older name n_max_agents
+                if args is not None and hasattr(args, 'n_max_agents'):
+                    arg_max = int(getattr(args, 'n_max_agents'))
+                elif args is not None and hasattr(args, 'max_active_agents'):
+                    arg_max = int(getattr(args, 'max_active_agents'))
+                else:
+                    arg_max = int(getattr(args, 'n_agents', int(getattr(self, 'num_jobs', 0))))
+            except Exception:
+                arg_max = None
+            # precedence: explicit config > explicit arg > fallback to num_jobs
+            if cfg_max is not None:
+                self.max_active_agents = cfg_max
+            elif arg_max is not None:
+                self.max_active_agents = arg_max
+            else:
+                self.max_active_agents = int(getattr(self, 'num_jobs', 0))
         except Exception:
             try:
                 self.max_active_agents = int(getattr(self, 'num_jobs', 0))
@@ -687,20 +710,267 @@ class MASAEnv:
             logging.getLogger(__name__).exception('Failed to write env_config_dump.json', exc_info=True)
 
     # ---------------- Public API ----------------
-    def reset(self):
-        """Reset runtime state; keep configuration and metadata intact."""
-        # Persist episode end marker before we reset counters
+    def finish_lifecycle_trace(self):
+        """Force-close an open lifecycle block if one was opened by a previous reset without an episode id.
+
+        This is a best-effort helper used by RolloutWorker before assigning a
+        numeric episode id so that any previously-started 'unknown' lifecycle
+        blocks do not remain unclosed in the scheduling timeline.
+        """
+        # Backwards-compatible helper: delegate to the new end_lifecycle_trace
+        ep = getattr(self, "episode_id", None)
         try:
-            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
-            os.makedirs(hist_dir, exist_ok=True)
-            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+            if ep is None:
+                ep = getattr(self, 'current_episode', 'unknown')
+        except Exception:
+            ep = getattr(self, 'episode_id', 'unknown')
+        try:
+            if hasattr(self, 'end_lifecycle_trace'):
+                try:
+                    self.end_lifecycle_trace(ep)
+                    return
+                except Exception:
+                    pass
+            # fallback: best-effort append
+            if not hasattr(self, "history_dir") or self.history_dir is None:
+                return
+            os.makedirs(self.history_dir, exist_ok=True)
+            with open(os.path.join(self.history_dir, "scheduling_timeline.txt"), "a", encoding='utf-8') as f:
+                f.write(f"=== JOB AGENT LIFECYCLE TRACE END (EPISODE {ep}) ===\n\n")
+        except Exception:
+            # best-effort: swallow errors to avoid impacting rollout
+            pass
+
+    def start_lifecycle_trace(self, ep: int):
+        """Write a START lifecycle header for the given episode id (best-effort).
+
+        This explicitly separates lifecycle-writing responsibility from
+        `reset()` so callers (RolloutWorker/Runner) can sequence START/END
+        writes around `env.reset()`.
+        """
+        # Developer-visible debug: confirm caller passed the episode id
+        try:
             try:
-                with open(timeline_path, 'a', encoding='utf-8') as tf:
-                    tf.write("=== JOB AGENT LIFECYCLE TRACE END ===\n")
+                print(f"[Lifecycle Debug] START called with episode_id={ep}")
+            except Exception:
+                pass
+
+        except Exception:
+            # swallow debug print errors
+            pass
+        try:
+            # determine history root (fall back to project historydata)
+            hist_root = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+        except Exception:
+            hist_root = os.path.join('my_data_and_graph', 'historydata')
+        try:
+            os.makedirs(hist_root, exist_ok=True)
+            timeline_path = os.path.join(hist_root, 'scheduling_timeline.txt')
+            # Ensure episode header precedes lifecycle block so readers see
+            # `=== EPISODE {ep} ===` at the very top of an episode section.
+            try:
+                # Best-effort: if the episode header already exists, do not duplicate
+                header = f"=== EPISODE {ep} ===\n"
+                if os.path.exists(timeline_path):
+                    try:
+                        with open(timeline_path, 'r', encoding='utf-8') as rf:
+                            contents = rf.read()
+                    except Exception:
+                        contents = ''
+                else:
+                    contents = ''
+                mode = 'a'
+                with open(timeline_path, mode, encoding='utf-8') as f:
+                    if header.strip() and header not in contents:
+                        f.write(header)
+                    f.write(f"=== JOB AGENT LIFECYCLE TRACE START (EPISODE {ep}) ===\n")
+                    f.write("[Lifecycle] Environment reset: all queues cleared, waiting agents reset.\n")
+            except Exception:
+                # Fallback: attempt to append minimal START line
+                try:
+                    with open(timeline_path, 'a', encoding='utf-8') as f:
+                        f.write(f"\n=== JOB AGENT LIFECYCLE TRACE START (EPISODE {ep}) ===\n")
+                        f.write("[Lifecycle] Environment reset: all queues cleared, waiting agents reset.\n")
+                except Exception:
+                    pass
+
+            # Instrumentation: also append a short debug line to a compact debug log
+            try:
+                from datetime import datetime
+                dbg_path = os.path.join(hist_root, 'lifecycle_debug_log.txt')
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                dbg_line = f"[DEBUG] {ts} - START lifecycle ep={ep}\n"
+                with open(dbg_path, 'a', encoding='utf-8') as df:
+                    df.write(dbg_line)
+                # echo to stdout for immediate visibility
+                try:
+                    print(dbg_line.strip())
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:
             pass
+
+    def end_lifecycle_trace(self, ep: int):
+        """Write an END lifecycle footer for the given episode id (best-effort)."""
+        try:
+            hist_root = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+        except Exception:
+            hist_root = os.path.join('my_data_and_graph', 'historydata')
+        try:
+            os.makedirs(hist_root, exist_ok=True)
+            timeline_path = os.path.join(hist_root, 'scheduling_timeline.txt')
+            # Idempotent guard: avoid writing duplicate END blocks for the same
+            # episode when end_lifecycle_trace may be invoked multiple times.
+            try:
+                if not hasattr(self, '_lifecycle_end_written'):
+                    try:
+                        self._lifecycle_end_written = set()
+                    except Exception:
+                        self._lifecycle_end_written = set()
+                # Normalize ep for comparison (best-effort) so '1' and 1 match
+                try:
+                    ep_key = int(ep)
+                except Exception:
+                    ep_key = ep
+
+                # First, consult the in-memory idempotent set
+                if ep_key in getattr(self, '_lifecycle_end_written', set()):
+                    # Already written -> skip
+                    pass
+                else:
+                    # Best-effort: also check the on-disk timeline in case another
+                    # process/worker already flushed the END footer. Use an
+                    # advisory file lock (fcntl) to avoid a TOCTOU race where two
+                    # writers both see the footer missing and append it.
+                    footer = f"=== JOB AGENT LIFECYCLE TRACE END (EPISODE {ep}) ===\n\n"
+                    already_on_disk = False
+                    did_write_footer = False
+                    try:
+                        # Use fcntl.flock for an exclusive lock around read+append
+                        try:
+                            import fcntl
+                        except Exception:
+                            fcntl = None
+
+                        # Open file for read/append (create if missing)
+                        try:
+                            fd_mode = 'a+'
+                            with open(timeline_path, fd_mode, encoding='utf-8') as rf:
+                                try:
+                                    if fcntl is not None:
+                                        try:
+                                            fcntl.flock(rf.fileno(), fcntl.LOCK_EX)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                                try:
+                                    # rewind then read to check for existing footer
+                                    try:
+                                        rf.seek(0)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        contents = rf.read() or ''
+                                    except Exception:
+                                        contents = ''
+                                    if footer in contents:
+                                        already_on_disk = True
+                                    else:
+                                        try:
+                                            rf.write(footer)
+                                            rf.flush()
+                                            did_write_footer = True
+                                        except Exception:
+                                            # fall back to append in a new stream
+                                            try:
+                                                with open(timeline_path, 'a', encoding='utf-8') as wf:
+                                                    wf.write(footer)
+                                                did_write_footer = True
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
+                                finally:
+                                    try:
+                                        if fcntl is not None:
+                                            try:
+                                                fcntl.flock(rf.fileno(), fcntl.LOCK_UN)
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            # If opening failed, fall back to naive existence check
+                            try:
+                                if os.path.exists(timeline_path):
+                                    try:
+                                        with open(timeline_path, 'r', encoding='utf-8') as rf2:
+                                            if footer in rf2.read():
+                                                already_on_disk = True
+                                    except Exception:
+                                        already_on_disk = False
+                            except Exception:
+                                already_on_disk = False
+                    except Exception:
+                        already_on_disk = False
+
+                    # record in-memory guard using normalized key
+                    try:
+                        try:
+                            self._lifecycle_end_written.add(ep_key)
+                        except Exception:
+                            # fallback: add raw ep when normalization failed
+                            self._lifecycle_end_written.add(ep)
+                    except Exception:
+                        pass
+            except Exception:
+                # Fallback append if anything unexpected occurs
+                try:
+                    with open(timeline_path, 'a', encoding='utf-8') as f:
+                        f.write(f"=== JOB AGENT LIFECYCLE TRACE END (EPISODE {ep}) ===\n\n")
+                    # we performed a fallback append
+                    try:
+                        did_write_footer = True
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            # Instrumentation: also log to compact debug file and print
+            # Only emit the compact END debug entry if this call actually
+            # appended the footer to the authoritative timeline. This avoids
+            # noisy duplicate debug lines from concurrent callers that lost
+            # the race to write the footer but still reached this point.
+            try:
+                if not ('did_write_footer' in locals() and bool(did_write_footer)):
+                    # nothing written by this invocation -> skip debug entry
+                    pass
+                else:
+                    from datetime import datetime
+                    dbg_path = os.path.join(hist_root, 'lifecycle_debug_log.txt')
+                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    dbg_line = f"[DEBUG] {ts} - END lifecycle ep={ep}\n"
+                    with open(dbg_path, 'a', encoding='utf-8') as df:
+                        df.write(dbg_line)
+                    try:
+                        print(dbg_line.strip())
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def reset(self):
+        """Reset runtime state; keep configuration and metadata intact."""
+        # IMPORTANT: Do NOT assign or guess `episode_id` here. The RolloutWorker
+        # is responsible for assigning `self.episode_id` and calling
+        # `start_lifecycle_trace()` before `reset()` so that lifecycle START/END
+        # ordering remains correct. Removing any episode_id guessing here
+        # prevents a one-episode phase shift where Episode 0 lifecycle appears
+        # under Episode 1.
 
         # Signal any running generator loop tied to previous env to stop
         try:
@@ -780,18 +1050,7 @@ class MASAEnv:
         except Exception:
             self.job_counter = 0
 
-        # After counters and lists cleared, write the START header for the new episode
-        try:
-            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
-            os.makedirs(hist_dir, exist_ok=True)
-            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
-            try:
-                with open(timeline_path, 'a', encoding='utf-8') as tf:
-                    tf.write("=== JOB AGENT LIFECYCLE TRACE START ===\n")
-            except Exception:
-                pass
-        except Exception:
-            pass
+        # lifecycle START is intentionally not written here (caller-managed)
 
         # Do not start any internal dynamic arrival loops on reset; however
         # create deterministic initial jobs at t=0 so tests and callers that
@@ -894,6 +1153,7 @@ class MASAEnv:
                 pass
         except Exception:
             pass
+        # lifecycle END is intentionally not written here (caller-managed)
         return self._build_all_agent_obs(), {"state_vec": None, "avail_actions": None}
 
     def step(self, action=None):
@@ -1033,13 +1293,42 @@ class MASAEnv:
                                     pass
                         except Exception:
                             pass
+                        # Persist completion event in lifecycle trace with counts
                         try:
                             hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
                             os.makedirs(hist_dir, exist_ok=True)
                             timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                             try:
                                 with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active: {len(getattr(self, 'active_agents', []) or [])} | Pending: {len(getattr(self, 'pending_jobs', []) or [])} | Completed: {int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                        # Append lifecycle snapshot after job completion
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+                            os.makedirs(hist_dir, exist_ok=True)
+                            with open(os.path.join(hist_dir, 'scheduling_timeline.txt'), 'a', encoding='utf-8') as tfs:
+                                active_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'finished', False)]
+                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]
+                                pending_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'is_active', False) and not getattr(j, 'finished', False)]
+                                total_jobs = len(getattr(self, 'jobs', []) or [])
+                                tfs.write(f"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\n")
+                                try:
+                                    if len(active_jobs) > getattr(self, 'max_active_agents', 999):
+                                        print(f"[WARN] Max active agents exceeded: {len(active_jobs)} > {self.max_active_agents}")
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            try:
+                                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
                             except Exception:
                                 pass
                         except Exception:
@@ -1560,71 +1849,148 @@ class MASAEnv:
                                 except Exception:
                                     pass
                     else:
-                        # No concrete operator manager or resource available.
-                        # In this case we fall back to waiting for the machine
-                        # and execute without a concrete operator — but we do
-                        # not record numeric/group fallbacks. Record operator as
-                        # 'UNASSIGNED' to make missing assignment explicit.
+                        # No concrete Operator object returned. We must not
+                        # execute the operation without a valid operator id.
+                        # Two strategies:
+                        #  1) If an Operators manager exists but returned None,
+                        #     wait (retry) until a qualified operator becomes
+                        #     available (delay semantics).
+                        #  2) If no Operators manager exists, fall back to using
+                        #     the operator_groups resources and synthesize a
+                        #     valid operator id string (e.g., 'O0') to record
+                        #     in gantt. This avoids 'UNASSIGNED' records.
                         try:
-                            logging.getLogger(__name__).warning("No Operators manager or resources available; running job=%s without concrete operator at time=%s", getattr(job, 'id', None), float(self.env.now))
-                        except Exception:
-                            pass
-                        with mr.request() as mc_req:
-                            yield mc_req
-                            wait_dur = self.env.now - getattr(job, 'arrival_time', self.env.now)
-                            if wait_dur > 0:
-                                job.wait_time += wait_dur
-                                self.total_wait_time += wait_dur
-                            op_start = float(self.env.now)
-                            job.remaining_time = dur
-                            try:
-                                yield self.env.timeout(dur)
-                            finally:
-                                op_end = float(self.env.now)
-                                op_id_for_record = 'UNASSIGNED'
-                                try:
-                                    # Log instrumentation so it's visible in test/dev logs.
-                                    LOG.info("[GANTT-APPEND] unassigned branch -> op_id_for_record=%r type=%s", op_id_for_record, type(op_id_for_record))
-                                    # Persist debug append info to disk as well so we can
-                                    # inspect appended values regardless of stdout capture.
+                            if getattr(self, 'operators', None) is not None:
+                                # wait until an operator becomes available (blocking delay)
+                                max_wait_loop = int(getattr(self, 'operator_selection_retries', 1000))
+                                wait_idx = 0
+                                found_op = None
+                                while found_op is None and float(self.env.now) < float(self.episode_limit):
                                     try:
-                                        dbg_dir = getattr(self, 'history_dir', 'my_data_and_graph/historydata')
-                                        import os, json
-                                        os.makedirs(dbg_dir, exist_ok=True)
-                                        dbg_path = os.path.join(dbg_dir, 'gantt_append_debug.log')
-                                        ep_stamp = getattr(self, 'current_episode', None)
+                                        found_op = self.operators.find_free_operator_for_machine(op_idx_local, chosen_m_name)
+                                    except Exception:
+                                        found_op = None
+                                    if found_op is None:
                                         try:
-                                            rec = [op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)]
-                                            if ep_stamp is not None:
-                                                rec.append(int(ep_stamp))
+                                            found_op = self.operators.find_free_operator(op_idx_local, wc_idx)
                                         except Exception:
-                                            rec = [op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)]
-                                        with open(dbg_path, 'a', encoding='utf-8') as df:
-                                            df.write(json.dumps({'time': float(self.env.now), 'branch': 'unassigned', 'op_id': op_id_for_record, 'op_id_type': str(type(op_id_for_record)), 'episode': ep_stamp, 'record': rec}) + '\n')
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    pass
-                                try:
-                                    logging.getLogger(__name__).debug("Appending gantt record with operator id (unassigned branch): %r (type=%s)", op_id_for_record, type(op_id_for_record))
-                                except Exception:
-                                    pass
-                                try:
-                                    ep_stamp = getattr(self, 'current_episode', None)
-                                    rec_dict = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
-                                    if ep_stamp is not None:
-                                        rec_dict['episode'] = int(ep_stamp)
+                                            found_op = None
+                                    if found_op is not None:
+                                        available_operator = found_op
+                                        break
+                                    # wait a small amount and retry
+                                    wait_idx += 1
+                                    if wait_idx >= max_wait_loop:
+                                        break
+                                    yield self.env.timeout(float(getattr(self, 'operator_selection_wait', 1.0)))
+                                # if still not found, log and skip starting this op for now
+                                if available_operator is None:
                                     try:
-                                        if decision_trace is not None:
-                                            rec_dict['decision_trace'] = asdict(decision_trace)
+                                        LOG.warning("No qualified operator available for job=%s on machine=%s at t=%.2f; delaying until available", getattr(job, 'id', None), str(chosen_m_name), float(self.env.now))
                                     except Exception:
                                         pass
-                                    self.gantt_records.append(rec_dict)
+                                    # back to top of loop to re-evaluate job.current_op()
+                                    yield self.env.timeout(float(getattr(self, 'operator_selection_wait', 1.0)))
+                                    continue
+                            else:
+                                # No Operators manager; synthesize operator id using operator_groups
+                                synth_op = None
+                                synth_idx = None
+                                try:
+                                    for gi, gres in enumerate(getattr(self, 'operator_groups', []) or []):
+                                        try:
+                                            if self._resource_free(gres):
+                                                synth_idx = int(gi)
+                                                synth_op = gres
+                                                break
+                                        except Exception:
+                                            continue
                                 except Exception:
+                                    synth_op = None
+                                if synth_op is None:
+                                    # fallback to index 0
                                     try:
-                                        self.gantt_records.append((op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)))
+                                        synth_idx = 0
+                                        synth_op = (getattr(self, 'operator_groups', []) or [None])[0]
                                     except Exception:
-                                        pass
+                                        synth_op = None
+                                # create a lightweight surrogate operator object
+                                class _SurrogateOp:
+                                    def __init__(self, resource, oid):
+                                        self.resource = resource
+                                        self.operator_id = oid
+                                    def assign_job(self, *args, **kwargs):
+                                        return
+                                    def release(self, *args, **kwargs):
+                                        return
+                                op_id_label = f"O{synth_idx}" if synth_idx is not None else 'O0'
+                                available_operator = _SurrogateOp(synth_op, op_id_label)
+                                # now proceed to acquire surrogate operator resource and machine
+                                try:
+                                    with available_operator.resource.request() as opres_req, mr.request() as mc_req:
+                                        yield opres_req; yield mc_req
+                                        wait_dur = self.env.now - getattr(job, 'arrival_time', self.env.now)
+                                        if wait_dur > 0:
+                                            job.wait_time += wait_dur
+                                            self.total_wait_time += wait_dur
+                                        op_start = float(self.env.now)
+                                        job.remaining_time = dur
+                                        try:
+                                            yield self.env.timeout(dur)
+                                        finally:
+                                            op_end = float(self.env.now)
+                                            op_id_for_record = str(getattr(available_operator, 'operator_id', 'O0'))
+                                            try:
+                                                LOG.info("[GANTT-APPEND] surrogate-op branch -> op_id_for_record=%r type=%s", op_id_for_record, type(op_id_for_record))
+                                                try:
+                                                    dbg_dir = getattr(self, 'history_dir', 'my_data_and_graph/historydata')
+                                                    import os, json
+                                                    os.makedirs(dbg_dir, exist_ok=True)
+                                                    dbg_path = os.path.join(dbg_dir, 'gantt_append_debug.log')
+                                                    ep_stamp = getattr(self, 'current_episode', None)
+                                                    rec = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
+                                                    if ep_stamp is not None:
+                                                        rec['episode'] = int(ep_stamp)
+                                                    try:
+                                                        if decision_trace is not None:
+                                                            rec['decision_trace'] = asdict(decision_trace)
+                                                    except Exception:
+                                                        pass
+                                                    with open(dbg_path, 'a', encoding='utf-8') as df:
+                                                        df.write(json.dumps({'time': float(self.env.now), 'branch': 'surrogate', 'op_id': op_id_for_record, 'op_id_type': str(type(op_id_for_record)), 'episode': ep_stamp, 'record': rec}) + '\n')
+                                                except Exception:
+                                                    pass
+                                            except Exception:
+                                                pass
+                                            try:
+                                                rec_dict = {'start': op_start, 'end': op_end, 'op_idx': int(op_type) if op_type is not None else job.current_op_idx, 'wc_idx': int(chosen_mid), 'job_id': int(job.id), 'op_grp': op_id_for_record, 'arrival': float(job.arrival_time), 'duration': float(dur)}
+                                                ep_stamp = getattr(self, 'current_episode', None)
+                                                if ep_stamp is not None:
+                                                    rec_dict['episode'] = int(ep_stamp)
+                                                try:
+                                                    if decision_trace is not None:
+                                                        rec_dict['decision_trace'] = asdict(decision_trace)
+                                                except Exception:
+                                                    pass
+                                                self.gantt_records.append(rec_dict)
+                                            except Exception:
+                                                try:
+                                                    self.gantt_records.append((op_start, op_end, int(op_type) if op_type is not None else job.current_op_idx, int(chosen_idx), int(job.id), op_id_for_record, float(job.arrival_time), float(dur)))
+                                                except Exception:
+                                                    pass
+                                            try:
+                                                available_operator.release()
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    logging.getLogger(__name__).exception("Exception in surrogate operator execution", exc_info=True)
+                                    # small delay and retry
+                                    yield self.env.timeout(float(getattr(self, 'operator_selection_wait', 1.0)))
+                                    continue
+                        except Exception:
+                            logging.getLogger(__name__).exception("Exception caught handling missing operator; delaying op start", exc_info=True)
+                            yield self.env.timeout(float(getattr(self, 'operator_selection_wait', 1.0)))
+                            continue
                 except Exception as e:
                     logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                     try:
@@ -1673,53 +2039,45 @@ class MASAEnv:
                 # If there are pending jobs, start pending jobs until capacity
                 # is reached (bounded dynamic capacity semantics)
                 try:
-                    while getattr(self, 'pending_jobs', None) and len(self.pending_jobs) > 0 and (int(getattr(self, 'max_active_agents', 0)) <= 0 or len(self.active_agents) < int(getattr(self, 'max_active_agents', 0))):
+                    # Promote at most one pending job (FIFO) per completion to
+                    # avoid mass activations and to keep lifecycle transitions
+                    # explicit and traceable.
+                    if getattr(self, 'pending_jobs', None) and len(self.pending_jobs) > 0 and (int(getattr(self, 'max_active_agents', 0)) <= 0 or len(self.active_agents) < int(getattr(self, 'max_active_agents', 0))):
                         try:
                             next_job = self.pending_jobs.pop(0)
                         except Exception:
-                            break
-                        try:
-                            # schedule and mark active
-                            self.env.process(self._job_process(next_job))
-                            self.active_jobs.append(next_job)
+                            next_job = None
+                        if next_job is not None:
                             try:
-                                self.active_agents.append(next_job)
-                            except Exception:
-                                pass
-                            # persist 'became active agent' event for pending activation
-                            try:
-                                hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
-                                os.makedirs(hist_dir, exist_ok=True)
-                                timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                                # schedule and mark active
+                                self.env.process(self._job_process(next_job))
+                                self.active_jobs.append(next_job)
                                 try:
-                                    with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(next_job, 'id', None)} became active agent -> ActiveAgents: {len(getattr(self, 'active_agents', []) or [])}\n")
+                                    self.active_agents.append(next_job)
+                                except Exception:
+                                    pass
+                                try:
+                                    next_job.is_active = True
+                                except Exception:
+                                    pass
+                                # persist 'became active agent' event with requested format
+                                try:
+                                    hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                                    os.makedirs(hist_dir, exist_ok=True)
+                                    timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                                    try:
+                                        with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                            tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(next_job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+                                try:
+                                    LOG.info("[Env] Pending job %s activated at t=%.4f", getattr(next_job, 'id', None), float(getattr(self.env, 'now', 0.0)))
                                 except Exception:
                                     pass
                             except Exception:
-                                pass
-                            try:
-                                next_job.is_active = True
-                            except Exception:
-                                pass
-                            try:
-                                LOG.info("[Env] Pending job %s activated at t=%.4f", getattr(next_job, 'id', None), float(getattr(self.env, 'now', 0.0)))
-                            except Exception:
-                                pass
-                            # persist pending activation
-                            try:
-                                hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
-                                os.makedirs(hist_dir, exist_ok=True)
-                                timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
-                                try:
-                                    with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Pending job {getattr(next_job, 'id', None)} activated -> ActiveAgents: {len(getattr(self, 'active_agents', []) or [])}\n")
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                        except Exception:
-                            logging.getLogger(__name__).exception("Failed to start pending job", exc_info=True)
+                                logging.getLogger(__name__).exception("Failed to start pending job", exc_info=True)
                 except Exception:
                     logging.getLogger(__name__).exception("Failed in capacity dispatch", exc_info=True)
 
@@ -2053,6 +2411,16 @@ class MASAEnv:
             except Exception:
                 pass
 
+        # Console-friendly lifecycle debug print for quick tracing
+        try:
+            try:
+                jname = getattr(job, 'name') if getattr(job, 'name', None) is not None else f"Job_{int(getattr(job, 'id', jid))}"
+            except Exception:
+                jname = f"Job_{int(getattr(job, 'id', jid))}"
+            print(f"[Lifecycle] New job added: {jname} | total_jobs={len(self.jobs)}")
+        except Exception:
+            pass
+
         # Capacity enforcement: self.num_jobs represents the capacity (n_agents)
         try:
             # Use configured bounded capacity when present
@@ -2097,10 +2465,28 @@ class MASAEnv:
                             timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                             try:
                                 with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(getattr(job, 'arrival_time', 0.0)):.2f}] New job {getattr(job, 'id', None)} arrived with {len(getattr(job, 'operations', []) or [])} ops -> Active: {len(getattr(self, 'active_agents', []) or [])} | Pending: {len(getattr(self, 'pending_jobs', []) or [])} | Completed: {int(getattr(self, 'completed_jobs', 0))}\n")
-                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} created and started -> Active: {len(getattr(self, 'active_agents', []) or [])}\n")
+                                    tf.write(f"[t={float(getattr(job, 'arrival_time', 0.0)):.2f}] New job {getattr(job, 'id', None)} arrived with {len(getattr(job, 'operations', []) or [])} ops -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
                             except Exception:
                                 pass
+                        except Exception:
+                            pass
+                        # Append a lifecycle snapshot after job addition/activation
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+                            os.makedirs(hist_dir, exist_ok=True)
+                            with open(os.path.join(hist_dir, 'scheduling_timeline.txt'), 'a', encoding='utf-8') as tf2:
+                                active_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'finished', False)]
+                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]
+                                pending_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'is_active', False) and not getattr(j, 'finished', False)]
+                                total_jobs = len(getattr(self, 'jobs', []) or [])
+                                tf2.write(f"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\n")
+                                # Optional warn
+                                try:
+                                    if len(active_jobs) > getattr(self, 'max_active_agents', 999):
+                                        print(f"[WARN] Max active agents exceeded: {len(active_jobs)} > {self.max_active_agents}")
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                     except Exception:
@@ -2112,30 +2498,42 @@ class MASAEnv:
                             logging.getLogger(__name__).exception("Exception caught while starting job (secondary)", exc_info=True)
                 else:
                     # queue for later start
-                    try:
-                        self.pending_jobs.append(job)
                         try:
-                            LOG.info("[Env] Job %s queued (capacity full)", getattr(job, 'id', None))
-                        except Exception:
-                            pass
-                        # persist queued event
-                        try:
-                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
-                            os.makedirs(hist_dir, exist_ok=True)
-                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            self.pending_jobs.append(job)
                             try:
-                                with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} queued (capacity full: max_active_agents={int(getattr(self, 'max_active_agents', 0))})\n")
+                                LOG.info("[Env] Job %s queued (capacity full)", getattr(job, 'id', None))
                             except Exception:
                                 pass
+                            # persist queued event with requested format
+                            try:
+                                hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                                os.makedirs(hist_dir, exist_ok=True)
+                                timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                                try:
+                                    with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} queued (pending) -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                                # Append lifecycle snapshot for queued event
+                                try:
+                                    hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+                                    os.makedirs(hist_dir, exist_ok=True)
+                                    with open(os.path.join(hist_dir, 'scheduling_timeline.txt'), 'a', encoding='utf-8') as tfq:
+                                        active_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'finished', False)]
+                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]
+                                        pending_jobs = [j for j in (getattr(self, 'jobs', []) or []) if not getattr(j, 'is_active', False) and not getattr(j, 'finished', False)]
+                                        total_jobs = len(getattr(self, 'jobs', []) or [])
+                                        tfq.write(f"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\n")
+                                except Exception:
+                                    pass
                         except Exception:
-                            pass
-                    except Exception:
-                        logging.getLogger(__name__).exception("Failed to queue pending job", exc_info=True)
-                        try:
-                            logging.getLogger(__name__).info("[Diag] add_job() failed to append pending job id=%s at t=%.4f", getattr(job, 'id', None), float(getattr(self, 'env', simpy.Environment()).now if getattr(self, 'env', None) is not None else 0.0))
-                        except Exception:
-                            pass
+                            logging.getLogger(__name__).exception("Failed to queue pending job", exc_info=True)
+                            try:
+                                logging.getLogger(__name__).info("[Diag] add_job() failed to append pending job id=%s at t=%.4f", getattr(job, 'id', None), float(getattr(self, 'env', simpy.Environment()).now if getattr(self, 'env', None) is not None else 0.0))
+                            except Exception:
+                                pass
             except Exception:
                 logging.getLogger(__name__).exception("Exception caught in capacity check", exc_info=True)
                 try:

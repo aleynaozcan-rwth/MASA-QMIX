@@ -164,7 +164,7 @@ def append_selection_log(path: str, sim_time, job_id, allowed_machine_indices, a
         pass
 
 
-def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, write_if_allowed: bool = True, out_dir: str = None) -> str:
+def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, write_if_allowed: bool = True, out_dir: str = None, records=None, skip_header: bool = False) -> str:
     """Generate a human-readable scheduling timeline from an in-memory MASAEnv.
 
     The output is plain text (no CSV/JSON) and contains:
@@ -186,7 +186,39 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     # Defensive: support both env object and dict-like surfaces
     try:
         jobs = list(getattr(env, 'jobs', []) or [])
-        records = list(getattr(env, 'gantt_records', []) or [])
+        # Use caller-provided records when available; otherwise read from env
+        if records is None:
+            records = list(getattr(env, 'gantt_records', []) or [])
+        else:
+            # ensure we have a list copy so downstream filtering is safe
+            try:
+                records = list(records)
+            except Exception:
+                records = []
+        # Normalize runtime wrapper-shaped records: some appenders wrap the
+        # canonical per-op dict under {'record': {...}, 'episode': X, ...}.
+        # Unwrap those so downstream logic can find top-level 'start'/'end'.
+        try:
+            normalized = []
+            for r in records:
+                try:
+                    if isinstance(r, dict) and 'record' in r and isinstance(r.get('record'), dict):
+                        inner = dict(r.get('record') or {})
+                        # preserve episode stamp from wrapper if inner lacks it
+                        try:
+                            if inner.get('episode') is None and r.get('episode') is not None:
+                                inner['episode'] = r.get('episode')
+                        except Exception:
+                            pass
+                        normalized.append(inner)
+                    else:
+                        normalized.append(r)
+                except Exception:
+                    normalized.append(r)
+            records = normalized
+        except Exception:
+            # fallback: leave records as-is
+            pass
         sim_now = float(getattr(getattr(env, 'env', None), 'now', getattr(env, 't', 0.0)))
     except Exception:
         jobs = []
@@ -194,13 +226,27 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
         sim_now = 0.0
 
     # detect if records include an episode stamp as a trailing element
-    has_ep_stamp = any(isinstance(r, (list, tuple)) and len(r) >= 9 and r[8] is not None for r in records)
+    has_ep_stamp = any(
+        (isinstance(r, (list, tuple)) and len(r) >= 9 and r[8] is not None)
+        or (isinstance(r, dict) and r.get('episode') is not None)
+        for r in records
+    )
 
     # If caller provided an explicit episode_id and records carry an
     # episode stamp, filter records to that episode for focused reporting.
     if episode_id is not None and has_ep_stamp:
         try:
-            records = [r for r in records if isinstance(r, (list, tuple)) and len(r) >= 9 and int(r[8]) == int(episode_id)]
+            def _rec_ep(r):
+                try:
+                    if isinstance(r, (list, tuple)) and len(r) >= 9:
+                        return int(r[8])
+                    if isinstance(r, dict) and r.get('episode') is not None:
+                        return int(r.get('episode'))
+                except Exception:
+                    return None
+                return None
+
+            records = [r for r in records if _rec_ep(r) is not None and int(_rec_ep(r)) == int(episode_id)]
         except Exception:
             # fallback: leave records unchanged
             pass
@@ -653,7 +699,19 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                     # write an episode block if there are records for that episode.
                     if episode_id is None and has_ep_stamp:
                         try:
-                            ep_ids = sorted({int(r[8]) for r in records if isinstance(r, (list, tuple)) and len(r) >= 9 and r[8] is not None})
+                            # Robustly collect episode ids from both legacy tuple/list
+                            # shaped records (episode at index 8) and dict-shaped
+                            # records (episode under 'episode' key).
+                            ep_set = set()
+                            for r in records:
+                                try:
+                                    if isinstance(r, (list, tuple)) and len(r) >= 9 and r[8] is not None:
+                                        ep_set.add(int(r[8]))
+                                    elif isinstance(r, dict) and r.get('episode') is not None:
+                                        ep_set.add(int(r.get('episode')))
+                                except Exception:
+                                    continue
+                            ep_ids = sorted(ep_set)
                         except Exception:
                             ep_ids = []
                         for i, ep in enumerate(ep_ids):
@@ -665,12 +723,42 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                             # Skip writing empty episode reports
                             if not ep_report or ep_report.strip() == '':
                                 continue
+                            # Only create (w) the file if it does not yet exist.
+                            # Avoid overwriting existing files — doing so can
+                            # remove lifecycle START blocks that may have been
+                            # written by the environment prior to timeline
+                            # generation. Append to existing files instead.
                             mode = 'a'
-                            if (i == 0 and (episode_id == 0 or not os.path.exists(out_path))) or (ep == 0 and not os.path.exists(out_path)):
+                            if not os.path.exists(out_path):
                                 mode = 'w'
                             try:
+                                # Instrumentation: log a compact debug record indicating
+                                # we're about to write an episode block so we can
+                                # correlate ordering against env lifecycle writes.
+                                try:
+                                    from datetime import datetime
+                                    dbg_path = os.path.join(out_dir, 'lifecycle_debug_log.txt')
+                                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                    dbg_line = f"[DEBUG] {ts} - WRITE episode block ep={ep}\n"
+                                    with open(dbg_path, 'a', encoding='utf-8') as df:
+                                        df.write(dbg_line)
+                                    try:
+                                        print(dbg_line.strip())
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+
+                                # Write an EPISODE header immediately before the
+                                # per-episode report unless the caller asked to
+                                # skip it. Some callers (for example when the
+                                # lifecycle END footer has already been written
+                                # immediately prior) want to avoid duplicating the
+                                # episode header.
+                                header = f"=== EPISODE {ep} ===\n"
                                 with open(out_path, mode, encoding='utf-8') as f:
-                                    f.write(f"=== EPISODE {ep} ===\n")
+                                    if not skip_header:
+                                        f.write(header)
                                     f.write(ep_report)
                                     f.write("\n")
                                     # Append conservative episode-level metadata
@@ -694,16 +782,40 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                             # no runtime records -> skip writing to avoid placeholders
                             pass
                         else:
-                            mode = 'a'
-                            if episode_id == 0 or not os.path.exists(out_path):
-                                mode = 'w'
                             try:
+                                # Instrumentation: record we're writing the single-block episode header
+                                try:
+                                    from datetime import datetime
+                                    dbg_path = os.path.join(out_dir, 'lifecycle_debug_log.txt')
+                                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                    dbg_ep = episode_id if episode_id is not None else 'unknown'
+                                    dbg_line = f"[DEBUG] {ts} - WRITE episode block ep={dbg_ep}\n"
+                                    with open(dbg_path, 'a', encoding='utf-8') as df:
+                                        df.write(dbg_line)
+                                    try:
+                                        print(dbg_line.strip())
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+
+                                # Only open in write mode if the authoritative
+                                # timeline file does not yet exist. If it exists,
+                                # append to preserve any lifecycle START/END
+                                # blocks that were written earlier.
+                                mode = 'a'
+                                if not os.path.exists(out_path):
+                                    mode = 'w'
+
+                                # Write an EPISODE header immediately before the
+                                # report unless the caller requested it to be
+                                # skipped (skip_header=True). This avoids
+                                # redundant headers when the lifecycle writer has
+                                # already placed the episode marker.
+                                header = f"=== EPISODE {episode_id} ===\n" if episode_id is not None else "=== EPISODE (unknown) ===\n"
                                 with open(out_path, mode, encoding='utf-8') as f:
-                                    # Episode header
-                                    if episode_id is not None:
-                                        f.write(f"=== EPISODE {episode_id} ===\n")
-                                    else:
-                                        f.write("=== EPISODE (unknown) ===\n")
+                                    if not skip_header:
+                                        f.write(header)
                                     # Write the report (initial jobs, timeline, summary)
                                     f.write(report)
                                     f.write("\n")

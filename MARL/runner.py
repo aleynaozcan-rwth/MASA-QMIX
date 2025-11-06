@@ -15,6 +15,7 @@ import matplotlib.colors as mcolors
 import matplotlib.patheffects as patheffects
 from matplotlib.ticker import MultipleLocator, MaxNLocator
 from matplotlib.patches import Patch
+import re
 # Line2D was previously used for arrival legend; no longer needed
 
 # Rollout
@@ -203,6 +204,531 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     return True
 
 
+def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png"):
+    """Create a clean job-level Gantt for the last episode of an evolution.
+
+    - Each job appears once on the Y axis as `Job_<id>`.
+    - Each bar is a single operation of that job (deduplicated by (job,op)).
+    - If multiple records exist for the same (job,op), keep the one with
+      the largest duration.
+    - Bars are colored by operation type with a legend on the right.
+    - Saves PNG to `filename`. Returns True on success, False if no data.
+    """
+    logger = logging.getLogger(__name__)
+
+    # prepare debug path (only two files allowed: png and debug txt)
+    try:
+        debug_dir = os.path.dirname(filename) or '.'
+        debug_path = os.path.join(debug_dir, 'gantt_last_evolution.debug.txt')
+    except Exception:
+        debug_path = 'gantt_last_evolution.debug.txt'
+
+    def _append_debug(**kwargs):
+        try:
+            with open(debug_path, 'a') as df:
+                for k, v in kwargs.items():
+                    df.write(f"{k}={v}\n")
+        except Exception:
+            pass
+
+    # incoming count
+    try:
+        incoming_count = len(for_gantt_data) if isinstance(for_gantt_data, (list, tuple)) else 0
+    except Exception:
+        incoming_count = 0
+    _append_debug(incoming_count=incoming_count)
+
+    if not for_gantt_data or not isinstance(for_gantt_data, (list, tuple)) or incoming_count == 0:
+        logger.info("No gantt records for last evolution; skipping gantt_last_evolution plot.")
+        _append_debug(status='no_records_for_gantt')
+        return False
+
+    # unpack helper (support dict or tuple/list records)
+    def _unpack(rec):
+        if isinstance(rec, dict):
+            s = rec.get('start') if 'start' in rec else rec.get('s') if 's' in rec else rec.get(0)
+            e = rec.get('end') if 'end' in rec else rec.get('e') if 'e' in rec else rec.get(1)
+            op_idx = rec.get('op_idx') if 'op_idx' in rec else rec.get('op') if 'op' in rec else rec.get(2)
+            # support multiple possible keys for workcenter/machine index
+            wc = None
+            if 'wc' in rec:
+                wc = rec.get('wc')
+            elif 'wc_idx' in rec:
+                wc = rec.get('wc_idx')
+            elif 'workcenter' in rec:
+                wc = rec.get('workcenter')
+            elif 'machine' in rec:
+                wc = rec.get('machine')
+            else:
+                wc = rec.get(3)
+            job_id = rec.get('job_id') if 'job_id' in rec else rec.get('job') if 'job' in rec else rec.get(4)
+            # operator/group may be named differently across envs; support several keys
+            operator = None
+            if 'operator' in rec:
+                operator = rec.get('operator')
+            elif 'op_agent' in rec:
+                operator = rec.get('op_agent')
+            elif 'op_grp' in rec:
+                operator = rec.get('op_grp')
+            else:
+                operator = rec.get(5)
+            arrival = rec.get('arrival') if 'arrival' in rec else None
+            duration = rec.get('duration') if 'duration' in rec else None
+            return s, e, op_idx, wc, job_id, operator, arrival, duration
+        if not isinstance(rec, (list, tuple)):
+            raise ValueError('invalid rec')
+        if len(rec) >= 8:
+            return rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6], rec[7]
+        if len(rec) == 6:
+            return rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], None, None
+        if len(rec) == 5:
+            return rec[0], rec[1], rec[2], rec[3], rec[4], None, None, None
+        raise ValueError('unsupported rec len')
+
+    # Deduplicate by (job_id, op_idx) keeping longest duration, and only keep records with assigned operator
+    best = {}
+    min_start = float('inf')
+    max_end = 0.0
+    machines = set()
+    operators = set()
+    op_types_seen = []
+
+    for rec in for_gantt_data:
+        try:
+            s, e, op_idx, wc, job_id, operator, arrival, duration = _unpack(rec)
+        except Exception:
+            continue
+        # If operator not provided at top-level, try to extract from nested
+        # decision trace (many records include chosen_operator inside
+        # `decision_trace`). If still missing, mark as UNASSIGNED and
+        # continue — we prefer to include operations even when operator
+        # wasn't assigned so the Gantt reflects actual scheduling.
+        if operator is None:
+            # try nested decision_trace when record is a dict
+            try:
+                if isinstance(rec, dict):
+                    dt = rec.get('decision_trace') or rec.get('decision') or {}
+                    if isinstance(dt, dict):
+                        operator = dt.get('chosen_operator') or dt.get('chosen_op') or operator
+            except Exception:
+                operator = operator
+        # Accept explicit 'UNASSIGNED' marker as valid label; if still None,
+        # set to a readable placeholder so the record is not dropped.
+        if operator is None:
+            operator = 'UNASSIGNED'
+        # normalize machine id
+        try:
+            mid = int(wc)
+        except Exception:
+            try:
+                m = re.search(r"(\d+)", str(wc))
+                mid = int(m.group(1)) if m else None
+            except Exception:
+                mid = None
+        if mid is None:
+            continue
+        machines.add(mid)
+        # normalize operator id
+        try:
+            op_id = str(operator)
+        except Exception:
+            op_id = str(operator)
+        operators.add(op_id)
+
+        # normalize job id
+        try:
+            jid = int(job_id)
+        except Exception:
+            try:
+                m = re.search(r"(\d+)", str(job_id))
+                jid = int(m.group(1)) if m else None
+            except Exception:
+                jid = None
+        if jid is None:
+            continue
+
+        try:
+            start = float(s)
+            end = float(e)
+        except Exception:
+            continue
+        if end < start:
+            # skip invalid intervals
+            continue
+        if duration is not None:
+            try:
+                dur = float(duration)
+            except Exception:
+                dur = end - start
+        else:
+            dur = end - start
+
+        key = (jid, op_idx)
+        prev = best.get(key)
+        if prev is None or dur > prev['duration']:
+            best[key] = {'start': start, 'end': end, 'op': op_idx, 'job': jid, 'duration': dur, 'machine': mid, 'operator': op_id}
+            min_start = min(min_start, start)
+            max_end = max(max_end, end)
+            if op_idx not in op_types_seen:
+                op_types_seen.append(op_idx)
+
+    records = list(best.values())
+    dedup_count = len(records)
+    _append_debug(dedup_count=dedup_count)
+
+    if not records:
+        logger.info("No valid gantt records after deduplication; skipping gantt_last_evolution plot.")
+        _append_debug(status='no_valid_records_after_dedup')
+        return False
+
+    # map op types to colors using a clear qualitative palette
+    try:
+        import matplotlib.cm as cm
+        cmap = cm.get_cmap('tab10') if len(op_types_seen) <= 10 else cm.get_cmap('tab20')
+    except Exception:
+        cmap = None
+    op_unique = []
+    for o in op_types_seen:
+        if o not in op_unique:
+            op_unique.append(o)
+    op_color_map = {}
+    for i, op in enumerate(op_unique):
+        try:
+            if cmap is not None:
+                rgba = cmap(i % (cmap.N if hasattr(cmap, 'N') else 10))
+                # convert to hex
+                color = mcolors.to_hex(rgba)
+            else:
+                palette = list(mcolors.TABLEAU_COLORS.values())
+                color = palette[i % len(palette)]
+        except Exception:
+            color = 'gray'
+        op_color_map[op] = color
+
+    # plotting: machine rows on Y axis
+    machine_list = sorted(list(machines))
+    machine_to_y = {m: idx for idx, m in enumerate(machine_list)}
+    n_machines = len(machine_list)
+    # autoscale figure size based on machines and makespan
+    makespan = max_end if max_end > 0 else 0.0
+    # scale_factor compresses long timelines visually while preserving relative durations
+    scale_factor = max(1.0, float(makespan) / 60.0)
+
+    fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
+    fig_h = max(4, float(n_machines) * 0.6)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    # bar height and font scale with number of rows to remain readable
+    bar_height = max(0.35, min(0.9, 0.6 if n_machines <= 8 else 0.6 * (8.0 / max(8.0, n_machines))))
+    # draw bars grouped by machine; scale horizontal coordinates by scale_factor
+    for r in records:
+        m = r['machine']
+        y = machine_to_y.get(m)
+        if y is None:
+            continue
+        start = r['start']; end = r['end']; width = max(0.0, end - start)
+        op = r['op']
+        color = op_color_map.get(op, 'gray')
+        # draw bar using scaled coordinates so even narrow durations stay visible
+        try:
+            left = float(start) / scale_factor
+            wscaled = float(width) / scale_factor
+            ax.barh(y, wscaled, left=left, height=bar_height, color=color, edgecolor='black', linewidth=0.6, zorder=3)
+        except Exception:
+            continue
+        # label inside bar: "M{machine} | O{operator} | Op {op}"
+        label_text = f"M{m} | O{r['operator']} | Op {op}"
+        # choose contrasting text color
+        try:
+            rgb = mcolors.to_rgb(op_color_map.get(op, '#777777'))
+            luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+            text_color = 'black' if luminance > 0.6 else 'white'
+        except Exception:
+            text_color = 'white'
+        # center label; compute fontsize relative to scaled width and fig size
+        try:
+            fontsize = int(max(8, min(14, 10 * bar_height)))
+        except Exception:
+            fontsize = 9
+        if width >= 0.02:
+            try:
+                ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=fontsize, color=text_color, zorder=4, weight='bold', clip_on=True)
+            except Exception:
+                pass
+
+    # show original time on x-axis by formatting scaled ticks back to original units
+    try:
+        from matplotlib.ticker import FuncFormatter
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
+    except Exception:
+        pass
+
+    # Y axis: machines
+    y_positions = [machine_to_y[m] for m in machine_list]
+    y_labels = [f"M{m}" for m in machine_list]
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(y_labels, fontsize=10)
+    ax.set_ylim(-0.5, max(0, n_machines - 1) + 0.5)
+
+    # X axis ticks: adaptive spacing
+    makespan = max_end if max_end > 0 else 0.0
+    if makespan <= 100:
+        major_step = 20 if makespan >= 40 else max(1, int(round(makespan / 5)))
+    else:
+        # try ~10 major ticks
+        major_step = max(10, int(round(makespan / 10)))
+    try:
+        ax.xaxis.set_major_locator(MultipleLocator(major_step))
+    except Exception:
+        pass
+    ax.set_xlabel('Simulation Time (s)', fontsize=12)
+    ax.set_title(f"Gantt Chart — Last Evolution (Total Time: {makespan:.1f}s)", fontsize=14)
+
+    # grid and background
+    ax.set_axisbelow(True)
+    ax.grid(True, linestyle='--', alpha=0.35)
+    ax.set_facecolor('#f7f7f7')
+
+    # Legend on the right with OpType -> Color mapping and explicit labels
+    handles = []
+    labels = []
+    for op in op_unique:
+        lab = f"OpType {op}"
+        handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
+        labels.append(lab)
+    if handles:
+        plt.subplots_adjust(right=0.78)
+        legend = ax.legend(handles, labels, title='Operation Type → Color', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10)
+        ax.add_artist(legend)
+
+    plt.tight_layout()
+
+    # write debug summary before attempting save
+    try:
+        _append_debug(min_start=min_start if min_start != float('inf') else 0.0,
+                      max_end=max_end,
+                      total_machines=n_machines,
+                      total_operators=len(operators))
+        # also write op->color mapping
+        try:
+            with open(debug_path, 'a') as df:
+                df.write('op_type_to_color_mapping:\n')
+                for k, v in op_color_map.items():
+                    df.write(f"  {k} -> {v}\n")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Prepare output paths
+    try:
+        history_dir = os.path.dirname(filename) or '.'
+    except Exception:
+        history_dir = '.'
+    machine_path = os.path.join(history_dir, 'gantt_machine_specific.png')
+    job_path = os.path.join(history_dir, 'gantt_job_specific.png')
+
+    save_results = {
+        'gantt_last_evolution': False,
+        'gantt_machine_specific': False,
+        'gantt_job_specific': False,
+    }
+
+    # --- Machine-Specific Gantt Chart ---
+    try:
+        n_bars = max(1, len(machine_list))
+        # autosize using makespan and number of bars
+        fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
+        fig_h = max(3, float(n_bars) * 0.45)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+        # dynamic bar height and font size (scaled to number of bars)
+        bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
+        font_size = int(max(8, min(14, 10 * bar_height)))
+
+        for r in records:
+            m = r['machine']
+            y = machine_to_y.get(m)
+            if y is None:
+                continue
+            start = r['start']; end = r['end']; width = max(0.0, end - start)
+            op = r['op']
+            color = op_color_map.get(op, 'gray')
+            # apply horizontal scaling for visibility
+            left = float(start) / scale_factor
+            wscaled = float(width) / scale_factor
+            ax.barh(y, wscaled, left=left, height=bar_height, color=color, edgecolor='black', linewidth=0.6, zorder=3)
+            # label: Job {job_id} | O{operator_id}
+            label_text = f"Job {r['job']} | O{r['operator']}"
+            try:
+                rgb = mcolors.to_rgb(color)
+                luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+                text_color = 'black' if luminance > 0.6 else 'white'
+            except Exception:
+                text_color = 'white'
+            if width >= 0.02:
+                ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=font_size, color=text_color, weight='bold', clip_on=True, zorder=4)
+
+        # Y axis: machines
+        y_positions = [machine_to_y[m] for m in machine_list]
+        y_labels = [f"M{m}" for m in machine_list]
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(y_labels, fontsize=max(8, font_size-1))
+        ax.set_ylim(-0.5, max(0, n_bars - 1) + 0.5)
+        ax.set_xlabel('Simulation Time (s)', fontsize=12)
+        ax.set_title(f"Machine-Specific Gantt Chart — Last Evolution (Total Time: {max_end:.1f}s)", fontsize=14)
+        ax.set_axisbelow(True)
+        ax.grid(True, alpha=0.3)
+
+        # Legend: OpType -> Color (stable mapping) placed outside plot
+        handles = []
+        labels = []
+        for op in op_unique:
+            lab = f"Op{int(op)+1}" if isinstance(op, (int, float)) and float(op).is_integer() else str(op)
+            handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
+            labels.append(lab)
+        if handles:
+            # reserve space on the right and place legend outside
+            plt.tight_layout(rect=[0, 0, 0.82, 1])
+            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9, title_fontsize=9)
+            ax.add_artist(legend)
+        else:
+            plt.tight_layout()
+
+        # adaptive x ticks and restore original time values in labels
+        try:
+            step = max(1, int(max(1, round(max_end / 10))))
+            ax.xaxis.set_major_locator(MultipleLocator(max(1, step / float(scale_factor))))
+            from matplotlib.ticker import FuncFormatter
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
+        except Exception:
+            pass
+
+        # Save machine-specific both as dedicated file and as legacy filename for backward compatibility
+        try:
+            plt.savefig(machine_path, dpi=150)
+            save_results['gantt_machine_specific'] = True
+        except Exception:
+            logger.exception('Failed to save machine-specific gantt', exc_info=True)
+        try:
+            plt.savefig(filename, dpi=150)
+            save_results['gantt_last_evolution'] = True
+        except Exception:
+            logger.exception('Failed to save gantt_last_evolution image', exc_info=True)
+        try:
+            plt.close()
+        except Exception:
+            pass
+    except Exception:
+        logger.exception('Failed to generate machine-specific gantt', exc_info=True)
+
+    # --- Job-Specific Gantt Chart ---
+    try:
+        job_list = sorted(list({r['job'] for r in records}))
+        job_to_y = {j: idx for idx, j in enumerate(job_list)}
+        n_bars = max(1, len(job_list))
+        # autosize using makespan and number of jobs
+        fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
+        fig_h = max(3, float(n_bars) * 0.45)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+        bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
+        font_size = int(max(8, min(14, 10 * bar_height)))
+
+        for r in records:
+            jid = r['job']
+            y = job_to_y.get(jid)
+            if y is None:
+                continue
+            start = r['start']; end = r['end']; width = max(0.0, end - start)
+            op = r['op']
+            color = op_color_map.get(op, 'gray')
+            left = float(start) / scale_factor
+            wscaled = float(width) / scale_factor
+            ax.barh(y, wscaled, left=left, height=bar_height, color=color, edgecolor='black', linewidth=0.6, zorder=3)
+            # label: M{machine_id} | O{operator_id}
+            label_text = f"M{r['machine']} | O{r['operator']}"
+            try:
+                rgb = mcolors.to_rgb(color)
+                luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+                text_color = 'black' if luminance > 0.6 else 'white'
+            except Exception:
+                text_color = 'white'
+            if width >= 0.02:
+                ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=font_size, color=text_color, weight='bold', clip_on=True, zorder=4)
+
+        # Y axis: jobs
+        y_positions = [job_to_y[j] for j in job_list]
+        y_labels = [f"J{j}" for j in job_list]
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(y_labels, fontsize=max(8, font_size-1))
+        ax.set_ylim(-0.5, max(0, n_bars - 1) + 0.5)
+        ax.set_xlabel('Simulation Time (s)', fontsize=12)
+        ax.set_title(f"Job-Specific Gantt Chart — Last Evolution (Total Time: {max_end:.1f}s)", fontsize=14)
+        ax.set_axisbelow(True)
+        ax.grid(True, alpha=0.3)
+
+        # Legend (outside)
+        handles = []
+        labels = []
+        for op in op_unique:
+            lab = f"Op{int(op)+1}" if isinstance(op, (int, float)) and float(op).is_integer() else str(op)
+            handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
+            labels.append(lab)
+        if handles:
+            plt.tight_layout(rect=[0, 0, 0.82, 1])
+            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9, title_fontsize=9)
+            ax.add_artist(legend)
+        else:
+            plt.tight_layout()
+
+        try:
+            step = max(1, int(max(1, round(max_end / 10))))
+            ax.xaxis.set_major_locator(MultipleLocator(max(1, step / float(scale_factor))))
+            from matplotlib.ticker import FuncFormatter
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
+        except Exception:
+            pass
+
+        try:
+            plt.savefig(job_path, dpi=150)
+            save_results['gantt_job_specific'] = True
+        except Exception:
+            logger.exception('Failed to save job-specific gantt', exc_info=True)
+        try:
+            plt.close()
+        except Exception:
+            pass
+    except Exception:
+        logger.exception('Failed to generate job-specific gantt', exc_info=True)
+
+    # Write debug entries for save results and op->color mapping
+    try:
+        _append_debug(min_start=min_start if min_start != float('inf') else 0.0,
+                      max_end=max_end,
+                      total_machines=len(machine_list),
+                      total_operators=len(operators))
+        try:
+            with open(debug_path, 'a') as df:
+                df.write('op_type_to_color_mapping:\n')
+                for k, v in op_color_map.items():
+                    df.write(f"  {k} -> {v}\n")
+                df.write(f"saved_files: {save_results}\n")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Also append separate save flags for easy machine parsing
+    try:
+        _append_debug(**{f"save_{k}": bool(v) for k, v in save_results.items()})
+    except Exception:
+        pass
+
+    # Return True if at least the legacy filename was saved
+    return bool(save_results.get('gantt_last_evolution'))
+
+
 class Runner:
     """
     Step 8A.6.6 Runner – Replay-based QMIX + KPI Logging + Learning Stability
@@ -215,6 +741,19 @@ class Runner:
     def __init__(self, env, args):
         self.env = env
         self.args = args
+        # run_args is the run-local copy used by many helper methods; ensure
+        # it's available immediately to avoid AttributeError when accessed
+        # earlier in the constructor.
+        self.run_args = args
+        # Configure whether history/artifact writes are allowed for this run.
+        # Prefer the centralized decision helper so environment variables
+        # and programmatic overrides are respected.
+        try:
+            from utils.io_control import allow_history_writes as _allow_fn
+            self.allow_history_writes = bool(_allow_fn())
+        except Exception:
+            # Conservatively enable history writes if the helper isn't present.
+            self.allow_history_writes = True
         # Snapshot the canonical args at construction time for audit/comparison.
         # This helps detect ad-hoc mutations to the global args object outside
         # of `MARL/common/arguments.py` or explicit test fixtures.
@@ -231,175 +770,9 @@ class Runner:
         # the repository-wide rule that modules must not write into args.
         try:
             run_args = copy.deepcopy(self.args)
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+        except Exception:
+            # fallback: use original args object if deepcopy fails
             run_args = self.args
-        self.run_args = run_args
-
-        # Central flag to control whether Runner writes history/artifact files.
-        # The repository uses a single authoritative source for this decision
-        # (`utils.io_control.allow_history_writes`). Runner will no longer
-        # trust a per-run argument to override that central decision. This
-        # prevents scattering overrides and ensures a single control point
-        # for history writes.
-        try:
-            from utils.io_control import allow_history_writes as _allow_fn
-            self.allow_history_writes = bool(_allow_fn())
-        except Exception:
-            # conservative fallback if import fails
-            self.allow_history_writes = False
-
-        # Print canonical IO setting for clarity at Runner startup
-        try:
-            from utils.io_control import allow_history_writes
-            print("[Runner] Allow history writes:", allow_history_writes())
-        except Exception:
-            print("[Runner] Allow history writes: <error determining setting>")
-
-        # ---------------------------
-        # Environment-derived shapes
-        # ---------------------------
-        # Runner is the authoritative place to query the environment for
-        # runtime-derived shapes (n_agents, n_actions, obs/state dims,
-        # episode_limit). This prevents ad-hoc assignments in entrypoints
-        # like `main.py` and centralizes runtime setup here.
-        try:
-            # ensure env has been reset so get_env_info() reports accurate sizes
-            try:
-                if hasattr(self.env, 'reset') and callable(getattr(self.env, 'reset')):
-                    # call reset once; many envs return (obs, info) or obs
-                    try:
-                        _ = self.env.reset()
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        # some envs may require additional args; ignore failures
-                        pass
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
-
-            info = None
-            if hasattr(self.env, 'get_env_info') and callable(getattr(self.env, 'get_env_info')):
-                try:
-                    info = self.env.get_env_info()
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    info = None
-
-            if info and isinstance(info, dict):
-                # Set canonical runtime shapes on the run-local args copy.
-                if 'n_actions' in info and info.get('n_actions') is not None:
-                    try:
-                        run_args.n_actions = int(info.get('n_actions'))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        run_args.n_actions = info.get('n_actions')
-                if 'n_agents' in info and info.get('n_agents') is not None:
-                    try:
-                        run_args.n_agents = int(info.get('n_agents'))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        run_args.n_agents = info.get('n_agents')
-                if 'state_shape' in info and info.get('state_shape') is not None:
-                    run_args.state_shape = int(info.get('state_shape')) if info.get('state_shape') is not None else getattr(run_args, 'state_shape', None)
-                if 'obs_shape' in info and info.get('obs_shape') is not None:
-                    run_args.obs_shape = int(info.get('obs_shape')) if info.get('obs_shape') is not None else getattr(run_args, 'obs_shape', None)
-                if 'episode_limit' in info and info.get('episode_limit') is not None:
-                    try:
-                        run_args.episode_limit = int(info.get('episode_limit'))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        run_args.episode_limit = info.get('episode_limit')
-
-                print(f"[Runner] Env shapes initialized from env.get_env_info(): n_agents={getattr(run_args,'n_agents',None)}, n_actions={getattr(run_args,'n_actions',None)}, obs_shape={getattr(run_args,'obs_shape',None)}, state_shape={getattr(run_args,'state_shape',None)}, episode_limit={getattr(run_args,'episode_limit',None)}")
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            # best-effort; if anything fails, existing Runner fallbacks will apply
-            pass
-
-        # Log environment config provenance and sizes for visibility (helps
-        # diagnose legacy vs current WorkCenter topology issues).
-        try:
-            cfg_path = getattr(self.env, 'config_path', None)
-            num_wcs = getattr(self.env, 'num_wcs', None)
-            # fallback: infer from workcenters_meta if not set
-            if num_wcs is None and hasattr(self.env, 'workcenters_meta'):
-                try:
-                    num_wcs = len(getattr(self.env.workcenters_meta, 'workcenters_list', []))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    num_wcs = None
-            num_ops = getattr(self.env, 'num_ops', None)
-            logging.getLogger(__name__).info("[Runner] Env config_path=%s num_wcs=%s num_ops=%s", cfg_path, num_wcs, num_ops)
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
-
-        # Log a concise view of canonical args used to start this Runner so
-        # it's obvious at runtime which source-of-truth is driving the run.
-        try:
-            important = [
-                'episode_limit', 'n_epoch', 'n_episodes', 'batch_size', 'buffer_size',
-                'train_steps', 'evaluate_cycle', 'save_cycle', 'seed', 'learn', 'cuda'
-            ]
-            vals = {k: getattr(self.args, k, None) for k in important}
-            logging.getLogger(__name__).info("[Runner] Canonical args snapshot: %s", vals)
-        except Exception:
-            pass
-
-        # Quick audit: warn if any canonical args were mutated since construction
-        try:
-            current = dict(vars(self.args))
-            diffs = {}
-            for k, v in self._args_snapshot.items():
-                if k in current and current[k] != v:
-                    diffs[k] = {'before': v, 'after': current[k]}
-            if diffs:
-                logging.getLogger(__name__).warning("Detected runtime mutation of canonical args: %s", diffs)
-        except Exception:
-            pass
-
-        # Determine final action-space size once, centrally.
-        # Priority:
-        # 1) If env.get_env_info() provided 'n_actions' use it.
-        # 2) If operator-granular actions requested -> num_wcs * num_ops
-        # 3) If machine-actions requested -> len(machine_list) or num_wcs
-        # 4) Fallback to 1
-        try:
-            if hasattr(run_args, 'n_actions') and run_args.n_actions is not None:
-                # already set from env.get_env_info()
-                pass
-            else:
-                if bool(getattr(run_args, 'use_granular_actions', False)):
-                    try:
-                        if hasattr(self.env, 'num_wcs') and hasattr(self.env, 'num_ops'):
-                            run_args.n_actions = int(self.env.num_wcs) * int(self.env.num_ops)
-                        else:
-                            run_args.n_actions = 1
-                    except Exception:
-                        run_args.n_actions = 1
-                elif bool(getattr(run_args, 'use_machine_actions', False)):
-                    try:
-                        mlist = getattr(self.env.workcenters_meta, 'machine_list', None)
-                        if mlist is not None and len(mlist) > 0:
-                            run_args.n_actions = int(len(mlist))
-                        elif hasattr(self.env, 'num_wcs'):
-                            run_args.n_actions = int(getattr(self.env, 'num_wcs'))
-                        else:
-                            run_args.n_actions = 1
-                    except Exception:
-                        run_args.n_actions = 1
-                else:
-                    try:
-                        if hasattr(self.env, 'num_wcs'):
-                            run_args.n_actions = int(getattr(self.env, 'num_wcs'))
-                        else:
-                            run_args.n_actions = 1
-                    except Exception:
-                        run_args.n_actions = 1
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            run_args.n_actions = getattr(run_args, 'n_actions', 1)
 
         # propagate quiet flag to environment to suppress verbose SimPy debug prints
         try:
@@ -732,78 +1105,27 @@ class Runner:
                 self.win_rates.append(win_rate)
                 self.episode_rewards.append(ep_reward)
                 print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
+                # Per-epoch Gantt PNG/CSV generation disabled.
+                # We produce a single, authoritative gantt_last_evolution.png at
+                # the per-evolution summary step to keep artifacts minimal and
+                # readable. This avoids producing intermediate gantt_epoch*.png files.
                 try:
-                    # create a combined gantt for this evaluation (env records + collected gantt)
+                    # still keep the combined gantt in memory for downstream use
                     combined = list(all_gantt_data)
                     try:
                         if hasattr(self.env, 'gantt_records'):
                             combined.extend(list(self.env.gantt_records))
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    except Exception:
                         pass
-                    png_path = os.path.join(self.history_dir, f"gantt_epoch{epoch}.png")
-                    plot_gantt(combined, filename=png_path)
-                    # optionally also write a CSV for detailed inspection
-                    if getattr(self.args, 'gantt_csv', False) and getattr(self, 'allow_history_writes', False):
-                        csv_path = os.path.join(self.history_dir, f"gantt_epoch{epoch}.csv")
-                        # prefer centralized writer to ensure consistent formatting
-                        try:
-                            if gantt_utils is not None:
-                                try:
-                                    gantt_utils.write_scheduling_trace(csv_path, combined)
-                                except Exception as e:
-                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                    # last-resort: fall back to legacy behavior below
-                                    raise
-                            else:
-                                raise RuntimeError("gantt_utils unavailable")
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            # fallback: legacy per-record normalization/writer
-                            try:
-                                # ensure history writes enabled before fallback write
-                                if getattr(self, 'allow_history_writes', False):
-                                    with open(csv_path, 'w') as cf:
-                                        cf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
-                                        for r in combined:
-                                            try:
-                                                if not isinstance(r, (list, tuple)):
-                                                    continue
-                                                if len(r) >= 8:
-                                                    start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
-                                                elif len(r) == 6:
-                                                    start, end, op_idx, wc, job_id, op_grp = r
-                                                    arrival = ''
-                                                    duration = ''
-                                                elif len(r) == 5:
-                                                    start, end, op_idx, wc, job_id = r
-                                                    op_grp = ''
-                                                    arrival = ''
-                                                    duration = ''
-                                                else:
-                                                    continue
-                                                try:
-                                                    if isinstance(op_idx, (int, float)) and float(op_idx).is_integer():
-                                                        op_name = f"Op{int(op_idx) + 1}"
-                                                    else:
-                                                        op_name = str(op_idx)
-                                                except Exception as e:
-                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                    op_name = str(op_idx)
-                                                vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
-                                                cf.write(','.join([str(x) for x in vals]) + '\n')
-                                            except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                                pass
-                            except Exception as e:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                                pass
-                except Exception as e:
-                    print("[WARN] Gantt plot failed:", e)
+                except Exception:
+                    pass
 
             # collect per-epoch gantt records so we can compute per-evolution metrics
             episodes, avg_rewards = [], []
             epoch_gantt = []
+            # Keep the last episode's gantt records (overwrite each episode)
+            # so we can plot a clean Gantt for the most recent episode only.
+            last_episode_gantt = []
             try:
                 before_wait = float(getattr(self.env, 'total_wait_time', 0.0))
             except Exception:
@@ -821,6 +1143,12 @@ class Runner:
                 # record gantt for this epoch specifically
                 try:
                     epoch_gantt.extend(gantt_data)
+                    # capture this episode's gantt separately; last assignment
+                    # will therefore represent the latest episode in the epoch
+                    try:
+                        last_episode_gantt = list(gantt_data)
+                    except Exception:
+                        last_episode_gantt = []
                 except Exception:
                     pass
                 avg_rewards.append(ep_r)
@@ -890,13 +1218,17 @@ class Runner:
                                 timeline = None
                                 if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
                                     try:
-                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                        # The RolloutWorker writes the authoritative per-episode
+                                        # block (after lifecycle END). Here we only request a
+                                        # non-writing preview to avoid duplicate writes.
+                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=False, out_dir=self.history_dir)
                                     except Exception:
                                         timeline = None
                                 if timeline is None:
                                     try:
                                         from utils.gantt import generate_scheduling_timeline
-                                        timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=True, out_dir=self.history_dir)
+                                        # non-writing preview to avoid duplicate authoritative writes
+                                        timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=False, out_dir=self.history_dir)
                                     except Exception:
                                         timeline = None
                                 if timeline:
@@ -1241,6 +1573,33 @@ class Runner:
                         plot_per_operator_utilization(history_dir=self.history_dir)
                         # combined grid (includes makespan & reward)
                         utilization_summary_grid(history_dir=self.history_dir, combine_plots=True)
+                        # Generate a clean machine/job-level Gantt for the last
+                        # episode of this evolution. This is a compact, readable
+                        # job-focused Gantt that avoids accumulation across
+                        # episodes.
+                        try:
+                            if getattr(self, 'allow_history_writes', False):
+                                # Prefer the explicit last-episode gantt; if that's empty,
+                                # fall back to any env-level gantt_records so we still
+                                # produce a useful artifact when possible.
+                                try:
+                                    cand = list(last_episode_gantt) if last_episode_gantt else list(getattr(self.env, 'gantt_records', []) or [])
+                                except Exception:
+                                    cand = list(getattr(self.env, 'gantt_records', []) or [])
+                                if cand:
+                                    png_path = os.path.join(self.history_dir, 'gantt_last_evolution.png')
+                                    try:
+                                        saved = plot_gantt_last_evolution(cand, filename=png_path)
+                                        if saved:
+                                            print(f"[Runner] gantt_last_evolution written to {png_path}")
+                                        else:
+                                            logging.getLogger(__name__).info("gantt_last_evolution: plot routine ran but produced no output (skipped)")
+                                    except Exception:
+                                        logging.getLogger(__name__).exception("Could not write gantt_last_evolution", exc_info=True)
+                                else:
+                                    logging.getLogger(__name__).info("gantt_last_evolution: no gantt records available (last_episode and env.gantt_records empty)")
+                        except Exception:
+                            pass
                         # optional timeline consistency check (heuristic)
                         try:
                             check_timeline_consistency(history_dir=self.history_dir)
@@ -1339,15 +1698,23 @@ class Runner:
 
                                 if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
                                     try:
-                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                        # Do not perform an authoritative write here: the
+                                        # per-episode generator (called by RolloutWorker)
+                                        # already writes episode blocks. To avoid
+                                        # duplicate episode blocks we only request a
+                                        # non-writing preview from the final sweep.
+                                        timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=False)
                                     except Exception:
                                         # fall through to direct import fallback
                                         timeline = None
                                 if timeline is None:
                                     try:
-                                        # direct import fallback
+                                        # direct import fallback — do not request an
+                                        # authoritative write here to prevent duplicate
+                                        # episode blocks (per-episode writes already
+                                        # happen elsewhere).
                                         from utils.gantt import generate_scheduling_timeline
-                                        timeline = generate_scheduling_timeline(self.env, write_if_allowed=True)
+                                        timeline = generate_scheduling_timeline(self.env, write_if_allowed=False)
                                     except Exception:
                                         timeline = None
                                 # If the generator returned text, log a short message indicating where it was written.

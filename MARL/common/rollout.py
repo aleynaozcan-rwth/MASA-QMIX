@@ -848,6 +848,85 @@ class RolloutWorker:
         args = runner_args if runner_args is not None else self.args
 
         # start/reset environment (env.reset returns initial obs/info)
+        # Lifecycle ordering:
+        # 1) Close any previous lifecycle block (END for prior episode)
+        # 2) Assign the new numeric episode id to env.episode_id
+        # 3) Write START lifecycle header for the new episode
+        # 4) Call env.reset() to perform environment reset
+        try:
+            # Close previous lifecycle block if present and episode_id known
+            try:
+                # Only close a previous lifecycle block when the env reports a
+                # different episode id than the one we're about to run. This
+                # avoids writing an END for episode 0 at startup when the env's
+                # default episode_id is 0 (causing duplicate ENDs).
+                if hasattr(self.env, "end_lifecycle_trace") and hasattr(self.env, 'episode_id'):
+                    try:
+                        prev_ep = getattr(self.env, 'episode_id')
+                        # prefer integer when possible
+                        try:
+                            prev_ep_int = int(prev_ep)
+                        except Exception:
+                            prev_ep_int = prev_ep
+                        try:
+                            new_ep_int = int(global_ep_idx)
+                        except Exception:
+                            new_ep_int = global_ep_idx
+                        # Only end previous if it's a different episode value
+                        if prev_ep is not None and prev_ep_int != new_ep_int:
+                            try:
+                                self.env.end_lifecycle_trace(prev_ep_int)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Assign new episode id (numeric preferred)
+            try:
+                self.env.episode_id = int(global_ep_idx)
+            except Exception:
+                try:
+                    setattr(self.env, 'episode_id', global_ep_idx)
+                except Exception:
+                    pass
+
+            # Write lifecycle START for the new episode BEFORE reset()
+            try:
+                if hasattr(self.env, "start_lifecycle_trace"):
+                    try:
+                        # Explicitly pass the canonical episode index that was
+                        # provided to this method (global_ep_idx). Using the
+                        # env.episode_id value here may be racy or off-by-one
+                        # if other code mutates the env between assignment and
+                        # this call; pass the argument to ensure alignment.
+                        try:
+                            ep_to_start = int(global_ep_idx)
+                        except Exception:
+                            ep_to_start = global_ep_idx
+                        self.env.start_lifecycle_trace(ep_to_start)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Ensure the environment has a history_dir for timeline writes
+        try:
+            if not hasattr(self.env, 'history_dir') or getattr(self.env, 'history_dir', None) is None:
+                import os
+                default_hist = os.path.join(os.getcwd(), 'my_data_and_graph', 'historydata')
+                try:
+                    self.env.history_dir = default_hist
+                except Exception:
+                    setattr(self.env, 'history_dir', default_hist)
+                try:
+                    os.makedirs(self.env.history_dir, exist_ok=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             obs_init, info = self.env.reset()
         except TypeError:
@@ -1005,6 +1084,101 @@ class RolloutWorker:
                         setattr(self.env, 'current_episode', None)
         except Exception:
             pass
+
+        # Ensure we close the lifecycle trace for this episode after it finishes
+        if hasattr(self.env, 'end_lifecycle_trace'):
+            ended_ep = getattr(self.env, 'episode_id', None)
+
+            # Prepare cleaned gantt records and metadata before ending the
+            # lifecycle block. We deliberately do NOT call the generator yet;
+            # instead we end the lifecycle trace first so the lifecycle START/END
+            # pair is fully written and then invoke generation so TIMELINE and
+            # SUMMARY appear after the lifecycle block (as requested).
+            cleaned = list(gantt or [])
+            ep_int = ended_ep
+            history_dir = getattr(self, 'history_dir', None) or getattr(self.env, 'history_dir', None) or './my_data_and_graph/historydata/'
+            try:
+                import os
+                os.makedirs(history_dir, exist_ok=True)
+            except Exception:
+                pass
+
+            if ended_ep is not None:
+                try:
+                    try:
+                        ep_int = int(ended_ep)
+                    except Exception:
+                        ep_int = ended_ep
+
+                    # Unwrap wrapper-shaped gantt records when present so the
+                    # generator receives the canonical per-op dicts it expects.
+                    try:
+                        tmp = []
+                        for rec in (gantt or []):
+                            try:
+                                if isinstance(rec, dict) and 'record' in rec and isinstance(rec.get('record'), dict):
+                                    inner = dict(rec.get('record') or {})
+                                    try:
+                                        if inner.get('episode') is None and rec.get('episode') is not None:
+                                            inner['episode'] = rec.get('episode')
+                                    except Exception:
+                                        pass
+                                    tmp.append(inner)
+                                else:
+                                    tmp.append(rec)
+                            except Exception:
+                                tmp.append(rec)
+                        cleaned = tmp
+                    except Exception:
+                        cleaned = list(gantt or [])
+                except Exception:
+                    cleaned = list(gantt or [])
+
+            # end lifecycle (best-effort) — write the END footer first so the
+            # lifecycle START/END pair is closed before we append TIMELINE and
+            # SUMMARY. This ensures the generator runs after the episode footer
+            # has been written and can still force the presence of the EPISODE
+            # header immediately before the TIMELINE/SUMMARY blocks.
+            try:
+                self.env.end_lifecycle_trace(ended_ep)
+            except Exception:
+                # swallow to avoid breaking runner flow
+                pass
+
+            # Invoke the generator so TIMELINE and SUMMARY are written after
+            # the lifecycle END footer. All I/O remains best-effort.
+            if ended_ep is not None:
+                try:
+                    from utils.gantt import generate_scheduling_timeline
+                except Exception:
+                    generate_scheduling_timeline = None
+                if generate_scheduling_timeline is not None:
+                    try:
+                        # Lightweight console diagnostics
+                        try:
+                            print(f"[DEBUG] generate_scheduling_timeline called with len(gantt)={len(gantt)} cleaned_len={len(cleaned)}")
+                        except Exception:
+                            pass
+                        try:
+                            print(f"[DEBUG] allow_history_writes()={allow_history_writes()}")
+                        except Exception:
+                            pass
+
+                        try:
+                            generate_scheduling_timeline(
+                                self.env,
+                                episode_id=ep_int,
+                                episode_reward=ep_reward if 'ep_reward' in locals() else None,
+                                write_if_allowed=True,
+                                skip_header=True,
+                                out_dir=history_dir,
+                                records=cleaned,
+                            )
+                        except Exception:
+                            # non-fatal; timeline generation best-effort
+                            pass
+                    except Exception:
+                        pass
 
         return episode, ep_reward, bool(win_tag), gantt
 
