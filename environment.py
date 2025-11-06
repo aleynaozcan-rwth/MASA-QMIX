@@ -542,13 +542,10 @@ class MASAEnv:
         self.pending_jobs: List[List] = []
         # active jobs tracked to enforce capacity (n_agents)
         self.active_jobs: List[JobAgent] = []
-<<<<<<< Updated upstream
-=======
         # active_agents: subset of jobs that are active from the learning/agent
         # perspective (may mirror self.active_jobs). Maintain separately so
         # ML-facing components can rely on a clear list that is managed here.
         self.active_agents: List[JobAgent] = []
->>>>>>> Stashed changes
 
         # generator/process lifecycle flag to avoid leaked processes across resets
         self._generator_shutdown = False
@@ -692,6 +689,19 @@ class MASAEnv:
     # ---------------- Public API ----------------
     def reset(self):
         """Reset runtime state; keep configuration and metadata intact."""
+        # Persist episode end marker before we reset counters
+        try:
+            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+            os.makedirs(hist_dir, exist_ok=True)
+            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+            try:
+                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                    tf.write("=== JOB AGENT LIFECYCLE TRACE END ===\n")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         # Signal any running generator loop tied to previous env to stop
         try:
             self._generator_shutdown = True
@@ -736,7 +746,14 @@ class MASAEnv:
         self.completed_jobs = 0
         self.total_wait_time = 0.0
         self._completed_now_cache = 0
-        self._recent_rewards.clear()
+        try:
+            self._recent_rewards.clear()
+        except Exception:
+            try:
+                from collections import deque
+                self._recent_rewards = deque(maxlen=20)
+            except Exception:
+                self._recent_rewards = []
         self.done = False
         self.pending_decisions = []
         self.decisions_ready = simpy.Event(self.env)
@@ -755,9 +772,26 @@ class MASAEnv:
         except Exception:
             self.active_jobs = []
         try:
+            self.active_agents = []
+        except Exception:
+            self.active_agents = []
+        try:
             self.job_counter = 0
         except Exception:
             self.job_counter = 0
+
+        # After counters and lists cleared, write the START header for the new episode
+        try:
+            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+            os.makedirs(hist_dir, exist_ok=True)
+            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+            try:
+                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                    tf.write("=== JOB AGENT LIFECYCLE TRACE START ===\n")
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         # Do not start any internal dynamic arrival loops on reset; however
         # create deterministic initial jobs at t=0 so tests and callers that
@@ -984,22 +1018,30 @@ class MASAEnv:
                         self._completed_now_cache += 1
                         try:
                             if job in self.active_jobs:
-<<<<<<< Updated upstream
-                                self.active_jobs.remove(job)
-=======
                                 try:
                                     self.active_jobs.remove(job)
                                 except Exception:
                                     pass
                         except Exception:
                             pass
+
                         try:
-                            if job in self.active_agents:
+                            if job in getattr(self, 'active_agents', []):
                                 try:
                                     self.active_agents.remove(job)
                                 except Exception:
                                     pass
->>>>>>> Stashed changes
+                        except Exception:
+                            pass
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            try:
+                                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active: {len(getattr(self, 'active_agents', []) or [])} | Pending: {len(getattr(self, 'pending_jobs', []) or [])} | Completed: {int(getattr(self, 'completed_jobs', 0))}\n")
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                 except Exception:
@@ -1616,17 +1658,15 @@ class MASAEnv:
                                     pass
                         except Exception:
                             pass
-<<<<<<< Updated upstream
-=======
+
                         try:
-                            if job in self.active_agents:
+                            if job in getattr(self, 'active_agents', []):
                                 try:
                                     self.active_agents.remove(job)
                                 except Exception:
                                     pass
                         except Exception:
                             pass
->>>>>>> Stashed changes
                 except Exception:
                     # best-effort: continue even if mark_completed fails
                     pass
@@ -1646,12 +1686,36 @@ class MASAEnv:
                                 self.active_agents.append(next_job)
                             except Exception:
                                 pass
+                            # persist 'became active agent' event for pending activation
+                            try:
+                                hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                                os.makedirs(hist_dir, exist_ok=True)
+                                timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                                try:
+                                    with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(next_job, 'id', None)} became active agent -> ActiveAgents: {len(getattr(self, 'active_agents', []) or [])}\n")
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
                             try:
                                 next_job.is_active = True
                             except Exception:
                                 pass
                             try:
                                 LOG.info("[Env] Pending job %s activated at t=%.4f", getattr(next_job, 'id', None), float(getattr(self.env, 'now', 0.0)))
+                            except Exception:
+                                pass
+                            # persist pending activation
+                            try:
+                                hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                                os.makedirs(hist_dir, exist_ok=True)
+                                timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                                try:
+                                    with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Pending job {getattr(next_job, 'id', None)} activated -> ActiveAgents: {len(getattr(self, 'active_agents', []) or [])}\n")
+                                except Exception:
+                                    pass
                             except Exception:
                                 pass
                         except Exception:
@@ -1991,12 +2055,8 @@ class MASAEnv:
 
         # Capacity enforcement: self.num_jobs represents the capacity (n_agents)
         try:
-<<<<<<< Updated upstream
-            capacity = int(getattr(self, 'num_jobs', 0)) or int(getattr(self.args, 'n_agents', 0))
-=======
             # Use configured bounded capacity when present
             capacity = int(getattr(self, 'max_active_agents', 0)) or int(getattr(self, 'num_jobs', 0)) or int(getattr(self.args, 'n_agents', 0))
->>>>>>> Stashed changes
         except Exception:
             capacity = int(getattr(self.args, 'n_agents', 0)) if getattr(self, 'args', None) is not None else 0
 
@@ -2013,14 +2073,36 @@ class MASAEnv:
                             job.is_active = True
                         except Exception:
                             pass
-<<<<<<< Updated upstream
-=======
                         # mirror into active_agents for ML-facing semantics
                         try:
                             self.active_agents.append(job)
                         except Exception:
                             pass
->>>>>>> Stashed changes
+                        # persist 'became active agent' event
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            try:
+                                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} became active agent -> ActiveAgents: {len(getattr(self, 'active_agents', []) or [])}\n")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                        # persist arrival/creation to timeline
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            try:
+                                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                    tf.write(f"[t={float(getattr(job, 'arrival_time', 0.0)):.2f}] New job {getattr(job, 'id', None)} arrived with {len(getattr(job, 'operations', []) or [])} ops -> Active: {len(getattr(self, 'active_agents', []) or [])} | Pending: {len(getattr(self, 'pending_jobs', []) or [])} | Completed: {int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} created and started -> Active: {len(getattr(self, 'active_agents', []) or [])}\n")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                     except Exception:
                         # Diagnostic: surface add_job startup failures with sim time
                         try:
@@ -2032,13 +2114,22 @@ class MASAEnv:
                     # queue for later start
                     try:
                         self.pending_jobs.append(job)
-<<<<<<< Updated upstream
-=======
                         try:
                             LOG.info("[Env] Job %s queued (capacity full)", getattr(job, 'id', None))
                         except Exception:
                             pass
->>>>>>> Stashed changes
+                        # persist queued event
+                        try:
+                            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if getattr(self, 'args', None) is not None else os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
+                            try:
+                                with open(timeline_path, 'a', encoding='utf-8') as tf:
+                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} queued (capacity full: max_active_agents={int(getattr(self, 'max_active_agents', 0))})\n")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                     except Exception:
                         logging.getLogger(__name__).exception("Failed to queue pending job", exc_info=True)
                         try:

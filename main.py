@@ -2,11 +2,13 @@ import argparse
 import numpy as np
 import pickle
 import os
-from environment import MASAEnv, LOG
 import sys
 from os.path import dirname, abspath
 
+# Ensure the project root is on sys.path before importing local modules
 sys.path.append(dirname(dirname(abspath(__file__))))
+
+from environment import MASAEnv, LOG
 
 from MARL.runner import Runner
 from MARL.common.arguments import (
