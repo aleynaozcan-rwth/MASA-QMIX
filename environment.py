@@ -542,6 +542,13 @@ class MASAEnv:
         self.pending_jobs: List[List] = []
         # active jobs tracked to enforce capacity (n_agents)
         self.active_jobs: List[JobAgent] = []
+<<<<<<< Updated upstream
+=======
+        # active_agents: subset of jobs that are active from the learning/agent
+        # perspective (may mirror self.active_jobs). Maintain separately so
+        # ML-facing components can rely on a clear list that is managed here.
+        self.active_agents: List[JobAgent] = []
+>>>>>>> Stashed changes
 
         # generator/process lifecycle flag to avoid leaked processes across resets
         self._generator_shutdown = False
@@ -603,6 +610,17 @@ class MASAEnv:
                     logging.getLogger(__name__).exception("Failed to generate initial jobs", exc_info=True)
         except Exception:
             pass
+
+        # Bounded dynamic agents capacity: maximum number of concurrently
+        # active learning agents. Prefer CLI args.n_agents when available,
+        # otherwise fall back to configured num_jobs capacity.
+        try:
+            self.max_active_agents = int(getattr(args, 'n_agents', int(getattr(self, 'num_jobs', 0))))
+        except Exception:
+            try:
+                self.max_active_agents = int(getattr(self, 'num_jobs', 0))
+            except Exception:
+                self.max_active_agents = 0
 
         # Note: automatic dynamic job generation is intentionally disabled
         # here. MASAEnv should be passive and only create initial jobs via
@@ -966,7 +984,22 @@ class MASAEnv:
                         self._completed_now_cache += 1
                         try:
                             if job in self.active_jobs:
+<<<<<<< Updated upstream
                                 self.active_jobs.remove(job)
+=======
+                                try:
+                                    self.active_jobs.remove(job)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        try:
+                            if job in self.active_agents:
+                                try:
+                                    self.active_agents.remove(job)
+                                except Exception:
+                                    pass
+>>>>>>> Stashed changes
                         except Exception:
                             pass
                 except Exception:
@@ -1583,24 +1616,46 @@ class MASAEnv:
                                     pass
                         except Exception:
                             pass
+<<<<<<< Updated upstream
+=======
+                        try:
+                            if job in self.active_agents:
+                                try:
+                                    self.active_agents.remove(job)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+>>>>>>> Stashed changes
                 except Exception:
                     # best-effort: continue even if mark_completed fails
                     pass
-                # If there are pending jobs, start the next one deterministically
+                # If there are pending jobs, start pending jobs until capacity
+                # is reached (bounded dynamic capacity semantics)
                 try:
-                    if getattr(self, 'pending_jobs', None):
-                        if len(self.pending_jobs) > 0:
+                    while getattr(self, 'pending_jobs', None) and len(self.pending_jobs) > 0 and (int(getattr(self, 'max_active_agents', 0)) <= 0 or len(self.active_agents) < int(getattr(self, 'max_active_agents', 0))):
+                        try:
                             next_job = self.pending_jobs.pop(0)
+                        except Exception:
+                            break
+                        try:
+                            # schedule and mark active
+                            self.env.process(self._job_process(next_job))
+                            self.active_jobs.append(next_job)
                             try:
-                                # schedule and mark active
-                                self.env.process(self._job_process(next_job))
-                                self.active_jobs.append(next_job)
-                                try:
-                                    next_job.is_active = True
-                                except Exception:
-                                    pass
+                                self.active_agents.append(next_job)
                             except Exception:
-                                logging.getLogger(__name__).exception("Failed to start pending job", exc_info=True)
+                                pass
+                            try:
+                                next_job.is_active = True
+                            except Exception:
+                                pass
+                            try:
+                                LOG.info("[Env] Pending job %s activated at t=%.4f", getattr(next_job, 'id', None), float(getattr(self.env, 'now', 0.0)))
+                            except Exception:
+                                pass
+                        except Exception:
+                            logging.getLogger(__name__).exception("Failed to start pending job", exc_info=True)
                 except Exception:
                     logging.getLogger(__name__).exception("Failed in capacity dispatch", exc_info=True)
 
@@ -1936,7 +1991,12 @@ class MASAEnv:
 
         # Capacity enforcement: self.num_jobs represents the capacity (n_agents)
         try:
+<<<<<<< Updated upstream
             capacity = int(getattr(self, 'num_jobs', 0)) or int(getattr(self.args, 'n_agents', 0))
+=======
+            # Use configured bounded capacity when present
+            capacity = int(getattr(self, 'max_active_agents', 0)) or int(getattr(self, 'num_jobs', 0)) or int(getattr(self.args, 'n_agents', 0))
+>>>>>>> Stashed changes
         except Exception:
             capacity = int(getattr(self.args, 'n_agents', 0)) if getattr(self, 'args', None) is not None else 0
 
@@ -1953,6 +2013,14 @@ class MASAEnv:
                             job.is_active = True
                         except Exception:
                             pass
+<<<<<<< Updated upstream
+=======
+                        # mirror into active_agents for ML-facing semantics
+                        try:
+                            self.active_agents.append(job)
+                        except Exception:
+                            pass
+>>>>>>> Stashed changes
                     except Exception:
                         # Diagnostic: surface add_job startup failures with sim time
                         try:
@@ -1964,6 +2032,13 @@ class MASAEnv:
                     # queue for later start
                     try:
                         self.pending_jobs.append(job)
+<<<<<<< Updated upstream
+=======
+                        try:
+                            LOG.info("[Env] Job %s queued (capacity full)", getattr(job, 'id', None))
+                        except Exception:
+                            pass
+>>>>>>> Stashed changes
                     except Exception:
                         logging.getLogger(__name__).exception("Failed to queue pending job", exc_info=True)
                         try:
