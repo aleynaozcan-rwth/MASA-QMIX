@@ -801,13 +801,28 @@ class Runner:
                 except Exception as e:
                     print("[WARN] Gantt plot failed:", e)
 
+            # collect per-epoch gantt records so we can compute per-evolution metrics
             episodes, avg_rewards = [], []
+            epoch_gantt = []
+            try:
+                before_wait = float(getattr(self.env, 'total_wait_time', 0.0))
+            except Exception:
+                before_wait = 0.0
+            try:
+                before_completed = int(getattr(self.env, 'completed_jobs', 0))
+            except Exception:
+                before_completed = 0
 
             for _ in range(self.args.n_episodes):
                 # Use the SimPy event-driven episode execution exclusively.
                 episode, ep_r, win_tag, gantt_data = self._run_event_driven_episode(global_ep_idx)
 
                 all_gantt_data.extend(gantt_data)
+                # record gantt for this epoch specifically
+                try:
+                    epoch_gantt.extend(gantt_data)
+                except Exception:
+                    pass
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
@@ -1134,6 +1149,109 @@ class Runner:
             except Exception as e:
                 print(f"[WARN] KPI logging failed: {e}")
 
+            # === Per-evolution summary and plotting ===
+            try:
+                if getattr(self, 'allow_history_writes', False):
+                    try:
+                        # compute per-epoch deltas for wait/completed
+                        after_wait = float(getattr(self.env, 'total_wait_time', 0.0))
+                        after_completed = int(getattr(self.env, 'completed_jobs', 0))
+                        delta_wait = max(0.0, after_wait - float(before_wait))
+                        delta_completed = max(0, after_completed - int(before_completed))
+                    except Exception:
+                        delta_wait = 0.0
+                        delta_completed = 0
+
+                    # infer machine/operator counts
+                    try:
+                        n_m = len(getattr(self.env, 'machine_resources', []) or [])
+                        if n_m <= 0:
+                            n_m = len(getattr(self.env.workcenters_meta, 'machine_list', []) or []) or int(getattr(self.env, 'num_wcs', 1))
+                    except Exception:
+                        n_m = int(getattr(self.env, 'num_wcs', 1) or 1)
+                    try:
+                        n_o = len(getattr(self.env, 'operator_groups', []) or [])
+                        if n_o <= 0:
+                            n_o = int(getattr(self.env, 'num_ops', 1) or 1)
+                    except Exception:
+                        n_o = int(getattr(self.env, 'num_ops', 1) or 1)
+
+                    # Build a single-item env-like dict describing this epoch
+                    epoch_item = {
+                        'gantt': list(epoch_gantt),
+                        'total_wait_time': float(delta_wait),
+                        'completed_jobs': int(delta_completed),
+                        'n_machines': int(n_m),
+                        'n_ops': int(n_o),
+                        # Ensure avg_epoch_reward is always present (fallback to 0.0)
+                        'avg_epoch_reward': float(np.mean(avg_rewards)) if avg_rewards else 0.0,
+                    }
+
+                    try:
+                        from my_data_and_graph.metrics import append_run_summary
+                        from my_data_and_graph.plot_metrics import (
+                            plot_utilization_and_makespan,
+                            plot_per_machine_utilization,
+                            plot_per_operator_utilization,
+                            utilization_summary_grid,
+                            check_timeline_consistency,
+                        )
+
+                        # Prefer asking the environment for the rich summary when available
+                        util_item = None
+                        try:
+                            if hasattr(self.env, '_compute_utilization_summary') and callable(getattr(self.env, '_compute_utilization_summary')):
+                                util_item = self.env._compute_utilization_summary()
+                        except Exception:
+                            util_item = None
+
+                        # Fall back to the constructed epoch_item if env cannot produce summary
+                        if util_item is None:
+                            util_item = epoch_item
+
+                        # Ensure avg_epoch_reward is present on the util summary and preserve any existing util fields
+                        try:
+                            avg_r = float(np.mean(avg_rewards)) if avg_rewards else 0.0
+                        except Exception:
+                            try:
+                                avg_r = float(epoch_item.get('avg_epoch_reward', 0.0))
+                            except Exception:
+                                avg_r = 0.0
+                        try:
+                            # prefer not to overwrite existing avg values for machine/operator utils
+                            if isinstance(util_item, dict):
+                                util_item['avg_epoch_reward'] = float(avg_r)
+                        except Exception:
+                            pass
+
+                        # Append the enriched util summary directly into run_summary.json
+                        try:
+                            append_run_summary(util_item, history_dir=self.history_dir)
+                        except Exception:
+                            # fallback: attempt to write via collect_evolution_summary if append fails
+                            try:
+                                from my_data_and_graph.metrics import collect_evolution_summary as _ces
+                                _ces([util_item], epoch)
+                            except Exception:
+                                pass
+                        # regenerate plots after appending
+                        plot_utilization_and_makespan(history_dir=self.history_dir)
+                        # also generate per-id bar charts for latest evolution
+                        plot_per_machine_utilization(history_dir=self.history_dir)
+                        plot_per_operator_utilization(history_dir=self.history_dir)
+                        # combined grid (includes makespan & reward)
+                        utilization_summary_grid(history_dir=self.history_dir, combine_plots=True)
+                        # optional timeline consistency check (heuristic)
+                        try:
+                            check_timeline_consistency(history_dir=self.history_dir)
+                        except Exception:
+                            pass
+                    except Exception:
+                        # best-effort: don't break training if metrics plotting fails
+                        logging.getLogger(__name__).exception("Exception while writing per-evolution summary/plots", exc_info=True)
+            except Exception:
+                logging.getLogger(__name__).exception("Exception in per-evolution summary block", exc_info=True)
+
         # === Save episode statistics ===
         try:
             if getattr(self, 'allow_history_writes', False):
@@ -1350,9 +1468,48 @@ class Runner:
             # write summary (opt-in)
             try:
                 if getattr(self, 'allow_history_writes', False):
+                    # Merge top-level summary fields into existing run_summary.json if present
                     summary_path = os.path.join(self.history_dir, 'run_summary.json')
-                    with open(summary_path, 'w') as sf:
-                        json.dump(summary, sf, indent=2)
+                    out_data = {}
+                    try:
+                        if os.path.exists(summary_path):
+                            with open(summary_path, 'r', encoding='utf-8') as rf:
+                                out_data = json.load(rf) or {}
+                    except Exception:
+                        out_data = {}
+
+                    # Preserve existing evolutions list if present
+                    evols = out_data.get('evolutions') if isinstance(out_data, dict) else None
+                    # Update top-level fields with computed summary values (do not erase evolutions)
+                    if not isinstance(out_data, dict):
+                        out_data = {}
+                    out_data['last_10_avg_reward'] = summary.get('last_10_avg_reward')
+                    out_data['last_10_avg_loss'] = summary.get('last_10_avg_loss')
+                    out_data['last_10_avg_td'] = summary.get('last_10_avg_td')
+                    out_data['avg_machine_utilization'] = summary.get('avg_machine_utilization')
+                    out_data['avg_operator_utilization'] = summary.get('avg_operator_utilization')
+
+                    # restore evolutions if they existed previously
+                    if evols is not None:
+                        out_data['evolutions'] = evols
+
+                    # If we have per-evolution summaries, mirror the most
+                    # recent evolution's averaged metrics to the top-level
+                    # fields so external consumers can read a concise
+                    # summary without scanning evolutions.
+                    try:
+                        if isinstance(out_data, dict) and 'evolutions' in out_data and len(out_data.get('evolutions', [])) > 0:
+                            last = out_data['evolutions'][-1]
+                            out_data['avg_machine_utilization'] = last.get('avg_machine_utilization', 0)
+                            out_data['avg_operator_utilization'] = last.get('avg_operator_utilization', 0)
+                            out_data['avg_epoch_reward'] = last.get('avg_epoch_reward', 0)
+                            out_data['avg_makespan'] = last.get('avg_makespan', last.get('average_makespan', 0))
+                    except Exception:
+                        # best-effort: do not fail the final write if mirroring fails
+                        pass
+
+                    with open(summary_path, 'w', encoding='utf-8') as sf:
+                        json.dump(out_data, sf, indent=2)
                     print(f"[Runner] run_summary.json written to {summary_path}")
                     print("system fully functional")
             except Exception as e:

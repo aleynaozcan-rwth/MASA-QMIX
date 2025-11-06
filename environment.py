@@ -2248,3 +2248,286 @@ class MASAEnv:
         except Exception:
             logging.getLogger(__name__).exception("Failed to print initial job summary", exc_info=True)
 
+    def _compute_utilization_summary(self):
+        """Compute utilization summary from gantt_records.
+
+        Returns a dict with keys:
+          - avg_machine_utilization: fraction [0,1] averaged across machines and time
+          - avg_operator_utilization: fraction [0,1] averaged across operators and time
+          - average_makespan: makespan observed in this episode (seconds)
+          - average_wait_time: total_wait_time / completed_jobs (seconds)
+        """
+        try:
+            records = getattr(self, 'gantt_records', []) or []
+            starts = []
+            ends = []
+            total_machine_busy = {}
+            total_operator_busy = {}
+            # debug flag: allow env- or args-driven enable
+            try:
+                log_util_debug = bool(getattr(self, 'log_util_debug', False)) or bool(getattr(self.args, 'log_util_debug', False))
+            except Exception:
+                log_util_debug = False
+
+            # NOTE: One machine can only be active with one operator at a time.
+            # UNASSIGNED operators are ignored (no real human involvement).
+            for r in records:
+                try:
+                    if isinstance(r, dict):
+                        s = float(r.get('start', r.get('s', 0.0)))
+                        e = float(r.get('end', r.get('e', s)))
+                        machine_id = r.get('wc_idx', r.get('wc', None))
+                        operator_id = r.get('op_grp', r.get('op_id', None))
+                    else:
+                        # legacy tuple: (start, end, op_idx, wc_idx, job_id, op_grp, ...)
+                        try:
+                            s = float(r[0])
+                        except Exception:
+                            s = 0.0
+                        try:
+                            e = float(r[1])
+                        except Exception:
+                            e = s
+                        machine_id = r[3] if len(r) > 3 else None
+                        operator_id = r[5] if len(r) > 5 else None
+
+
+                    # Skip records with non-positive duration
+                    dur = max(0.0, float(e) - float(s))
+                    if dur <= 0.0:
+                        continue
+
+                    # Skip UNASSIGNED operators entirely (user requested semantics)
+                    try:
+                        if operator_id is not None and str(operator_id) == 'UNASSIGNED':
+                            # still record start/end for makespan calculation but do not credit busy-time
+                            starts.append(float(s)); ends.append(float(e))
+                            continue
+                    except Exception:
+                        pass
+
+                    # compute busy time (strictly for this record's machine/operator pair)
+                    starts.append(float(s))
+                    ends.append(float(e))
+
+                    # accumulate per-machine busy time
+                    try:
+                        mid = int(machine_id) if machine_id is not None else None
+                    except Exception:
+                        try:
+                            mid = int(getattr(self.workcenters_meta, 'machine_index', {}).get(str(machine_id)))
+                        except Exception:
+                            mid = None
+                    if mid is not None:
+                        total_machine_busy[mid] = total_machine_busy.get(mid, 0.0) + dur
+
+                    # accumulate per-operator busy time (ignore UNASSIGNED)
+                    if operator_id is not None:
+                        try:
+                            opid = str(operator_id)
+                        except Exception:
+                            opid = None
+                        if opid and opid != 'UNASSIGNED':
+                            total_operator_busy[opid] = total_operator_busy.get(opid, 0.0) + dur
+                except Exception:
+                    continue
+
+            # episode length
+            if starts and ends:
+                episode_length = float(max(ends)) - float(min(starts))
+            else:
+                # fallback to env.now if no gantt records
+                episode_length = float(getattr(self.env, 'now', 0.0))
+
+            # avoid zero-length
+            if episode_length <= 0:
+                episode_length = 1e-9
+
+            # compute utilizations based on machine-operator pairs
+            try:
+                # configured totals: prefer explicit resources when available
+                try:
+                    total_machines = len(getattr(self, 'machine_resources', []) or [])
+                    if total_machines <= 0:
+                        total_machines = len(getattr(self.workcenters_meta, 'machine_list', []) or []) or int(getattr(self, 'num_wcs', 1))
+                except Exception:
+                    total_machines = len(getattr(self.workcenters_meta, 'machine_list', []) or []) or int(getattr(self, 'num_wcs', 1) or 1)
+
+                try:
+                    total_operators = len(getattr(self, 'operator_groups', []) or [])
+                    # if operator_groups not available or zero, infer from gantt records
+                    if total_operators <= 0:
+                        seen_ops = set()
+                        for r in records:
+                            try:
+                                op = r.get('op_grp', r.get('op_id')) if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+                                if op is not None and str(op) != 'UNASSIGNED':
+                                    seen_ops.add(str(op))
+                            except Exception:
+                                continue
+                        total_operators = max(1, len(seen_ops))
+                except Exception:
+                    seen_ops = set()
+                    for r in records:
+                        try:
+                            op = r.get('op_grp', r.get('op_id')) if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+                            if op is not None and str(op) != 'UNASSIGNED':
+                                seen_ops.add(str(op))
+                        except Exception:
+                            continue
+                    total_operators = max(1, len(seen_ops))
+
+                mm_total = float(sum(total_machine_busy.values()))
+                avg_machine_util = mm_total / (episode_length * max(1, int(total_machines)))
+
+            except Exception:
+                avg_machine_util = 0.0
+
+            try:
+                oo_total = float(sum(total_operator_busy.values()))
+                avg_operator_util = oo_total / (episode_length * max(1, int(total_operators)))
+            except Exception:
+                avg_operator_util = 0.0
+
+            # clip between 0 and 1
+            try:
+                avg_machine_util = float(np.clip(avg_machine_util, 0.0, 1.0))
+                avg_operator_util = float(np.clip(avg_operator_util, 0.0, 1.0))
+            except Exception:
+                pass
+
+            avg_makespan = float(episode_length)
+
+            # average wait per completed job
+            try:
+                total_wait = float(getattr(self, 'total_wait_time', 0.0))
+                completed = int(getattr(self, 'completed_jobs', 0))
+                avg_wait_time = float(total_wait) / max(1.0, float(completed))
+            except Exception:
+                avg_wait_time = float(getattr(self, 'total_wait_time', 0.0))
+
+            # Build per-machine utilization for all configured machines
+            per_machine_util = {}
+            try:
+                total_machines = int(total_machines) if 'total_machines' in locals() else None
+            except Exception:
+                total_machines = None
+            try:
+                if total_machines is None:
+                    total_machines = len(getattr(self, 'machine_resources', []) or [])
+                    if total_machines <= 0:
+                        total_machines = len(getattr(self.workcenters_meta, 'machine_list', []) or []) or int(getattr(self, 'num_wcs', 1) or 1)
+            except Exception:
+                total_machines = len(getattr(self.workcenters_meta, 'machine_list', []) or []) or int(getattr(self, 'num_wcs', 1) or 1)
+
+            for mid in range(int(max(1, total_machines))):
+                busy = float(total_machine_busy.get(mid, 0.0))
+                try:
+                    per_machine_util[mid] = float(np.clip(busy / float(episode_length), 0.0, 1.0))
+                except Exception:
+                    per_machine_util[mid] = 0.0
+
+            # Build per-operator utilization for all configured operators
+            per_operator_util = {}
+            try:
+                # prefer operator objects if available
+                op_ids = None
+                if getattr(self, 'operators', None) is not None and getattr(self.operators, 'operators_object_list', None) is not None:
+                    try:
+                        op_ids = [str(getattr(o, 'operator_id', i)) for i, o in enumerate(getattr(self.operators, 'operators_object_list') or [])]
+                    except Exception:
+                        op_ids = None
+
+                if op_ids is None:
+                    # fall back to operator_groups count
+                    try:
+                        n_ops_conf = len(getattr(self, 'operator_groups', []) or [])
+                        op_ids = [str(i) for i in range(int(max(1, n_ops_conf)))]
+                    except Exception:
+                        # final fallback: keys seen in records
+                        op_ids = list(total_operator_busy.keys())
+                # ensure unique
+                op_ids = list(dict.fromkeys(op_ids))
+            except Exception:
+                op_ids = list(dict.fromkeys(list(total_operator_busy.keys())))
+
+            for opid in op_ids:
+                busy = float(total_operator_busy.get(opid, 0.0))
+                try:
+                    per_operator_util[opid] = float(np.clip(busy / float(episode_length), 0.0, 1.0))
+                except Exception:
+                    per_operator_util[opid] = 0.0
+
+            # Debug reporting: optionally write a short summary to logfile/stdout
+            if log_util_debug:
+                try:
+                    dbg_lines = []
+                    # makespan summary
+                    try:
+                        makespan_line = f"[DEBUG UTIL] Computed makespan={float(episode_length):.3f}s using {len(records)} records"
+                        dbg_lines.append(makespan_line)
+                        try:
+                            LOG.debug(makespan_line)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                    for mid in sorted(per_machine_util.keys(), key=lambda x: int(x) if isinstance(x, (int, str)) and str(x).isdigit() else str(x)):
+                        busy = float(total_machine_busy.get(mid, 0.0))
+                        util = float(per_machine_util.get(mid, 0.0))
+                        try:
+                            # Machine id may be int or str
+                            mid_str = str(mid)
+                            line = f"[DEBUG UTIL] Machine {mid_str} busy {busy:.2f}s of {episode_length:.2f}s -> {util:.3f}"
+                        except Exception:
+                            line = f"[DEBUG UTIL] Machine {mid} busy {busy:.2f}s of {episode_length:.2f}s -> {util:.3f}"
+                        dbg_lines.append(line)
+                        try:
+                            LOG.debug(line)
+                        except Exception:
+                            pass
+
+                    for opid in sorted(per_operator_util.keys(), key=lambda x: str(x)):
+                        busy = float(total_operator_busy.get(opid, 0.0))
+                        util = float(per_operator_util.get(opid, 0.0))
+                        try:
+                            oid_str = str(opid)
+                            line = f"[DEBUG UTIL] Operator {oid_str} busy {busy:.2f}s of {episode_length:.2f}s -> {util:.3f}"
+                        except Exception:
+                            line = f"[DEBUG UTIL] Operator {opid} busy {busy:.2f}s of {episode_length:.2f}s -> {util:.3f}"
+                        dbg_lines.append(line)
+                        try:
+                            LOG.debug(line)
+                        except Exception:
+                            pass
+
+                    # persist to history_dir if available
+                    try:
+                        hist = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+                        os.makedirs(hist, exist_ok=True)
+                        dbg_path = os.path.join(hist, 'util_debug.log')
+                        with open(dbg_path, 'a', encoding='utf-8') as df:
+                            df.write('\n'.join(dbg_lines) + "\n")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            return {
+                'avg_machine_utilization': avg_machine_util,
+                'avg_operator_utilization': avg_operator_util,
+                'average_makespan': avg_makespan,
+                'average_wait_time': avg_wait_time,
+                'per_machine_utilization': per_machine_util,
+                'per_operator_utilization': per_operator_util,
+            }
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to compute utilization summary", exc_info=True)
+            return {
+                'avg_machine_utilization': 0.0,
+                'avg_operator_utilization': 0.0,
+                'average_makespan': 0.0,
+                'average_wait_time': 0.0,
+            }
+
