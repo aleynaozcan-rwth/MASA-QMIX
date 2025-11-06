@@ -14,9 +14,7 @@ MARL/model/**/*.pkl
 my_data_and_graph/historydata/scheduleresults.txt
 
 # Ignore generated comparison tools and their outputs (local only)
-tools/check_config_defaults.py
-tools/compare_config_to_modules.py
-tools/config_diff_report.json
+
 
 # Local historydata artifacts generated during env runs
 my_data_and_graph/historydata/*
