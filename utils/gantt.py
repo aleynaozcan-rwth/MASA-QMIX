@@ -15,6 +15,17 @@ except Exception:
     def allow_history_writes():
         return False
 
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import matplotlib.cm as cm
+except Exception:
+    plt = None
+    mpatches = None
+    cm = None
+
 Record = Tuple[float, float, int, int, int, int, float, float]
 
 
@@ -841,3 +852,191 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
             pass
 
     return report
+
+
+def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', title: str = None, save_if_allowed: bool = True) -> bool:
+    """Render a wide, readable Gantt chart from `records` and save to `path`.
+
+    Parameters
+    - records: iterable of gantt Record tuples or dicts (see module Record).
+    - path: filesystem path to save the PNG image.
+    - by: 'machine' (default) to layout y-axis by machine/workcenter index,
+          or 'job' to layout by job id.
+    - title: optional title string for the chart.
+    - save_if_allowed: when True, only write the file when
+          `allow_history_writes()` permits it (defensive default).
+
+    Returns True on successful save, False otherwise.
+    """
+    # Defensive: require matplotlib available
+    if plt is None:
+        return False
+
+    try:
+        recs = list(records or [])
+    except Exception:
+        recs = []
+
+    # Respect central IO gate if requested
+    if save_if_allowed and not allow_history_writes():
+        # do not create files when history writes are disabled
+        return False
+
+    # Normalize records to tuples: (start,end,op,wc,job_id,op_grp,...)
+    normalized = []
+    for r in recs:
+        try:
+            if isinstance(r, dict):
+                s = float(r.get('start', r.get('s', 0.0)))
+                e = float(r.get('end', r.get('e', 0.0)))
+                op = r.get('op_idx', r.get('op', None))
+                wc = r.get('wc_idx', r.get('wc', None))
+                job = r.get('job_id', r.get('job_id', None))
+            else:
+                s, e, op, wc, job = (r[0], r[1], r[2] if len(r) > 2 else None, r[3] if len(r) > 3 else None, r[4] if len(r) > 4 else None)
+            normalized.append((float(s), float(e), op, wc, job))
+        except Exception:
+            continue
+
+    # Group keys and map to y positions
+    if by == 'job':
+        keys = sorted({int(k[4]) for k in normalized if k[4] is not None})
+        key_name = lambda k: f"Job_{k}"
+    else:
+        # default: machine / workcenter index
+        keys = sorted({int(k[3]) for k in normalized if k[3] is not None})
+        key_name = lambda k: f"M{k}"
+
+    if not keys:
+        # ensure at least a single row so labels render
+        keys = [0]
+
+    # map key -> y index (top-down visually)
+    keys = list(keys)
+    keys.sort()
+    y_map = {k: i for i, k in enumerate(keys[::-1])}  # reversed so first key appears at top
+
+    # Color map for operations
+    unique_ops = sorted({str(int(r[2])) if isinstance(r[2], (int, float)) and float(r[2]).is_integer() else str(r[2]) for r in normalized})
+    color_map = {}
+    cmap = cm.get_cmap('tab20') if cm is not None else None
+    for i, op in enumerate(unique_ops):
+        color_map[op] = cmap(i % 20) if cmap is not None else None
+
+    # Build the figure with a wide/tall panoramic aspect for readability
+    fig, ax = plt.subplots(figsize=(32, 10))
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+
+    # Plot each record as a horizontal bar and ensure legend handles exist
+    try:
+        plotted_ops = set()
+        for s, e, op, wc, job in normalized:
+            try:
+                key = int(job) if by == 'job' and job is not None else int(wc) if wc is not None else 0
+            except Exception:
+                key = 0
+            y = y_map.get(key, 0)
+            # make bar height adapt to number of rows so bars stay readable
+            height = 0.8
+            start = float(s)
+            width = max(0.0, float(e) - float(s))
+            op_label = str(int(op)) if isinstance(op, (int, float)) and float(op).is_integer() else str(op)
+            color = color_map.get(op_label, None) or 'tab:blue'
+            # Add a label only for the first drawn bar of each operation type so
+            # legend handles are created without duplicating entries.
+            lab = None
+            if op_label not in plotted_ops:
+                lab = f"Op {op_label}"
+                plotted_ops.add(op_label)
+            try:
+                ax.broken_barh([(start, width)], (y - height/2.0, height), facecolors=color, edgecolor='black', linewidth=0.4, label=lab)
+            except Exception:
+                # Some backends/versions may not accept label on broken_barh; fall back
+                col = color
+                rect = ax.broken_barh([(start, width)], (y - height/2.0, height), facecolors=col, edgecolor='black', linewidth=0.4)
+                try:
+                    if lab is not None:
+                        rect.set_label(lab)
+                except Exception:
+                    pass
+    except Exception:
+        # best-effort: continue to rendering
+        pass
+
+    # Y ticks and labels
+    y_positions = [y_map[k] for k in keys]
+    y_labels = [key_name(k) for k in keys]
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(y_labels, fontsize=12)
+
+    # X label and Y label with slightly larger fonts
+    ax.set_xlabel('Simulation Time (s)', fontsize=14)
+    ax.set_ylabel('Machine / Job ID', fontsize=14)
+
+    # Title
+    if title:
+        ax.set_title(title, fontsize=16)
+
+    # Build and show legend: prefer handles created during plotting; if none,
+    # create a fallback legend from the op-type color map so the legend is
+    # always visible and centered vertically to the right of the chart.
+    try:
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(handles, labels, loc='center left', bbox_to_anchor=(1.02, 0.5),
+                      frameon=True, fontsize=10, title='Operation Types')
+        else:
+            try:
+                print("⚠️ No legend handles found for this chart (creating fallback).")
+            except Exception:
+                pass
+            # create fallback patches
+            try:
+                patches = [mpatches.Patch(color=color_map.get(op, 'tab:blue'), label=f"Op {op}") for op in unique_ops]
+                if patches:
+                    ax.legend(handles=patches, loc='center left', bbox_to_anchor=(1.02, 0.5),
+                              frameon=True, fontsize=10, title='Operation Types')
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Expand x-axis slightly beyond the last operation so labels aren't clipped
+    try:
+        max_end_time = 0.0
+        for _, e, _, _, _ in normalized:
+            try:
+                if float(e) > max_end_time:
+                    max_end_time = float(e)
+            except Exception:
+                continue
+        if max_end_time and max_end_time > 0:
+            ax.set_xlim(0, max_end_time * 1.05)
+    except Exception:
+        pass
+
+    # Adjust figure proportions to a panoramic layout and reserve room for the
+    # vertical legend on the right. This makes the plot fill the figure width
+    # while keeping the legend visible and centered.
+    try:
+        fig.set_size_inches(40, 10)
+    except Exception:
+        pass
+    plt.subplots_adjust(left=0.05, right=0.80, top=0.93, bottom=0.12)
+
+    # Ensure saved figure has tight bounding box and a small padding so the
+    # chart fills the image but the legend remains visible.
+    try:
+        # create parent dir if missing
+        pdir = Path(path).parent
+        pdir.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, bbox_inches='tight', pad_inches=0.3, dpi=300)
+        plt.close(fig)
+        return True
+    except Exception:
+        try:
+            plt.close(fig)
+        except Exception:
+            pass
+        return False

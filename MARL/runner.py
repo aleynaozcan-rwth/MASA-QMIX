@@ -53,7 +53,13 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
 
     # allow legacy 5/6-tuple records and the new 8-tuple format
     # default size; may be increased vertically for many jobs below
-    fig, ax = plt.subplots(figsize=(14, 6))
+    # Use a wider/taller default so the gantt fills the page better
+    fig, ax = plt.subplots(figsize=(18, 9))
+    try:
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('white')
+    except Exception:
+        pass
     # choose color palette keyed by operation type for readability
     # collect unique operation identifiers (int or str) and job ids
     op_vals = []
@@ -179,7 +185,8 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         op_handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', linewidth=0.5, label=lab))
         op_labels.append(lab)
     if op_handles:
-        legend_ops = ax.legend(op_handles, op_labels, title="Operation Types", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+        # place legend slightly further right (still inside figure) and center vertically
+        legend_ops = ax.legend(op_handles, op_labels, title="Operation Types", bbox_to_anchor=(1.25, 0.5), loc="center left", borderaxespad=0, frameon=True, fontsize=10, title_fontsize=10)
         ax.add_artist(legend_ops)
 
     # arrival markers removed by user request; arrivals remain in CSV only
@@ -196,10 +203,27 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     except Exception as e:
         logging.getLogger(__name__).exception("Exception caught", exc_info=True)
         pass
-    # adjust bottom margin and save with friendly dpi
-    plt.subplots_adjust(bottom=0.12)
-    plt.tight_layout()
-    plt.savefig(filename, dpi=150)
+    # adjust margins: reserve space on the right for the legend and remove excess borders
+    try:
+        # let tight_layout compute internal spacing then reserve a wider right
+        # margin so the legend (at x=1.25 in axes coords) remains inside the
+        # final figure. This reduces large empty borders while ensuring the
+        # legend is visible.
+        plt.tight_layout()
+        plt.subplots_adjust(left=0.05, right=0.72, top=0.95, bottom=0.08)
+    except Exception:
+        try:
+            plt.tight_layout()
+        except Exception:
+            pass
+    # Save with high resolution and trim extra whitespace
+    try:
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+    except Exception:
+        try:
+            plt.savefig(filename, dpi=150)
+        except Exception:
+            pass
     plt.close()
     return True
 
@@ -415,7 +439,9 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
     scale_factor = max(1.0, float(makespan) / 60.0)
 
     fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
-    fig_h = max(4, float(n_machines) * 0.6)
+    # keep a consistent aspect ratio (approx 2:1 width:height) while ensuring
+    # a reasonable minimum height for readability
+    fig_h = max(6, fig_w / 2.0)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     # bar height and font scale with number of rows to remain readable
@@ -497,11 +523,19 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
         labels.append(lab)
     if handles:
-        plt.subplots_adjust(right=0.78)
-        legend = ax.legend(handles, labels, title='Operation Type → Color', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10)
+        # reserve a larger right margin and place legend further to the right
+        # but still inside the figure. Use centered-left anchor so the legend
+        # appears vertically centered alongside the plot.
+        legend = ax.legend(handles, labels, title='Operation Type → Color', bbox_to_anchor=(1.25, 0.5), loc='center left', fontsize=10)
         ax.add_artist(legend)
-
-    plt.tight_layout()
+        # let tight_layout compute internals then explicitly reserve right margin
+        try:
+            plt.tight_layout()
+            plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
+        except Exception:
+            pass
+    else:
+        plt.tight_layout()
 
     # write debug summary before attempting save
     try:
@@ -537,10 +571,17 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
     # --- Machine-Specific Gantt Chart ---
     try:
         n_bars = max(1, len(machine_list))
-        # autosize using makespan and number of bars
-        fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
-        fig_h = max(3, float(n_bars) * 0.45)
+        # autosize using makespan and number of bars; ensure a generous minimum
+        fig_w = max(22, min(60, float(makespan) / 3.0 + 6.0))
+        # Maintain consistent aspect ratio across machine/job charts
+        fig_h = max(8, fig_w / 2.0)
         fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+        # ensure white background (avoid large dark margins when saving)
+        try:
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('white')
+        except Exception:
+            pass
 
         # dynamic bar height and font size (scaled to number of bars)
         bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
@@ -588,12 +629,18 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
             labels.append(lab)
         if handles:
-            # reserve space on the right and place legend outside
-            plt.tight_layout(rect=[0, 0, 0.82, 1])
-            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9, title_fontsize=9)
+            # place legend slightly further right and center it vertically
+            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.25, 0.5), loc='center left', frameon=True, fontsize=10, title_fontsize=10)
             ax.add_artist(legend)
+            # ensure tight layout then reserve right margin so legend stays inside
+            try:
+                plt.tight_layout()
+                plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
+            except Exception:
+                pass
         else:
             plt.tight_layout()
+            plt.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.1)
 
         # adaptive x ticks and restore original time values in labels
         try:
@@ -606,12 +653,12 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
 
         # Save machine-specific both as dedicated file and as legacy filename for backward compatibility
         try:
-            plt.savefig(machine_path, dpi=150)
+            plt.savefig(machine_path, dpi=300, bbox_inches='tight')
             save_results['gantt_machine_specific'] = True
         except Exception:
             logger.exception('Failed to save machine-specific gantt', exc_info=True)
         try:
-            plt.savefig(filename, dpi=150)
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
             save_results['gantt_last_evolution'] = True
         except Exception:
             logger.exception('Failed to save gantt_last_evolution image', exc_info=True)
@@ -627,10 +674,16 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         job_list = sorted(list({r['job'] for r in records}))
         job_to_y = {j: idx for idx, j in enumerate(job_list)}
         n_bars = max(1, len(job_list))
-        # autosize using makespan and number of jobs
-        fig_w = max(12, min(40, float(makespan) / 3.0 + 6.0))
-        fig_h = max(3, float(n_bars) * 0.45)
+        # autosize using makespan and number of jobs; ensure a generous minimum
+        fig_w = max(22, min(60, float(makespan) / 3.0 + 6.0))
+        # Maintain consistent aspect ratio across machine/job charts
+        fig_h = max(8, fig_w / 2.0)
         fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+        try:
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('white')
+        except Exception:
+            pass
 
         bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
         font_size = int(max(8, min(14, 10 * bar_height)))
@@ -676,11 +729,17 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             handles.append(Patch(facecolor=op_color_map.get(op, 'gray'), edgecolor='black', label=lab))
             labels.append(lab)
         if handles:
-            plt.tight_layout(rect=[0, 0, 0.82, 1])
-            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9, title_fontsize=9)
+            # place legend slightly further right and center it vertically
+            legend = ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.25, 0.5), loc='center left', frameon=True, fontsize=10, title_fontsize=10)
             ax.add_artist(legend)
+            try:
+                plt.tight_layout()
+                plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
+            except Exception:
+                pass
         else:
             plt.tight_layout()
+            plt.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.1)
 
         try:
             step = max(1, int(max(1, round(max_end / 10))))
@@ -691,7 +750,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             pass
 
         try:
-            plt.savefig(job_path, dpi=150)
+            plt.savefig(job_path, dpi=300, bbox_inches='tight')
             save_results['gantt_job_specific'] = True
         except Exception:
             logger.exception('Failed to save job-specific gantt', exc_info=True)

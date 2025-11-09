@@ -1,0 +1,9 @@
+{
+  "episode_limit": 600,
+  "initial_jobs_created": 4,
+  "initial_jobs_requested": 4,
+  "job_max_ops": 4,
+  "job_min_ops": 2,
+  "n_agents_capacity": 10,
+  "seed": 123
+}

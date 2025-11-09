@@ -17,7 +17,7 @@
         "O2": 0.7410785091197466
       },
       "avg_epoch_reward": -144.12114218618385,
-      "timestamp": "2025-11-06T23:24:16.444790",
+      "timestamp": "2025-11-07T00:43:52.389320",
       "avg_makespan": 63.05,
       "avg_wait_time": 24.172622261056674,
       "average_machine_utilization": 0.2967644726407614,
@@ -40,7 +40,7 @@
         "O2": 0.6911181601903256
       },
       "avg_epoch_reward": -148.23286129981574,
-      "timestamp": "2025-11-06T23:24:19.498301",
+      "timestamp": "2025-11-07T00:43:57.673947",
       "avg_makespan": 63.05,
       "avg_wait_time": 27.713437395148397,
       "average_machine_utilization": 0.29787470261697074,
@@ -63,7 +63,7 @@
         "O2": 0.7577319587628869
       },
       "avg_epoch_reward": -176.27071894742318,
-      "timestamp": "2025-11-06T23:24:24.039996",
+      "timestamp": "2025-11-07T00:44:07.017293",
       "avg_makespan": 63.05,
       "avg_wait_time": 26.901580757141442,
       "average_machine_utilization": 0.30675654242664563,
@@ -86,14 +86,14 @@
         "O2": 0.6411578112609044
       },
       "avg_epoch_reward": -178.0089555388754,
-      "timestamp": "2025-11-06T23:24:32.493196",
+      "timestamp": "2025-11-07T00:44:17.243404",
       "avg_makespan": 63.05,
       "avg_wait_time": 29.818832550039513,
       "average_machine_utilization": 0.3038699444885013,
       "average_operator_utilization": 0.3798374306106267
     },
     {
-      "avg_machine_utilization": 0.3115305313243458,
+      "avg_machine_utilization": 0.31153053132434577,
       "avg_operator_utilization": 0.38941316415543237,
       "average_makespan": 63.05,
       "average_wait_time": 29.559815428545782,
@@ -109,18 +109,18 @@
         "O2": 0.7799365582870741
       },
       "avg_epoch_reward": -166.14446204135368,
-      "timestamp": "2025-11-06T23:24:40.439560",
+      "timestamp": "2025-11-07T00:44:25.117206",
       "avg_makespan": 63.05,
       "avg_wait_time": 29.559815428545782,
-      "average_machine_utilization": 0.3115305313243458,
+      "average_machine_utilization": 0.31153053132434577,
       "average_operator_utilization": 0.38941316415543237
     }
   ],
-  "avg_machine_utilization": 0.3115305313243458,
+  "avg_machine_utilization": 0.31153053132434577,
   "avg_operator_utilization": 0.38941316415543237,
   "avg_epoch_reward": -166.14446204135368,
-  "last_10_avg_reward": -168.784,
-  "last_10_avg_loss": 15.30310287475586,
-  "last_10_avg_td": 3.5468230724334715,
+  "last_10_avg_reward": -168.78399999999996,
+  "last_10_avg_loss": 10.917992687225341,
+  "last_10_avg_td": 3.0417359590530397,
   "avg_makespan": 63.05
 }
