@@ -2,8 +2,7 @@
 # MARL/policy/qmix.py
 # Step 8A.7.6 – MASA-QMIX Replay-Aware Learning + Safe AutoSave
 # -------------------------------------------------------------
-# - Compatible with MASAEnv (11D obs, 64D state)
-# - Reward normalization for stable updates
+# - Compatible with MASAEnv (6D obs, 64D state)
 # - Double-Q with target sync
 # - Guaranteed checkpoint save to ./MARL/model/qmix/masa_schedule/
 # ------------------------------------------------------------
@@ -73,7 +72,7 @@ class QMIX:
         o = to_t(batch["o"])
         o_next = to_t(batch["o_next"])
         u = to_t(batch["u"], dtype=torch.long)
-        r = to_t(batch["r"]) / 10.0  # normalize reward
+        r = to_t(batch["r"])
         terminated = to_t(batch["terminated"])
         filled = to_t(batch["filled"])
         s = to_t(batch["state"])

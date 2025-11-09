@@ -8,7 +8,7 @@ from utils.gantt import format_gantt_records
 import numpy as np
 
 # instantiate with the no-arrival config
-env = MASAEnv(num_jobs=4, num_operators=2, num_wcs=3, seed=123, obs_dim_agent=11, config_path='configs/env_no_arrival.yaml')
+env = MASAEnv(num_jobs=4, num_operators=2, num_wcs=3, seed=123, obs_dim_agent=6, config_path='configs/env_no_arrival.yaml')
 
 print('\n=== MACHINE REGISTRY ===')
 mlist = getattr(env.workcenters_meta, 'machine_list', [])
@@ -38,7 +38,8 @@ for item in batch:
     jid = item.get('job_id')
     print('\n--- Decision for Job', jid, '---')
     obs = item.get('obs')
-    print('obs (11-dim):', [float(round(x,6)) for x in obs])
+    # print observation with dynamic length (no hard-coded '11')
+    print(f'obs (len={len(obs)}):', [float(round(x,6)) for x in obs])
     ar = item.get('avail_row')
     print('avail_row:', [int(x) for x in ar])
     print('allowed_machine_indices:', item.get('allowed_machine_indices'))

@@ -1,0 +1,32 @@
+[
+  [
+    "job",
+    0,
+    "remaining_time"
+  ],
+  [
+    "job",
+    0,
+    "progress_ratio"
+  ],
+  [
+    "job",
+    1,
+    "remaining_time"
+  ],
+  [
+    "job",
+    1,
+    "progress_ratio"
+  ],
+  [
+    "job",
+    2,
+    "remaining_time"
+  ],
+  [
+    "job",
+    2,
+    "progress_ratio"
+  ]
+]

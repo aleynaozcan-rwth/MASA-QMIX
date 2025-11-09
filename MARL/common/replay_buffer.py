@@ -379,7 +379,7 @@ def _infer_agents_obs(episodes: List[Episode]) -> Tuple[int, int]:
     environment emits variable-sized decision batches across timesteps.
     """
     max_agents = 1
-    obs_dim = 11
+    obs_dim = 6
     for ep in episodes:
         for tr in ep:
             # observations

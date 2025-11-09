@@ -792,7 +792,7 @@ class Runner:
     """
     Step 8A.6.6 Runner – Replay-based QMIX + KPI Logging + Learning Stability
     -------------------------------------------------------------------------
-    - 11D observations (progress_ratio)
+    - 6D observations
     - Extended KPI metrics (avg wait, utilization, makespan)
     - Moving-average loss/TD tracking
     """
@@ -1190,7 +1190,8 @@ class Runner:
             except Exception:
                 before_wait = 0.0
             try:
-                before_completed = int(getattr(self.env, 'completed_jobs', 0))
+                # Compute finished job count on-demand (canonical)
+                before_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
             except Exception:
                 before_completed = 0
 
@@ -1241,9 +1242,11 @@ class Runner:
                 if hasattr(self.env, "wait_time_dict"):
                     self.wait_time_records.append(dict(self.env.wait_time_dict))
                 else:
-                    # fallback: try env.total_wait_time / completed_jobs
+                    # fallback: try env.total_wait_time / computed completed-count
                     try:
-                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, "completed_jobs", 1))))})
+                        # Replace legacy counter usage with computed count
+                        _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
+                        self.wait_time_records.append({0: (self.env.total_wait_time / _completed_count)})
                     except Exception as e:
                         logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                         self.wait_time_records.append({0: ep_r / 20.0})
@@ -1490,7 +1493,9 @@ class Runner:
                                                 'td': None,
                                             }
                                             try:
-                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))
+                                                # Compute average wait using on-demand completed count
+                                                _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
+                                                metrics['avg_wait'] = float(self.env.total_wait_time) / _completed_count
                                             except Exception as e:
                                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
                                                 metrics['avg_wait'] = None
@@ -1530,9 +1535,55 @@ class Runner:
             # KPI logging (opt-in)
             try:
                 if getattr(self, 'allow_history_writes', False):
-                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)
-                    util_m = self.env._util_machines()
-                    util_o = self.env._util_ops()
+                    # compute avg_wait using computed completed count to avoid legacy counter
+                    _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
+                    avg_wait = self.env.total_wait_time / _completed_count
+                    # Compute instantaneous machine utilization fraction (best-effort)
+                    try:
+                        mres = list(getattr(self.env, 'machine_resources', []) or [])
+                        if mres:
+                            occupied = 0
+                            for r in mres:
+                                try:
+                                    users = getattr(r, 'users', None)
+                                    if users is not None:
+                                        if len(users) > 0:
+                                            occupied += 1
+                                        continue
+                                    # fallback: treat a positive 'count' attribute as occupied
+                                    if getattr(r, 'count', None) is not None:
+                                        if int(getattr(r, 'count', 0)) > 0:
+                                            occupied += 1
+                                except Exception:
+                                    continue
+                            util_m = float(occupied) / max(1.0, float(len(mres)))
+                        else:
+                            util_m = 0.0
+                    except Exception:
+                        util_m = 0.0
+
+                    # Compute instantaneous operator/utilization fraction (best-effort)
+                    try:
+                        og = list(getattr(self.env, 'operator_groups', []) or [])
+                        if og:
+                            occ_o = 0
+                            for g in og:
+                                try:
+                                    users = getattr(g, 'users', None)
+                                    if users is not None:
+                                        if len(users) > 0:
+                                            occ_o += 1
+                                        continue
+                                    if getattr(g, 'count', None) is not None:
+                                        if int(getattr(g, 'count', 0)) > 0:
+                                            occ_o += 1
+                                except Exception:
+                                    continue
+                            util_o = float(occ_o) / max(1.0, float(len(og)))
+                        else:
+                            util_o = 0.0
+                    except Exception:
+                        util_o = 0.0
                     makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
                     makespan = getattr(self.env, "t", makespan)
                     with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
@@ -1546,7 +1597,8 @@ class Runner:
                     try:
                         # compute per-epoch deltas for wait/completed
                         after_wait = float(getattr(self.env, 'total_wait_time', 0.0))
-                        after_completed = int(getattr(self.env, 'completed_jobs', 0))
+                        # compute after_completed on-demand
+                        after_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
                         delta_wait = max(0.0, after_wait - float(before_wait))
                         delta_completed = max(0, after_completed - int(before_completed))
                     except Exception:
@@ -1568,10 +1620,22 @@ class Runner:
                         n_o = int(getattr(self.env, 'num_ops', 1) or 1)
 
                     # Build a single-item env-like dict describing this epoch
+                    # Build an epoch summary. Do NOT rely on legacy counters;
+                    # instead include a serializable `jobs` list so downstream canonical
+                    # metrics consumers can derive the completed count deterministically.
                     epoch_item = {
                         'gantt': list(epoch_gantt),
                         'total_wait_time': float(delta_wait),
-                        'completed_jobs': int(delta_completed),
+                        # Provide a lightweight, serializable jobs list with minimal
+                        # attributes needed by metrics (id, finished). Downstream
+                        # collectors will compute completed counts from this list.
+                        'jobs': [
+                            {
+                                'id': int(getattr(j, 'id', -1)),
+                                'finished': bool(getattr(j, 'finished', False))
+                            }
+                            for j in getattr(self.env, 'jobs', [])
+                        ],
                         'n_machines': int(n_m),
                         'n_ops': int(n_o),
                         # Ensure avg_epoch_reward is always present (fallback to 0.0)
@@ -1877,8 +1941,49 @@ class Runner:
                 # fallback to env util functions if kpi not available
                 if not util_m_vals or not util_o_vals:
                     try:
-                        util_m = float(self.env._util_machines())
-                        util_o = float(self.env._util_ops())
+                        # Best-effort fallback: compute instantaneous utilizations
+                        try:
+                            mres = list(getattr(self.env, 'machine_resources', []) or [])
+                            if mres:
+                                occupied = 0
+                                for r in mres:
+                                    try:
+                                        users = getattr(r, 'users', None)
+                                        if users is not None:
+                                            if len(users) > 0:
+                                                occupied += 1
+                                            continue
+                                        if getattr(r, 'count', None) is not None:
+                                            if int(getattr(r, 'count', 0)) > 0:
+                                                occupied += 1
+                                    except Exception:
+                                        continue
+                                util_m = float(occupied) / max(1.0, float(len(mres)))
+                            else:
+                                util_m = 0.0
+                        except Exception:
+                            util_m = 0.0
+                        try:
+                            og = list(getattr(self.env, 'operator_groups', []) or [])
+                            if og:
+                                occ_o = 0
+                                for g in og:
+                                    try:
+                                        users = getattr(g, 'users', None)
+                                        if users is not None:
+                                            if len(users) > 0:
+                                                occ_o += 1
+                                            continue
+                                        if getattr(g, 'count', None) is not None:
+                                            if int(getattr(g, 'count', 0)) > 0:
+                                                occ_o += 1
+                                    except Exception:
+                                        continue
+                                util_o = float(occ_o) / max(1.0, float(len(og)))
+                            else:
+                                util_o = 0.0
+                        except Exception:
+                            util_o = 0.0
                         util_m_vals.append(util_m); util_o_vals.append(util_o)
                     except Exception as e:
                         logging.getLogger(__name__).exception("Exception caught", exc_info=True)

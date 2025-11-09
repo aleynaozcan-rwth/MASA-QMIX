@@ -311,9 +311,9 @@ class MASAEnv:
             elif args is not None and hasattr(args, 'obs_shape'):
                 self.obs_dim_agent = int(getattr(args, 'obs_shape'))
             else:
-                self.obs_dim_agent = 11
+                self.obs_dim_agent = 6
         except Exception:
-            self.obs_dim_agent = 11
+            self.obs_dim_agent = 6
 
         try:
             if 'state_dim' in kwargs:
@@ -324,6 +324,91 @@ class MASAEnv:
                 self.state_dim = 64
         except Exception:
             self.state_dim = 64
+
+        # ---------------- Normalization reference attributes ----------------
+        # These attributes are used by observation builders to produce
+        # dynamically-normalized features (replace hard-coded divisors).
+        # Prefer explicit values provided via `args` or kwargs; otherwise
+        # infer from metadata; finally fall back to conservative constants.
+        # n_operation_types: number of distinct operation types (categorical count)
+        try:
+            self.n_operation_types = int(getattr(args, 'n_operation_types', None) or kwargs.get('n_operation_types', None))
+        except Exception:
+            self.n_operation_types = None
+        if not self.n_operation_types:
+            # Attempt simple inference from workcenters_meta if available
+            try:
+                registry = getattr(self, 'workcenters_meta', None) or {}
+                caps = []
+                for mname, md in (getattr(registry, 'machine_registry', {}) or {}).items():
+                    try:
+                        caps.extend(list(md.get('capabilities', []) or []))
+                    except Exception:
+                        continue
+                self.n_operation_types = int(max(caps) + 1) if caps else None
+            except Exception:
+                self.n_operation_types = None
+        # fallback
+        if not self.n_operation_types or int(self.n_operation_types) <= 0:
+            self.n_operation_types = getattr(args, 'n_operation_types', None) or 10
+
+        # max_operations_per_job: used to normalize total / remaining ops
+        try:
+            self.max_operations_per_job = int(getattr(args, 'job_max_ops', None) or kwargs.get('max_operations_per_job', None))
+        except Exception:
+            self.max_operations_per_job = None
+        if not self.max_operations_per_job:
+            try:
+                gen = getattr(self, 'job_generator', None)
+                if gen is not None and hasattr(gen, 'default_max_ops'):
+                    self.max_operations_per_job = int(getattr(gen, 'default_max_ops'))
+            except Exception:
+                self.max_operations_per_job = None
+        if not self.max_operations_per_job or int(self.max_operations_per_job) <= 0:
+            self.max_operations_per_job = 10
+
+        # max_wait_time: used to normalize job.wait_time
+        try:
+            self.max_wait_time = float(getattr(args, 'max_wait_time', None) or kwargs.get('max_wait_time', None))
+        except Exception:
+            self.max_wait_time = None
+        if not self.max_wait_time or self.max_wait_time <= 0.0:
+            self.max_wait_time = getattr(args, 'max_wait_time', 50.0)
+
+        # mean_wait_reference: optional smoothing/reference (may be None)
+        try:
+            self.mean_wait_reference = float(getattr(args, 'mean_wait_reference', None) or kwargs.get('mean_wait_reference', None))
+        except Exception:
+            self.mean_wait_reference = None
+
+        # avg_wait_scale: multiplier used to scale avg_wait denominator when building state
+        try:
+            self.avg_wait_scale = float(getattr(args, 'avg_wait_scale', None) or kwargs.get('avg_wait_scale', None))
+        except Exception:
+            self.avg_wait_scale = None
+        if not self.avg_wait_scale or float(self.avg_wait_scale) <= 0.0:
+            self.avg_wait_scale = getattr(args, 'avg_wait_scale', 10.0)
+
+        # max_jobs (job capacity): canonical link to args.n_agents (active capacity)
+        # Enforce strict derivation: must be provided via args.n_agents and > 0.
+        if args is not None and hasattr(args, 'n_agents') and int(getattr(args, 'n_agents')) > 0:
+            self.max_jobs = int(getattr(args, 'n_agents'))
+        else:
+            raise ValueError("MASAEnv requires args.n_agents > 0 to derive max_jobs")
+        # --------------------------------------------------------------------
+
+        # Strict validation of canonical normalization attributes.
+        # These must be present and strictly positive when using the
+        # observation builders that rely on them. Fail fast to surface
+        # configuration errors (no fallbacks here by design).
+        if getattr(self, 'max_jobs', None) is None or int(self.max_jobs) <= 0:
+            raise ValueError("Invalid environment configuration: max_jobs must be > 0")
+        if getattr(self, 'max_operations_per_job', None) is None or int(self.max_operations_per_job) <= 0:
+            raise ValueError("Invalid environment configuration: max_operations_per_job must be > 0")
+        if getattr(self, 'n_operation_types', None) is None or int(self.n_operation_types) <= 0:
+            raise ValueError("Invalid environment configuration: n_operation_types must be > 0")
+        if getattr(self, 'max_wait_time', None) is None or float(self.max_wait_time) <= 0.0:
+            raise ValueError("Invalid environment configuration: max_wait_time must be > 0")
 
         # Increase default episode length so initial jobs have time to start
         # and progress. Callers may still override via args or kwargs.
@@ -377,10 +462,9 @@ class MASAEnv:
                 self.interarrival_time = 4.0
 
         # maximum number of jobs to generate via the dynamic job generator
-        try:
-            self.max_jobs = int(_resolve(('max_jobs', 'num_generate_jobs'), int, default=int(getattr(self, 'initial_jobs', 0) or 0)))
-        except Exception:
-            self.max_jobs = int(kwargs.get('max_jobs', getattr(self, 'initial_jobs', 0) or 0))
+        # NOTE: max_jobs is canonicalized to args.n_agents above. Do not
+        # overwrite it here; dynamic generation bounds (num_generate_jobs)
+        # should be provided via separate config if required.
 
         # options controlling eager behaviors
         self.strict_mode = bool(strict_mode)
@@ -683,10 +767,14 @@ class MASAEnv:
 
         # bookkeeping and reward caches
         self.t = 0.0
-        self.completed_jobs = 0
+        # legacy `completed_jobs` counter removed in favour of computed metrics
+        # across `self.jobs`. Tests and consumers that relied on this attribute
+        # must be adapted to compute finished counts from env.jobs.
+        # TODO: requires test adaptation
         self.total_wait_time = 0.0
         self._completed_now_cache = 0
-        self._recent_rewards = deque(maxlen=20)
+        # removed internal recent rewards deque; consumers should use canonical
+        # metrics APIs or event streams. TODO: requires test adaptation
         self.done = False
 
         # decision batching
@@ -1013,17 +1101,12 @@ class MASAEnv:
 
         # reset bookkeeping and job state
         self.t = 0.0
-        self.completed_jobs = 0
+        # legacy `completed_jobs` removed; compute finished counts from jobs when needed
+        # TODO: requires test adaptation
         self.total_wait_time = 0.0
         self._completed_now_cache = 0
-        try:
-            self._recent_rewards.clear()
-        except Exception:
-            try:
-                from collections import deque
-                self._recent_rewards = deque(maxlen=20)
-            except Exception:
-                self._recent_rewards = []
+        # removed internal recent rewards storage; consumers should query metrics APIs
+        # TODO: requires test adaptation
         self.done = False
         self.pending_decisions = []
         self.decisions_ready = simpy.Event(self.env)
@@ -1251,18 +1334,21 @@ class MASAEnv:
         self._completed_now_cache = 0
         sim_t = float(self.env.now) if hasattr(self, 'env') else 1.0
         avg_wait = float(self.total_wait_time) / max(1.0, sim_t)
-        wip = float(self._wip())
+        # Compute work-in-progress (WIP) from active agents list instead of
+        # legacy `_wip()` helper.
+        try:
+            wip = float(sum(1 for j in getattr(self, 'active_agents', []) if not getattr(j, 'finished', False)))
+        except Exception:
+            wip = 0.0
         try:
             idle_ops = sum(1 for g in getattr(self, 'operator_groups', []) if self._resource_free(g))
         except Exception as e:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             idle_ops = 0
         reward = (self.alpha * completed) - (self.beta * avg_wait) - (self.gamma * wip) - (self.delta * float(idle_ops))
-        try:
-            self._recent_rewards.append(reward)
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # NOTE: removed appending to internal `_recent_rewards` deque. Consumers
+        # should obtain recent rewards via canonical metrics APIs or event logs.
+        # TODO: requires test adaptation
         return float(reward)
 
     # ---------------- SimPy job process (simple, robust) ----------------
@@ -1274,7 +1360,9 @@ class MASAEnv:
                 now_t = float(getattr(self.env, 'now', 0.0))
                 try:
                     if job.mark_completed(now_t):
-                        self.completed_jobs += 1
+                        # legacy `completed_jobs` counter removed; compute finished
+                        # count from self.jobs when needed. Keep the per-pop
+                        # completed cache used by reward shaping.
                         self._completed_now_cache += 1
                         try:
                             if job in self.active_jobs:
@@ -1299,8 +1387,10 @@ class MASAEnv:
                             os.makedirs(hist_dir, exist_ok=True)
                             timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                             try:
+                                # compute finished count on-demand
+                                completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
                                 with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
                             except Exception:
                                 pass
                         except Exception:
@@ -1327,8 +1417,9 @@ class MASAEnv:
                             os.makedirs(hist_dir, exist_ok=True)
                             timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                             try:
+                                completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
                                 with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(now_t):.2f}] Job {getattr(job, 'id', None)} completed -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
                             except Exception:
                                 pass
                         except Exception:
@@ -2013,7 +2104,8 @@ class MASAEnv:
                 now_t = float(getattr(self.env, 'now', 0.0))
                 try:
                     if job.mark_completed(now_t):
-                        self.completed_jobs += 1
+                        # legacy `completed_jobs` counter removed; compute finished
+                        # counts from self.jobs when needed. Keep the per-pop cache.
                         self._completed_now_cache += 1
                         # Capacity management: when a job finishes, free an active slot
                         try:
@@ -2066,8 +2158,9 @@ class MASAEnv:
                                     os.makedirs(hist_dir, exist_ok=True)
                                     timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                                     try:
+                                        completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
                                         with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                            tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(next_job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                            tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(next_job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
                                     except Exception:
                                         pass
                                 except Exception:
@@ -2281,9 +2374,6 @@ class MASAEnv:
         return row
 
     # ---------------- Helpers -----------------
-    def _wip(self):
-        return sum(1 for j in self.jobs if not j.finished)
-
     def _resource_free(self, res):
         try:
             return len(res.users) < res.capacity
@@ -2291,44 +2381,26 @@ class MASAEnv:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             return True
 
-    # ---------------- Utilization helpers used by utils/env_obs.py -------
-    def _util_machines(self) -> float:
-        """Return a [0,1] utilization estimate for machines."""
-        try:
-            mres = getattr(self, 'machine_resources', []) or []
-            if not mres:
-                return 0.0
-            busy = 0
-            for r in mres:
-                try:
-                    if len(getattr(r, 'users', [])) > 0:
-                        busy += 1
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    continue
-            return float(busy) / max(1.0, float(len(mres)))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            return 0.0
+    def active_jobs_count(self) -> int:
+        """Return canonical number of currently active jobs (public helper).
 
-    def _util_ops(self) -> float:
-        """Return a [0,1] utilization estimate for operator groups."""
+        Prefer an explicit `active_jobs` list if present; otherwise fall back
+        to computing from active_jobs or jobs lists.
+        """
         try:
-            ores = getattr(self, 'operator_groups', []) or []
-            if not ores:
-                return 0.0
-            busy = 0
-            for r in ores:
-                try:
-                    if len(getattr(r, 'users', [])) > 0:
-                        busy += 1
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    continue
-            return float(busy) / max(1.0, float(len(ores)))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            return 0.0
+            if getattr(self, 'active_jobs', None) is not None:
+                return int(len(getattr(self, 'active_jobs') or []))
+        except Exception:
+            pass
+        try:
+            # Fallback: compute work-in-progress from jobs list
+            return int(sum(1 for j in getattr(self, 'jobs', []) if not getattr(j, 'finished', False)))
+        except Exception:
+            return 0
+    # Note: legacy helpers `_wip`, `_util_machines`, and `_util_ops` have
+    # been removed. Consumers should compute utilization/wip directly from
+    # `self.machine_resources`, `self.operator_groups`, or `self.jobs`, or
+    # use canonical metrics APIs instead.
 
     def _build_state_vector(self):
         """Return the global state vector; used by tests and env_obs helper.
@@ -2464,9 +2536,10 @@ class MASAEnv:
                             os.makedirs(hist_dir, exist_ok=True)
                             timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                             try:
+                                completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
                                 with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                    tf.write(f"[t={float(getattr(job, 'arrival_time', 0.0)):.2f}] New job {getattr(job, 'id', None)} arrived with {len(getattr(job, 'operations', []) or [])} ops -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
-                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                    tf.write(f"[t={float(getattr(job, 'arrival_time', 0.0)):.2f}] New job {getattr(job, 'id', None)} arrived with {len(getattr(job, 'operations', []) or [])} ops -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
+                                    tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} became active agent → Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
                             except Exception:
                                 pass
                         except Exception:
@@ -2510,8 +2583,9 @@ class MASAEnv:
                                 os.makedirs(hist_dir, exist_ok=True)
                                 timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                                 try:
+                                    completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
                                     with open(timeline_path, 'a', encoding='utf-8') as tf:
-                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} queued (pending) -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{int(getattr(self, 'completed_jobs', 0))}\n")
+                                        tf.write(f"[t={float(getattr(self.env, 'now', 0.0)):.2f}] Job {getattr(job, 'id', None)} queued (pending) -> Active:{len(getattr(self, 'active_agents', []) or [])} | Pending:{len(getattr(self, 'pending_jobs', []) or [])} | Completed:{completed_count}\n")
                                 except Exception:
                                     pass
                             except Exception:
@@ -2799,7 +2873,11 @@ class MASAEnv:
             # average wait per completed job
             try:
                 total_wait = float(getattr(self, 'total_wait_time', 0.0))
-                completed = int(getattr(self, 'completed_jobs', 0))
+                # compute completed jobs on-demand rather than using legacy counter
+                try:
+                    completed = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
+                except Exception:
+                    completed = 0
                 avg_wait_time = float(total_wait) / max(1.0, float(completed))
             except Exception:
                 avg_wait_time = float(getattr(self, 'total_wait_time', 0.0))

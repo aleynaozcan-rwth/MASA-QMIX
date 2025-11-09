@@ -1,0 +1,46 @@
+--- tmp_smoke_test.py.bak	2025-11-09 18:19:00.065157596 +0100
++++ tmp_smoke_test.py	2025-11-09 18:20:03.729162079 +0100
+@@ -1,24 +1,24 @@
+-from environment import MASAEnv
+-import os
++from environment import MASAEnv 
++import os 
+ 
+ # simple smoke test: capacity=2, 5 jobs
+-env = MASAEnv(args=None)
+-env.max_active_agents = 2
++env =MASAEnv (args =None )
++env .max_active_agents =2 
+ # single-op jobs of duration 1.0 on machine 0
+-ops = [(0, [0], {0: 1.0})]
+-for i in range(5):
+-    env.add_job(ops, start_immediately=True)
++ops =[(0 ,[0 ],{0 :1.0 })]
++for i in range (5 ):
++    env .add_job (ops ,start_immediately =True )
+ 
+-# run simulation until all jobs finish or time limit
+-env.env.run(until=50)
+-# compute completed count on-demand (legacy env.completed_jobs removed)
+-completed = len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])
+-print("Done", "Completed:", completed, "Active:", len(env.active_agents), "Pending:", len(env.pending_jobs))
++    # run simulation until all jobs finish or time limit
++env .env .run (until =50 )
++# compute completed count on-demand (legacy env.completed-count removed)
++completed =len ([j for j in getattr (env ,'jobs',[])if getattr (j ,'finished',False )])
++print ("Done","Completed:",completed ,"Active:",len (env .active_agents ),"Pending:",len (env .pending_jobs ))
+ 
+-path = os.path.join('my_data_and_graph', 'historydata', 'scheduling_timeline.txt')
+-try:
+-    with open(path, 'r', encoding='utf-8') as f:
+-        print('=== TIMELINE ===')
+-        print(f.read())
+-except Exception as e:
+-    print('No timeline file or failed to read:', e)
++path =os .path .join ('my_data_and_graph','historydata','scheduling_timeline.txt')
++try :
++    with open (path ,'r',encoding ='utf-8')as f :
++        print ('=== TIMELINE ===')
++        print (f .read ())
++except Exception as e :
++    print ('No timeline file or failed to read:',e )

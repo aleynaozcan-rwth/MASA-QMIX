@@ -2,7 +2,7 @@
 # arguments.py – MASA-QMIX Step 8A.7 (Clean Fixed)
 # -------------------------------------------------
 # True learning configuration for stable QMIX training
-# Compatible with: MASAEnv (11D obs, 64D state, 18 WorkCenters, 200-step episodes)
+# Compatible with: MASAEnv (6D obs, 64D state, 18 WorkCenters, 200-step episodes)
 # -------------------------------------------------
 
 import argparse
@@ -109,7 +109,8 @@ def get_mutable_args():
     parser.add_argument('--n_actions', type=int, default=5,
                         help='(fallback) number of actions/workcenters when machine_list is not provided')
     parser.add_argument('--state_shape', type=int, default=64)
-    parser.add_argument('--obs_shape', type=int, default=11)
+    parser.add_argument('--obs_shape', type=int, default=6)
+    
 
     # ============================================================
     # === Replay buffer & training settings ======================

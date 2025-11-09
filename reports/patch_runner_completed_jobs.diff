@@ -1,0 +1,57 @@
+diff --git a/MARL/runner.py b/MARL/runner.py
+index ab83857..f169ba2 100644
+--- a/MARL/runner.py
++++ b/MARL/runner.py
+@@ -1190,7 +1190,8 @@ class Runner:
+             except Exception:
+                 before_wait = 0.0
+             try:
+-                before_completed = int(getattr(self.env, 'completed_jobs', 0))
++                 # Compute finished job count on-demand; legacy env.completed_jobs removed
++                 before_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
+             except Exception:
+                 before_completed = 0
+ 
+@@ -1243,7 +1244,9 @@ class Runner:
+                 else:
+                     # fallback: try env.total_wait_time / completed_jobs
+                     try:
+-                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, "completed_jobs", 1))))})
++                        # Replace legacy completed_jobs usage with computed count
++                        _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
++                        self.wait_time_records.append({0: (self.env.total_wait_time / _completed_count)})
+                     except Exception as e:
+                         logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                         self.wait_time_records.append({0: ep_r / 20.0})
+@@ -1490,7 +1493,9 @@ class Runner:
+                                                 'td': None,
+                                             }
+                                             try:
+-                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))
++                                                # Compute average wait using on-demand completed count
++                                                _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
++                                                metrics['avg_wait'] = float(self.env.total_wait_time) / _completed_count
+                                             except Exception as e:
+                                                 logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                 metrics['avg_wait'] = None
+@@ -1530,7 +1535,9 @@ class Runner:
+             # KPI logging (opt-in)
+             try:
+                 if getattr(self, 'allow_history_writes', False):
+-                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)
++                    # compute avg_wait using computed completed count to avoid legacy counter
++                    _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
++                    avg_wait = self.env.total_wait_time / _completed_count
+                     util_m = self.env._util_machines()
+                     util_o = self.env._util_ops()
+                     makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
+@@ -1546,7 +1553,8 @@ class Runner:
+                     try:
+                         # compute per-epoch deltas for wait/completed
+                         after_wait = float(getattr(self.env, 'total_wait_time', 0.0))
+-                        after_completed = int(getattr(self.env, 'completed_jobs', 0))
++                        # compute after_completed on-demand
++                        after_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
+                         delta_wait = max(0.0, after_wait - float(before_wait))
+                         delta_completed = max(0, after_completed - int(before_completed))
+                     except Exception:

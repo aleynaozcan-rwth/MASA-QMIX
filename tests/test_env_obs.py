@@ -11,7 +11,7 @@ def test_build_agent_obs_and_state_shape():
     aobs = env._build_agent_obs(job)
     aobs2 = env_obs.build_agent_obs(env, job)
     assert isinstance(aobs, np.ndarray)
-    assert aobs.shape[0] == env.obs_dim_agent
+    assert aobs.shape == (6,)
     assert np.all(aobs >= 0.0) and np.all(aobs <= 1.0)
     # the delegated function should return same-shape output
     assert isinstance(aobs2, np.ndarray)

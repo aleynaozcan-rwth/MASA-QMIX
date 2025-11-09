@@ -11,5 +11,5 @@ def test_observation_and_state_shapes():
     state = env._build_state_vector()
     assert isinstance(obs, np.ndarray)
     assert isinstance(state, np.ndarray)
-    assert obs.shape == (env.obs_dim_agent,)
+    assert obs.shape == (6,)
     assert state.shape == (env.state_dim,)

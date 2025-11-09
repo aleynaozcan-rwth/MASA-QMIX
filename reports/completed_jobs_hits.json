@@ -1,0 +1,370 @@
+[
+  {
+    "file": "MARL/runner.py",
+    "line": 1193,
+    "match": "                before_completed = int(getattr(self.env, 'completed_jobs', 0))",
+    "context_before": [],
+    "context_after": [
+      "                    # fallback: try env.total_wait_time / completed_jobs",
+      "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})",
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1244,
+    "match": "                    # fallback: try env.total_wait_time / completed_jobs",
+    "context_before": [
+      "                before_completed = int(getattr(self.env, 'completed_jobs', 0))"
+    ],
+    "context_after": [
+      "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})",
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))",
+      "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)"
+    ],
+    "classification": "comment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1246,
+    "match": "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})",
+    "context_before": [
+      "                before_completed = int(getattr(self.env, 'completed_jobs', 0))",
+      "                    # fallback: try env.total_wait_time / completed_jobs"
+    ],
+    "context_after": [
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))",
+      "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)",
+      "                        after_completed = int(getattr(self.env, 'completed_jobs', 0))"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1493,
+    "match": "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))",
+    "context_before": [
+      "                before_completed = int(getattr(self.env, 'completed_jobs', 0))",
+      "                    # fallback: try env.total_wait_time / completed_jobs",
+      "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})"
+    ],
+    "context_after": [
+      "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)",
+      "                        after_completed = int(getattr(self.env, 'completed_jobs', 0))",
+      "                        'completed_jobs': int(delta_completed),"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1533,
+    "match": "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)",
+    "context_before": [
+      "                    # fallback: try env.total_wait_time / completed_jobs",
+      "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})",
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))"
+    ],
+    "context_after": [
+      "                        after_completed = int(getattr(self.env, 'completed_jobs', 0))",
+      "                        'completed_jobs': int(delta_completed),"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1549,
+    "match": "                        after_completed = int(getattr(self.env, 'completed_jobs', 0))",
+    "context_before": [
+      "                        self.wait_time_records.append({0: (self.env.total_wait_time / max(1, max(1, getattr(self.env, \"completed_jobs\", 1))))})",
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))",
+      "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)"
+    ],
+    "context_after": [
+      "                        'completed_jobs': int(delta_completed),"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "MARL/runner.py",
+    "line": 1574,
+    "match": "                        'completed_jobs': int(delta_completed),",
+    "context_before": [
+      "                                                metrics['avg_wait'] = float(self.env.total_wait_time / max(1, self.env.completed_jobs))",
+      "                    avg_wait = self.env.total_wait_time / max(1, self.env.completed_jobs)",
+      "                        after_completed = int(getattr(self.env, 'completed_jobs', 0))"
+    ],
+    "context_after": [],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "environment.py",
+    "line": 770,
+    "match": "        # legacy `completed_jobs` counter removed in favour of computed metrics",
+    "context_before": [],
+    "context_after": [
+      "        # legacy `completed_jobs` removed; compute finished counts from jobs when needed",
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "classification": "comment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 1104,
+    "match": "        # legacy `completed_jobs` removed; compute finished counts from jobs when needed",
+    "context_before": [
+      "        # legacy `completed_jobs` counter removed in favour of computed metrics"
+    ],
+    "context_after": [
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "classification": "comment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 1363,
+    "match": "                        # legacy `completed_jobs` counter removed; compute finished",
+    "context_before": [
+      "        # legacy `completed_jobs` counter removed in favour of computed metrics",
+      "        # legacy `completed_jobs` removed; compute finished counts from jobs when needed"
+    ],
+    "context_after": [
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                        # legacy `completed_jobs` counter removed; compute finished"
+    ],
+    "classification": "comment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 1404,
+    "match": "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+    "context_before": [
+      "        # legacy `completed_jobs` counter removed in favour of computed metrics",
+      "        # legacy `completed_jobs` removed; compute finished counts from jobs when needed",
+      "                        # legacy `completed_jobs` counter removed; compute finished"
+    ],
+    "context_after": [
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 1407,
+    "match": "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+    "context_before": [
+      "        # legacy `completed_jobs` removed; compute finished counts from jobs when needed",
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "context_after": [
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "classification": "print/logging",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "environment.py",
+    "line": 2107,
+    "match": "                        # legacy `completed_jobs` counter removed; compute finished",
+    "context_before": [
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "context_after": [
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "classification": "comment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 2553,
+    "match": "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+    "context_before": [
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                        # legacy `completed_jobs` counter removed; compute finished"
+    ],
+    "context_after": [
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                        tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 2556,
+    "match": "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+    "context_before": [
+      "                                tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "context_after": [
+      "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                        tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "          - average_wait_time: total_wait_time / completed_jobs (seconds)"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "environment.py",
+    "line": 2599,
+    "match": "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+    "context_before": [
+      "                        # legacy `completed_jobs` counter removed; compute finished",
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "context_after": [
+      "                                        tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "          - average_wait_time: total_wait_time / completed_jobs (seconds)"
+    ],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "environment.py",
+    "line": 2602,
+    "match": "                                        tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+    "context_before": [
+      "                                completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+    ],
+    "context_after": [
+      "          - average_wait_time: total_wait_time / completed_jobs (seconds)"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "environment.py",
+    "line": 2730,
+    "match": "          - average_wait_time: total_wait_time / completed_jobs (seconds)",
+    "context_before": [
+      "                                tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")",
+      "                                        completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]",
+      "                                        tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+    ],
+    "context_after": [],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "my_data_and_graph/metrics.py",
+    "line": 108,
+    "match": "    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):",
+    "context_before": [],
+    "context_after": [
+      "            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))",
+      "                    completed_jobs = int(item.get('completed_jobs', 0))",
+      "                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "my_data_and_graph/metrics.py",
+    "line": 170,
+    "match": "            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))",
+    "context_before": [
+      "    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):"
+    ],
+    "context_after": [
+      "                    completed_jobs = int(item.get('completed_jobs', 0))",
+      "                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)"
+    ],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "my_data_and_graph/metrics.py",
+    "line": 198,
+    "match": "                    completed_jobs = int(item.get('completed_jobs', 0))",
+    "context_before": [
+      "    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):",
+      "            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))"
+    ],
+    "context_after": [
+      "                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)"
+    ],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "my_data_and_graph/metrics.py",
+    "line": 199,
+    "match": "                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)",
+    "context_before": [
+      "    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):",
+      "            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))",
+      "                    completed_jobs = int(item.get('completed_jobs', 0))"
+    ],
+    "context_after": [],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "tmp_smoke_test.py",
+    "line": 14,
+    "match": "print(\"Done\", \"Completed:\", env.completed_jobs, \"Active:\", len(env.active_agents), \"Pending:\", len(env.pending_jobs))",
+    "context_before": [],
+    "context_after": [],
+    "classification": "print/logging",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "tmp_test_gantt_decision_trace.py",
+    "line": 35,
+    "match": "        self.completed_jobs = 0",
+    "context_before": [],
+    "context_after": [],
+    "classification": "assignment",
+    "suggestion": "Remove assignment to legacy counter; compute finished counts on-demand from env.jobs or expose a metrics API."
+  },
+  {
+    "file": "utils/env_obs.py",
+    "line": 142,
+    "match": "    legacy helpers such as _wip, _recent_rewards or completed_jobs.",
+    "context_before": [],
+    "context_after": [],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  },
+  {
+    "file": "utils/gantt.py",
+    "line": 644,
+    "match": "        avg_wait = float(getattr(env, 'total_wait_time', 0.0)) / max(1.0, float(getattr(env, 'completed_jobs', 0) or 1))",
+    "context_before": [],
+    "context_after": [],
+    "classification": "read",
+    "suggestion": "Replace with computed finished count: len([j for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False)])  (or use env.metrics.completed_jobs() if a metrics API is provided)"
+  }
+]

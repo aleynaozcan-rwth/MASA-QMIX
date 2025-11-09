@@ -1,0 +1,122 @@
+[
+  {
+    "file": "./environment.py",
+    "line": 107,
+    "match": "self.remaining_time = 0.0"
+  },
+  {
+    "file": "./environment.py",
+    "line": 117,
+    "match": "def progress_ratio(self):"
+  },
+  {
+    "file": "./environment.py",
+    "line": 770,
+    "match": "# legacy `completed_jobs` counter removed in favour of computed metrics"
+  },
+  {
+    "file": "./environment.py",
+    "line": 1104,
+    "match": "# legacy `completed_jobs` removed; compute finished counts from jobs when needed"
+  },
+  {
+    "file": "./environment.py",
+    "line": 1338,
+    "match": "# legacy `_wip()` helper."
+  },
+  {
+    "file": "./environment.py",
+    "line": 1363,
+    "match": "# legacy `completed_jobs` counter removed; compute finished"
+  },
+  {
+    "file": "./environment.py",
+    "line": 1404,
+    "match": "completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+  },
+  {
+    "file": "./environment.py",
+    "line": 1407,
+    "match": "tfs.write(f\"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+  },
+  {
+    "file": "./environment.py",
+    "line": 1873,
+    "match": "job.remaining_time = dur"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2028,
+    "match": "job.remaining_time = dur"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2101,
+    "match": "job.remaining_time = 0.0"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2107,
+    "match": "# legacy `completed_jobs` counter removed; compute finished"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2553,
+    "match": "completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2556,
+    "match": "tf2.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2599,
+    "match": "completed_jobs = [j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)]"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2602,
+    "match": "tfq.write(f\"[Lifecycle] t={float(getattr(self, 't', getattr(self.env, 'now', 0.0))):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\\n\")"
+  },
+  {
+    "file": "./environment.py",
+    "line": 2730,
+    "match": "- average_wait_time: total_wait_time / completed_jobs (seconds)"
+  },
+  {
+    "file": "./tmp_test_gantt_decision_trace.py",
+    "line": 35,
+    "match": "self.completed_jobs = 0"
+  },
+  {
+    "file": "./tmp_smoke_test.py",
+    "line": 14,
+    "match": "# compute completed count on-demand (legacy env.completed_jobs removed)"
+  },
+  {
+    "file": "./utils/jobagent.py",
+    "line": 118,
+    "match": "self.remaining_time = 0.0"
+  },
+  {
+    "file": "./utils/jobagent.py",
+    "line": 148,
+    "match": "def progress_ratio(self):"
+  },
+  {
+    "file": "./utils/jobagent.py",
+    "line": 263,
+    "match": "self.remaining_time = 0.0"
+  },
+  {
+    "file": "./utils/env_obs.py",
+    "line": 6,
+    "match": "does NOT contain any legacy 11-D features or silent fallbacks \u2014 if a"
+  },
+  {
+    "file": "./utils/env_obs.py",
+    "line": 142,
+    "match": "legacy helpers such as _wip, _recent_rewards or completed_jobs."
+  }
+]

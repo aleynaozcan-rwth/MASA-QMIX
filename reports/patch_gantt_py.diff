@@ -1,0 +1,22 @@
+diff --git a/utils/gantt.py b/utils/gantt.py
+index ceb127b..56862a6 100644
+--- a/utils/gantt.py
++++ b/utils/gantt.py
+@@ -641,9 +641,15 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
+             continue
+     total_simpy_time = float(sim_now if sim_now and sim_now > 0 else max_end)
+     try:
+-        avg_wait = float(getattr(env, 'total_wait_time', 0.0)) / max(1.0, float(getattr(env, 'completed_jobs', 0) or 1))
++        # Use canonical completed count; fail-fast if no completed jobs present
++        total_wait = float(getattr(env, 'total_wait_time', 0.0))
++        completed_count = sum(1 for j in getattr(env, 'jobs', []) if getattr(j, 'finished', False))
++        if completed_count <= 0:
++            raise ValueError("Cannot compute average wait time: no completed jobs available")
++        avg_wait = total_wait / float(completed_count)
+     except Exception:
+-        avg_wait = 0.0
++        # Do not silently fallback; re-raise so callers become aware of missing data
++        raise
+     # average makespan: average of job last end times
+     job_last_end = {}
+     for rec in records:

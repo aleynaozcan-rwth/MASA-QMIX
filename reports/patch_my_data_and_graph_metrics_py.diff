@@ -1,0 +1,73 @@
+diff --git a/my_data_and_graph/metrics.py b/my_data_and_graph/metrics.py
+index 93dd1b9..b0cc42a 100644
+--- a/my_data_and_graph/metrics.py
++++ b/my_data_and_graph/metrics.py
+@@ -105,7 +105,7 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+     oper_utils = []
+     avg_rewards = []
+ 
+-    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):
++    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_count: int = None):
+         """Best-effort compute util/makespan from raw gantt_records list.
+ 
+         gantt_records: list of dict or tuple records
+@@ -166,10 +166,12 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+         avg_machine_util = float(total_machine_busy) / (episode_len * max(1, int(n_machines))) if episode_len > 0 else 0.0
+         avg_operator_util = float(total_operator_busy) / (episode_len * max(1, int(n_ops))) if episode_len > 0 else 0.0
+         avg_makespan = float(episode_len)
+-        try:
+-            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))
+-        except Exception:
+-            avg_wait = float(total_wait_time)
++    # Use canonical completed_count passed by caller and enforce fail-fast behavior
++        if completed_count is None:
++            raise ValueError("Cannot compute average wait time: completed job count is required")
++        if completed_count <= 0:
++            raise ValueError("Cannot compute average wait time: no completed jobs available")
++        avg_wait = float(total_wait_time) / float(completed_count)
+ 
+         return {
+             'avg_machine_utilization': float(avg_machine_util),
+@@ -181,26 +183,25 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+     for item in envs:
+         util = None
+         # item may be an env object (has _compute_utilization_summary)
+-        try:
+-            if hasattr(item, '_compute_utilization_summary') and callable(getattr(item, '_compute_utilization_summary')):
+-                util = item._compute_utilization_summary()
+-        except Exception:
+-            util = None
++        if hasattr(item, '_compute_utilization_summary') and callable(getattr(item, '_compute_utilization_summary')):
++            util = item._compute_utilization_summary()
+ 
+         # If item is a dict describing gantt and counters
+         if util is None:
+-            try:
+-                if isinstance(item, dict) and 'gantt' in item:
+-                    gantt = item.get('gantt', [])
+-                    n_m = int(item.get('n_machines', 1)) if item.get('n_machines', None) is not None else 1
+-                    n_o = int(item.get('n_ops', 1)) if item.get('n_ops', None) is not None else 1
+-                    total_wait_time = float(item.get('total_wait_time', 0.0))
+-                    completed_jobs = int(item.get('completed_jobs', 0))
+-                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)
+-                elif isinstance(item, (list, tuple)):
+-                    util = _compute_from_gantt(item)
+-            except Exception:
+-                util = None
++            if isinstance(item, dict) and 'gantt' in item:
++                gantt = item.get('gantt', [])
++                n_m = int(item.get('n_machines', 1)) if item.get('n_machines', None) is not None else 1
++                n_o = int(item.get('n_ops', 1)) if item.get('n_ops', None) is not None else 1
++                total_wait_time = float(item.get('total_wait_time', 0.0))
++                # compute canonical completed count from provided jobs list; fail-fast when not available
++                if 'jobs' in item and isinstance(item.get('jobs'), (list, tuple)):
++                    completed_count = sum(1 for j in item.get('jobs') if getattr(j, 'finished', False))
++                else:
++                    raise ValueError("Cannot compute metrics for dict item: missing 'jobs' list to derive completed job count")
++                util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_count=completed_count)
++            elif isinstance(item, (list, tuple)):
++                # list/tuple gantt-only item: cannot compute avg_wait without completed job count
++                raise ValueError("Cannot compute metrics from raw gantt list: completed job count required")
+ 
+         if util:
+             mach_utils.append(float(util.get("avg_machine_utilization", 0.0)))

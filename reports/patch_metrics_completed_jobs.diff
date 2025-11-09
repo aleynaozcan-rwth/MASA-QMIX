@@ -1,0 +1,35 @@
+diff --git a/my_data_and_graph/metrics.py b/my_data_and_graph/metrics.py
+index 93dd1b9..6968028 100644
+--- a/my_data_and_graph/metrics.py
++++ b/my_data_and_graph/metrics.py
+@@ -105,7 +105,7 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+     oper_utils = []
+     avg_rewards = []
+ 
+-    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs: int = 0):
++    def _compute_from_gantt(gantt_records: Any, n_machines: int = 1, n_ops: int = 1, total_wait_time: float = 0.0, completed_jobs_count: int = 0):
+         """Best-effort compute util/makespan from raw gantt_records list.
+ 
+         gantt_records: list of dict or tuple records
+@@ -167,7 +167,8 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+         avg_operator_util = float(total_operator_busy) / (episode_len * max(1, int(n_ops))) if episode_len > 0 else 0.0
+         avg_makespan = float(episode_len)
+         try:
+-            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs))
++            # Use completed_jobs_count passed by caller; keep previous division guard
++            avg_wait = float(total_wait_time) / max(1.0, float(completed_jobs_count))
+         except Exception:
+             avg_wait = float(total_wait_time)
+ 
+@@ -195,8 +196,9 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
+                     n_m = int(item.get('n_machines', 1)) if item.get('n_machines', None) is not None else 1
+                     n_o = int(item.get('n_ops', 1)) if item.get('n_ops', None) is not None else 1
+                     total_wait_time = float(item.get('total_wait_time', 0.0))
+-                    completed_jobs = int(item.get('completed_jobs', 0))
+-                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs=completed_jobs)
++                    # preserve legacy fallback when item contains a completed_jobs field
++                    completed_jobs_count = int(item.get('completed_jobs', 0))
++                    util = _compute_from_gantt(gantt, n_machines=n_m, n_ops=n_o, total_wait_time=total_wait_time, completed_jobs_count=completed_jobs_count)
+                 elif isinstance(item, (list, tuple)):
+                     util = _compute_from_gantt(item)
+             except Exception:
