@@ -89,11 +89,34 @@ def get_mutable_args():
                         help='Maximum number of operations per job (default 4)')
     parser.add_argument('--machine_speed_range', type=float, nargs=2, default=[0.7, 1.4])
     # Reward shaping defaults (centralized single source-of-truth)
-    parser.add_argument('--reward_alpha', type=float, default=1.0, help='Shaped reward coefficient alpha (completed jobs)')
-    parser.add_argument('--reward_beta', type=float, default=0.5, help='Shaped reward coefficient beta (avg wait)')
-    parser.add_argument('--reward_gamma', type=float, default=0.2, help='Shaped reward coefficient gamma (WIP)')
-    parser.add_argument('--reward_delta', type=float, default=0.1, help='Shaped reward coefficient delta (idle ops)')
-    parser.add_argument('--reward_c_time', type=float, default=0.0, help='Cost per time unit (c_time)')
+    # === Hybrid Reward Parameters ===
+    parser.add_argument('--reward_w1_completed', type=float, default=1.0,
+                        help='Weight for CompletedNorm (K1)')
+    parser.add_argument('--reward_w2_avgwait', type=float, default=0.6,
+                        help='Weight for AvgWait (K2)')
+    parser.add_argument('--reward_w3_wip', type=float, default=0.3,
+                        help='Weight for Work-in-Progress (K3)')
+    parser.add_argument('--reward_w4_throughput_delta', type=float, default=0.8,
+                        help='Weight for ThroughputDelta (K4)')
+    parser.add_argument('--reward_w5_load_variance', type=float, default=0.4,
+                        help='Weight for LoadVariance (K5)')
+
+    parser.add_argument('--reward_a1_completion', type=float, default=1.0,
+                        help='Local reward weight for completed operation (a1)')
+    parser.add_argument('--reward_a2_wait', type=float, default=0.5,
+                        help='Local reward weight for waiting penalty (a2)')
+    parser.add_argument('--reward_a3_infeasible', type=float, default=0.25,
+                        help='Local reward weight for infeasible action penalty (a3)')
+
+    parser.add_argument('--reward_alpha_mix', type=float, default=0.7,
+                        help='Mixing coefficient between global and local rewards (alpha)')
+    parser.add_argument('--reward_lambda_m', type=float, default=0.8,
+                        help='Weight for machine utilization variance (lambda_m)')
+    parser.add_argument('--reward_lambda_o', type=float, default=0.2,
+                        help='Weight for operator utilization variance (lambda_o)')
+
+    parser.add_argument('--reward_log_components', action='store_true', default=False,
+                        help='If set, logs detailed reward component breakdowns during rollout.')
 
     # ============================================================
     # === Episode / agent configuration ==========================
@@ -192,11 +215,21 @@ def get_mutable_args():
     args.clean_history = getattr(args, "clean_history", False)
 
     # Expose reward shaping values so other modules (Environment) can consume them
-    args.reward_alpha = getattr(args, 'reward_alpha', 1.0)
-    args.reward_beta = getattr(args, 'reward_beta', 0.5)
-    args.reward_gamma = getattr(args, 'reward_gamma', 0.2)
-    args.reward_delta = getattr(args, 'reward_delta', 0.1)
-    args.reward_c_time = getattr(args, 'reward_c_time', 0.0)
+    args.reward_w1_completed = getattr(args, 'reward_w1_completed', 1.0)
+    args.reward_w2_avgwait = getattr(args, 'reward_w2_avgwait', 0.6)
+    args.reward_w3_wip = getattr(args, 'reward_w3_wip', 0.3)
+    args.reward_w4_throughput_delta = getattr(args, 'reward_w4_throughput_delta', 0.8)
+    args.reward_w5_load_variance = getattr(args, 'reward_w5_load_variance', 0.4)
+
+    args.reward_a1_completion = getattr(args, 'reward_a1_completion', 1.0)
+    args.reward_a2_wait = getattr(args, 'reward_a2_wait', 0.5)
+    args.reward_a3_infeasible = getattr(args, 'reward_a3_infeasible', 0.25)
+
+    args.reward_alpha_mix = getattr(args, 'reward_alpha_mix', 0.7)
+    args.reward_lambda_m = getattr(args, 'reward_lambda_m', 0.8)
+    args.reward_lambda_o = getattr(args, 'reward_lambda_o', 0.2)
+
+    args.reward_log_components = getattr(args, 'reward_log_components', False)
 
     # Short-run / quick-sanity defaults (override for fast local runs)
     # These can be overridden by CLI flags, but provide a compact default

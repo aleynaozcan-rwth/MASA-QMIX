@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="4.737" timestamp="2025-11-09T17:10:20.733040+01:00" hostname="AleynasIdeapad"><testcase classname="" name="tmp_smoke_test" time="0.000"><error message="collection failure">tmp_smoke_test.py:14: in &lt;module&gt;
-    print("Done", "Completed:", env.completed_jobs, "Active:", len(env.active_agents), "Pending:", len(env.pending_jobs))
-                                ^^^^^^^^^^^^^^^^^^
-E   AttributeError: 'MASAEnv' object has no attribute 'completed_jobs'</error></testcase></testsuite></testsuites>

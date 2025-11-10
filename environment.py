@@ -415,37 +415,25 @@ class MASAEnv:
         # Default increased to 600s to allow longer episodes by default.
         self.episode_limit = _resolve(('episode_limit',), int, default=600)
 
-        # reward params — prefer explicit reward_weights dict, else require
-        # presence in args or kwargs
-        if reward_weights:
-            self.alpha = float(reward_weights.get('alpha'))
-            self.beta = float(reward_weights.get('beta'))
-            self.gamma = float(reward_weights.get('gamma'))
-            self.delta = float(reward_weights.get('delta'))
-            self.c_time = float(reward_weights.get('c_time'))
-        else:
-            # Read reward shaping hyperparameters from the args namespace
-            try:
-                if args is not None:
-                    self.alpha = float(getattr(args, 'reward_alpha', 0.0))
-                    self.beta = float(getattr(args, 'reward_beta', 0.0))
-                    self.gamma = float(getattr(args, 'reward_gamma', 0.0))
-                    self.delta = float(getattr(args, 'reward_delta', 0.0))
-                    self.c_time = float(getattr(args, 'reward_c_time', 0.0))
-                else:
-                    # fallback for callers not providing args
-                    self.alpha = float(_resolve(('reward_alpha', 'alpha'), float, default=0.0))
-                    self.beta = float(_resolve(('reward_beta', 'beta'), float, default=0.0))
-                    self.gamma = float(_resolve(('reward_gamma', 'gamma'), float, default=0.0))
-                    self.delta = float(_resolve(('reward_delta', 'delta'), float, default=0.0))
-                    self.c_time = float(_resolve(('reward_c_time', 'c_time'), float, default=0.0))
-            except Exception:
-                # last-resort defaults
-                self.alpha = 0.0
-                self.beta = 0.0
-                self.gamma = 0.0
-                self.delta = 0.0
-                self.c_time = 0.0
+        # === Hybrid Reward Parameters ===
+        # Read hybrid reward parameters from injected args namespace only.
+        # Per task constraints: do not provide fallbacks here — callers must
+        # supply `args` with the expected fields (defined in MARL.common.arguments).
+        self.reward_w1 = args.reward_w1_completed
+        self.reward_w2 = args.reward_w2_avgwait
+        self.reward_w3 = args.reward_w3_wip
+        self.reward_w4 = args.reward_w4_throughput_delta
+        self.reward_w5 = args.reward_w5_load_variance
+
+        self.reward_a1 = args.reward_a1_completion
+        self.reward_a2 = args.reward_a2_wait
+        self.reward_a3 = args.reward_a3_infeasible
+
+        self.reward_alpha_mix = args.reward_alpha_mix
+        self.lambda_m = args.reward_lambda_m
+        self.lambda_o = args.reward_lambda_o
+
+        self.log_reward_components = getattr(args, "reward_log_components", False)
 
         # job generation params
         self.job_min_ops = int(_resolve(('job_min_ops',), int, default=1))
@@ -781,6 +769,12 @@ class MASAEnv:
         self.pending_decisions: List[Dict] = []
         self.decisions_ready = simpy.Event(self.env)
         self.gantt_records: List = []
+
+        # Decision cache for local reward computation
+        self._last_decision_info: List[Dict] = []
+        """Stores the most recent decision batch for reward computation.
+        Each entry will include job_id, chosen_action, avail_row, chosen_machine_name, job_completed, wait_time_norm.
+        """
 
         # Optionally dump merged configuration for runtime debugging/validation.
         # This is opt-in only (see self.dump_config). When disabled, no file is
@@ -1327,29 +1321,167 @@ class MASAEnv:
     def pop_decision_reward(self) -> float:
         """Return shaped reward computed since last pop."""
         try:
-            completed = float(self._completed_now_cache)
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            completed = 0.0
-        self._completed_now_cache = 0
-        sim_t = float(self.env.now) if hasattr(self, 'env') else 1.0
-        avg_wait = float(self.total_wait_time) / max(1.0, sim_t)
-        # Compute work-in-progress (WIP) from active agents list instead of
-        # legacy `_wip()` helper.
-        try:
-            wip = float(sum(1 for j in getattr(self, 'active_agents', []) if not getattr(j, 'finished', False)))
+            # clear per-pop completed cache (preserve existing side-effect)
+            try:
+                _ = float(self._completed_now_cache)
+            except Exception:
+                pass
+            try:
+                self._completed_now_cache = 0
+            except Exception:
+                pass
+
+            # ----- Global metrics (K1..K5) -----
+            # K1: CompletedNorm
+            try:
+                completed_count = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
+                CompletedNorm = float(completed_count) / float(max(1, int(getattr(self, 'max_jobs', 1))))
+            except Exception:
+                CompletedNorm = 0.0
+
+            # K2: AvgWaitNorm
+            try:
+                jobs_len = max(1, int(len(getattr(self, 'jobs', []) or [])))
+                avg_wait_per_job = float(getattr(self, 'total_wait_time', 0.0)) / float(jobs_len)
+                max_wait = float(getattr(self, 'max_wait_time', 1.0))
+                AvgWaitNorm = float(np.clip(avg_wait_per_job / (max_wait if max_wait > 0 else 1.0), 0.0, 1.0))
+            except Exception:
+                AvgWaitNorm = 0.0
+
+            # K3: WIPNorm
+            try:
+                wip_count = len([j for j in (getattr(self, 'active_agents', []) or []) if not getattr(j, 'finished', False)])
+                WIPNorm = float(wip_count) / float(max(1, int(getattr(self, 'max_jobs', 1))))
+            except Exception:
+                WIPNorm = 0.0
+
+            # K4: ThroughputDelta (uses a small rolling history)
+            try:
+                if not hasattr(self, '_throughput_history') or getattr(self, '_throughput_history', None) is None:
+                    self._throughput_history = deque(maxlen=10)
+                completed_now = len([j for j in (getattr(self, 'jobs', []) or []) if getattr(j, 'finished', False)])
+                try:
+                    self._throughput_history.append(int(completed_now))
+                except Exception:
+                    try:
+                        # coerce append fallback
+                        self._throughput_history.append(completed_now)
+                    except Exception:
+                        pass
+                if len(self._throughput_history) > 1:
+                    throughput_delta = float(self._throughput_history[-1] - self._throughput_history[-2]) / float(max(1, int(getattr(self, 'max_jobs', 1))))
+                else:
+                    throughput_delta = 0.0
+            except Exception:
+                throughput_delta = 0.0
+
+            # K5: LoadVariance (weighted machine/operator variance)
+            try:
+                util = self._compute_utilization_summary()
+                per_machine = list(util.get('per_machine_utilization', {}).values()) if isinstance(util.get('per_machine_utilization', {}), dict) else list(util.get('per_machine_utilization', []))
+                per_operator = list(util.get('per_operator_utilization', {}).values()) if isinstance(util.get('per_operator_utilization', {}), dict) else list(util.get('per_operator_utilization', []))
+                var_machine = float(np.var(per_machine)) if per_machine else 0.0
+                var_operator = float(np.var(list(per_operator))) if per_operator else 0.0
+                # use lambda_m / lambda_o previously set on the env
+                lambda_m = float(getattr(self, 'lambda_m', getattr(self, 'reward_lambda_m', 0.0)))
+                lambda_o = float(getattr(self, 'lambda_o', getattr(self, 'reward_lambda_o', 0.0)))
+                load_variance = float((lambda_m * var_machine) + (lambda_o * var_operator))
+            except Exception:
+                throughput_delta = float(throughput_delta) if 'throughput_delta' in locals() else 0.0
+                load_variance = 0.0
+
+            # Compute R_global per spec
+            try:
+                R_global = (
+                    (float(getattr(self, 'reward_w1', getattr(self, 'reward_w1_completed', 0.0))) * float(CompletedNorm))
+                    - (float(getattr(self, 'reward_w2', getattr(self, 'reward_w2_avgwait', 0.0))) * float(AvgWaitNorm))
+                    - (float(getattr(self, 'reward_w3', getattr(self, 'reward_w3_wip', 0.0))) * float(WIPNorm))
+                    + (float(getattr(self, 'reward_w4', getattr(self, 'reward_w4_throughput_delta', 0.0))) * float(throughput_delta))
+                    - (float(getattr(self, 'reward_w5', getattr(self, 'reward_w5_load_variance', 0.0))) * float(load_variance))
+                )
+            except Exception:
+                R_global = 0.0
+
+            # ----- Local rewards (per-decision) -----
+            try:
+                R_local_mean = 0.0
+                if getattr(self, '_last_decision_info', None):
+                    local_rewards = []
+                    for entry in list(getattr(self, '_last_decision_info', []) or []):
+                        try:
+                            completed = 1.0 if entry.get('job_completed', False) else 0.0
+                            wait_penalty = float(entry.get('wait_time_norm', 0.0))
+                            infeasible = 0.0
+                            avail = entry.get('avail_row')
+                            chosen = int(entry.get('chosen_action', -1)) if entry.get('chosen_action', None) is not None else -1
+                            if avail is not None:
+                                try:
+                                    arr = np.array(avail)
+                                    valid_indices = np.where(arr == 1)[0]
+                                    if chosen not in list(valid_indices):
+                                        infeasible = 1.0
+                                except Exception:
+                                    # if avail not array-like, treat as feasible
+                                    infeasible = 0.0
+                            r_local_i = (
+                                (float(getattr(self, 'reward_a1', getattr(self, 'reward_a1_completion', 0.0))) * completed)
+                                - (float(getattr(self, 'reward_a2', getattr(self, 'reward_a2_wait', 0.0))) * wait_penalty)
+                                - (float(getattr(self, 'reward_a3', getattr(self, 'reward_a3_infeasible', 0.0))) * infeasible)
+                            )
+                            local_rewards.append(float(r_local_i))
+                        except Exception:
+                            continue
+                    if local_rewards:
+                        R_local_mean = float(np.mean(local_rewards))
+                    else:
+                        R_local_mean = 0.0
+                else:
+                    R_local_mean = 0.0
+            except Exception:
+                R_local_mean = 0.0
+
+            # Combine
+            try:
+                alpha_mix = float(getattr(self, 'reward_alpha_mix', getattr(self, 'reward_alpha_mix', 0.0)))
+                R_total = (alpha_mix * float(R_global)) + ((1.0 - alpha_mix) * float(R_local_mean))
+            except Exception:
+                R_total = float(R_global) if 'R_global' in locals() else 0.0
+
+            # Diagnostics
+            try:
+                self.last_reward_components = {
+                    'CompletedNorm': float(CompletedNorm),
+                    'AvgWaitNorm': float(AvgWaitNorm),
+                    'WIPNorm': float(WIPNorm),
+                    'ThroughputDelta': float(throughput_delta) if 'throughput_delta' in locals() else 0.0,
+                    'LoadVariance': float(load_variance) if 'load_variance' in locals() else 0.0,
+                    'R_global': float(R_global),
+                    'R_local_mean': float(R_local_mean),
+                    'R_total': float(R_total),
+                }
+            except Exception:
+                try:
+                    self.last_reward_components = {}
+                except Exception:
+                    pass
+
+            # Optional logging of components
+            try:
+                if bool(getattr(self, 'log_reward_components', False)):
+                    try:
+                        LOG.debug('[REWARD COMPONENTS] %s', self.last_reward_components)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            return float(R_total)
         except Exception:
-            wip = 0.0
-        try:
-            idle_ops = sum(1 for g in getattr(self, 'operator_groups', []) if self._resource_free(g))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            idle_ops = 0
-        reward = (self.alpha * completed) - (self.beta * avg_wait) - (self.gamma * wip) - (self.delta * float(idle_ops))
-        # NOTE: removed appending to internal `_recent_rewards` deque. Consumers
-        # should obtain recent rewards via canonical metrics APIs or event logs.
-        # TODO: requires test adaptation
-        return float(reward)
+            logging.getLogger(__name__).exception("Exception computing hybrid reward", exc_info=True)
+            try:
+                return float(getattr(self, 'last_reward_components', {}).get('R_total', 0.0))
+            except Exception:
+                return 0.0
 
     # ---------------- SimPy job process (simple, robust) ----------------
     def _job_process(self, job: JobAgent):
@@ -1470,6 +1602,18 @@ class MASAEnv:
             # the decision_item so the policy/runner can call resume_evt.succeed(choice).
             resume_evt = simpy.Event(self.env)
             decision_item['resume_evt'] = resume_evt
+
+            # If this is the start of a new decision batch (pending_decisions
+            # currently empty), overwrite the last decision cache so we do
+            # not accumulate entries across batches.
+            try:
+                if not self.pending_decisions:
+                    self._last_decision_info = []
+            except Exception:
+                try:
+                    self._last_decision_info = []
+                except Exception:
+                    pass
 
             self.pending_decisions.append(decision_item)
             try:
@@ -1740,6 +1884,37 @@ class MASAEnv:
                     at_time=float(now_t),
                     eligibilities=elig_entries,
                 )
+                # Cache this decision info so external reward logic can compute
+                # per-decision local rewards later. We only append one entry
+                # per decision (jobs will overwrite the batch-start cleared
+                # `_last_decision_info` set earlier).
+                try:
+                    try:
+                        if not hasattr(self, '_last_decision_info') or self._last_decision_info is None:
+                            self._last_decision_info = []
+                    except Exception:
+                        self._last_decision_info = []
+                    try:
+                        job_obj = job
+                        avail_row = decision_item.get('avail_row') if isinstance(decision_item, dict) else None
+                        chosen_action_val = int(chosen_idx) if chosen_idx is not None else -1
+                        job_completed = getattr(job_obj, 'finished', False)
+                        wait_time = getattr(job_obj, 'wait_time', 0.0)
+                        max_wait = getattr(self, 'max_wait_time', 1.0)
+                        wait_time_norm = wait_time / max_wait if max_wait > 0 else 0.0
+                        self._last_decision_info.append({
+                            'job_id': getattr(job_obj, 'id', None),
+                            'chosen_action': chosen_action_val,
+                            'avail_row': avail_row,
+                            'chosen_machine_name': chosen_m_name,
+                            'job_completed': job_completed,
+                            'wait_time_norm': wait_time_norm
+                        })
+                    except Exception:
+                        # best-effort: do not interrupt decision execution
+                        pass
+                except Exception:
+                    pass
             except Exception:
                 decision_trace = None
 
