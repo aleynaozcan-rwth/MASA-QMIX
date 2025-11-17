@@ -10,6 +10,7 @@
 import os
 import torch
 import torch.nn.functional as F
+import time
 from MARL.network.base_net import RNNAgent
 from MARL.network.qmix_net import QMixNet as QMixer
 
@@ -47,6 +48,8 @@ class QMIX:
         self.params = list(self.eval_rnn.parameters()) + list(self.eval_mixer.parameters())
         self.optimizer = torch.optim.RMSprop(self.params, lr=self.args.lr)
         self.train_step = 0
+        # diagnostics
+        self.target_update_count = 0
 
         # =====================================================
         # === Canonical Model Save Directory (always same) ====
@@ -106,7 +109,34 @@ class QMIX:
         # --- Backpropagation ---
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+
+        # Lightweight diagnostics: gradient norms before/after clipping and avg-Q on this batch
+        try:
+            # compute global grad norm before clipping
+            grad_norm_before = 0.0
+            for p in self.params:
+                if p.grad is not None:
+                    grad_norm_before += float(p.grad.data.norm(2).item() ** 2)
+            grad_norm_before = float(grad_norm_before ** 0.5)
+        except Exception:
+            grad_norm_before = None
+
+        try:
+            torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+        except Exception:
+            # if clipping fails silently continue
+            pass
+
+        try:
+            # compute global grad norm after clipping
+            grad_norm_after = 0.0
+            for p in self.params:
+                if p.grad is not None:
+                    grad_norm_after += float(p.grad.data.norm(2).item() ** 2)
+            grad_norm_after = float(grad_norm_after ** 0.5)
+        except Exception:
+            grad_norm_after = None
+
         self.optimizer.step()
 
         # --- Target update ---
@@ -135,6 +165,27 @@ class QMIX:
             with open("./my_data_and_graph/historydata/td_error.txt", "a") as f:
                 mean_td = float(td_error.abs().mean().item())
                 print(mean_td, file=f)
+            # append diagnostics line (lightweight, rate-limited)
+            try:
+                diagnostics_every = int(getattr(self.args, "diagnostics_every", 20) or 20)
+            except Exception:
+                diagnostics_every = 20
+
+            try:
+                if diagnostics_every > 0 and (train_step % diagnostics_every == 0):
+                    avg_q = float(q_total_eval.mean().detach().cpu().item())
+                    ts = time.time()
+                    diag_path = "./my_data_and_graph/historydata/diagnostics_log.txt"
+                    with open(diag_path, "a") as df:
+                        # CSV: ts,train_step,avg_q,grad_norm_before,grad_norm_after,target_updates,loss,td_error
+                        df.write(f"{ts},{train_step},{avg_q},{grad_norm_before},{grad_norm_after},{self.target_update_count},{float(loss.item())},{float(td_error.abs().mean().item())}\n")
+                    # also print a concise console line
+                    try:
+                        print(f"[QMIX Diagnostics] step={train_step} avg_q={avg_q:.4f} grad_before={grad_norm_before} grad_after={grad_norm_after} target_updates={self.target_update_count}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -179,6 +230,10 @@ class QMIX:
     def _update_target_networks(self):
         self.target_rnn.load_state_dict(self.eval_rnn.state_dict())
         self.target_mixer.load_state_dict(self.eval_mixer.state_dict())
+        try:
+            self.target_update_count += 1
+        except Exception:
+            pass
 
     def init_hidden(self, episode_num):
         # GRU expects hidden shape (num_layers * num_directions, batch, hidden_size)

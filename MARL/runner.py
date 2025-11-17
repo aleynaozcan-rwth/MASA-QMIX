@@ -800,9 +800,7 @@ class Runner:
     def __init__(self, env, args):
         self.env = env
         self.args = args
-        # run_args is the run-local copy used by many helper methods; ensure
-        # it's available immediately to avoid AttributeError when accessed
-        # earlier in the constructor.
+        # run_args is the run-local copy used by many helper methods; ensure it's available immediately to avoid AttributeError when accessed earlier in the constructor.
         self.run_args = args
         # Configure whether history/artifact writes are allowed for this run.
         # Prefer the centralized decision helper so environment variables
@@ -946,6 +944,98 @@ class Runner:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             self.history_dir = './my_data_and_graph/historydata'
         os.makedirs(self.history_dir, exist_ok=True)
+
+        # Small, resilient stdout "tee" so console prints are mirrored into a
+        # debug file inside historydata. This is non-invasive: it preserves
+        # console output while also appending the same text to
+        # <history_dir>/debug_output.txt for post-run inspection. We register
+        # an atexit handler to restore the original stdout and close the file
+        # even if the Runner exits via exception or signal-handled shutdown.
+        try:
+            import sys as _sys, atexit as _atexit
+            debug_path = os.path.join(self.history_dir, 'debug_output.txt')
+            # open in append mode so multiple runs don't truncate previous logs
+            _f = open(debug_path, 'a', encoding='utf-8')
+            _orig = _sys.stdout
+
+            class _Tee:
+                def __init__(self, orig, fh):
+                    self._orig = orig
+                    self._fh = fh
+
+                def write(self, data):
+                    try:
+                        self._orig.write(data)
+                    except Exception:
+                        pass
+                    try:
+                        self._fh.write(data)
+                        self._fh.flush()
+                    except Exception:
+                        pass
+
+                def flush(self):
+                    try:
+                        self._orig.flush()
+                    except Exception:
+                        pass
+                    try:
+                        self._fh.flush()
+                    except Exception:
+                        pass
+
+                def isatty(self):
+                    try:
+                        return self._orig.isatty()
+                    except Exception:
+                        return False
+
+                def fileno(self):
+                    try:
+                        return self._orig.fileno()
+                    except Exception:
+                        return None
+
+            _tee = _Tee(_orig, _f)
+            _sys.stdout = _tee
+            # keep references for best-effort cleanup later
+            self._stdout_tee_file = _f
+            self._stdout_orig = _orig
+
+            def _restore_stdout():
+                try:
+                    if hasattr(self, '_stdout_orig') and getattr(self, '_stdout_orig') is not None:
+                        _sys.stdout = getattr(self, '_stdout_orig')
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, '_stdout_tee_file') and getattr(self, '_stdout_tee_file') is not None:
+                        try:
+                            getattr(self, '_stdout_tee_file').close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            try:
+                _atexit.register(_restore_stdout)
+            except Exception:
+                # If atexit registration fails, still keep the attributes so
+                # callers can manually restore/close if desired.
+                pass
+        except Exception:
+            # Best-effort only: do not fail Runner initialization if teeing fails
+            try:
+                print(f"[WARN] Could not enable stdout tee to {self.history_dir}/debug_output.txt")
+            except Exception:
+                pass
+
+        # Log active training args for easy verification (appears in console and debug_output.txt)
+        try:
+            self._log_active_training_args()
+        except Exception:
+            # Don't let logging of args interfere with Runner startup
+            pass
 
         # snapshot_on_eval: produce gantt snapshots only on evaluation by default
         # if the user explicitly sets --gantt_snapshot_every, training-step snapshots
@@ -1146,6 +1236,27 @@ class Runner:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             pass
 
+    def _log_active_training_args(self):
+        try:
+            a = self.args
+            lines = [
+                "[ACTIVE_ARGS] preset=%s" % getattr(a, "preset", ""),
+                "[ACTIVE_ARGS] n_epoch=%d" % int(getattr(a, "n_epoch", -1)),
+                "[ACTIVE_ARGS] n_episodes=%d" % int(getattr(a, "n_episodes", -1)),
+                "[ACTIVE_ARGS] episode_limit=%d" % int(getattr(a, "episode_limit", -1)),
+                "[ACTIVE_ARGS] buffer_size=%d" % int(getattr(a, "buffer_size", -1)),
+                "[ACTIVE_ARGS] batch_size=%d" % int(getattr(a, "batch_size", -1)),
+                "[ACTIVE_ARGS] train_steps=%d" % int(getattr(a, "train_steps", -1)),
+                "[ACTIVE_ARGS] lr=%g" % float(getattr(a, "lr", -1)),
+                "[ACTIVE_ARGS] gamma=%g" % float(getattr(a, "gamma", -1)),
+                "[ACTIVE_ARGS] epsilon_start=%g" % float(getattr(a, "epsilon_start", -1)),
+                "[ACTIVE_ARGS] epsilon_end=%g" % float(getattr(a, "epsilon_end", -1)),
+                "[ACTIVE_ARGS] epsilon_anneal_steps=%d" % int(getattr(a, "epsilon_anneal_steps", -1)),
+            ]
+            print("\n".join(lines), flush=True)
+        except Exception as e:
+            print(f"[ACTIVE_ARGS] failed to log: {e}", flush=True)
+
     def run(self, num):
         train_steps = 0
         all_gantt_data = []
@@ -1158,6 +1269,23 @@ class Runner:
             sys.stdout.write(f"\rRun {num}, epoch {epoch}, avg rewards {np.mean(avg_rewards):.2f}")
             sys.stdout.flush()
 
+            # --- Epoch-level lightweight diagnostics (epsilon, buffer size) ---
+            try:
+                eps = None
+                try:
+                    eps = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
+                except Exception:
+                    eps = getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None))
+                buf_len = len(self.buffer) if getattr(self, 'buffer', None) is not None else None
+                print(f"[Diagnostics] Epoch {epoch} start | epsilon={eps} | buffer_len={buf_len}")
+                try:
+                    os.makedirs(self.history_dir, exist_ok=True)
+                    with open(os.path.join(self.history_dir, 'diagnostics_log.txt'), 'a') as df:
+                        df.write(f"{time.time()},{epoch},epoch_start,epsilon={eps},buffer_len={buf_len}\n")
+                except Exception:
+                    pass
+            except Exception:
+                pass
             # === Periodic evaluation ===
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
                 win_rate, ep_reward, global_ep_idx, gantt_eval = self.evaluate(all_gantt_data, global_ep_idx)
@@ -1534,58 +1662,102 @@ class Runner:
             # === KPI LOGGING (Step 8A.6.6) ===
             # KPI logging (opt-in)
             try:
+                # Epoch-end diagnostics: snapshot epsilon and buffer length
+                try:
+                    eps_end = None
+                    try:
+                        eps_end = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
+                    except Exception:
+                        eps_end = getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None))
+                    buf_len_end = len(self.buffer) if getattr(self, 'buffer', None) is not None else None
+                    with open(os.path.join(self.history_dir, 'diagnostics_log.txt'), 'a') as df:
+                        df.write(f"{time.time()},{epoch},epoch_end,epsilon={eps_end},buffer_len={buf_len_end}\n")
+                except Exception:
+                    pass
                 if getattr(self, 'allow_history_writes', False):
                     # compute avg_wait using computed completed count to avoid legacy counter
                     _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
                     avg_wait = self.env.total_wait_time / _completed_count
-                    # Compute instantaneous machine utilization fraction (best-effort)
+                    # Prefer env-provided averaged utilization summary when available.
+                    # Fall back to instantaneous resource snapshot only if the
+                    # env summary call is unavailable or fails.
                     try:
-                        mres = list(getattr(self.env, 'machine_resources', []) or [])
-                        if mres:
-                            occupied = 0
-                            for r in mres:
-                                try:
-                                    users = getattr(r, 'users', None)
-                                    if users is not None:
-                                        if len(users) > 0:
-                                            occupied += 1
-                                        continue
-                                    # fallback: treat a positive 'count' attribute as occupied
-                                    if getattr(r, 'count', None) is not None:
-                                        if int(getattr(r, 'count', 0)) > 0:
-                                            occupied += 1
-                                except Exception:
-                                    continue
-                            util_m = float(occupied) / max(1.0, float(len(mres)))
+                        util_m = 0.0
+                        util_o = 0.0
+                        makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
+                        makespan = getattr(self.env, "t", makespan)
+
+                        util_item = None
+                        try:
+                            if hasattr(self.env, '_compute_utilization_summary') and callable(getattr(self.env, '_compute_utilization_summary')):
+                                util_item = self.env._compute_utilization_summary()
+                        except Exception:
+                            util_item = None
+
+                        if util_item:
+                            try:
+                                util_m = float(util_item.get('avg_machine_utilization', 0.0))
+                            except Exception:
+                                util_m = 0.0
+                            try:
+                                util_o = float(util_item.get('avg_operator_utilization', 0.0))
+                            except Exception:
+                                util_o = 0.0
+                            try:
+                                makespan = float(util_item.get('average_makespan', makespan))
+                            except Exception:
+                                pass
                         else:
-                            util_m = 0.0
+                            # Fallback: instantaneous snapshot (legacy behaviour)
+                            try:
+                                mres = list(getattr(self.env, 'machine_resources', []) or [])
+                                if mres:
+                                    occupied = 0
+                                    for r in mres:
+                                        try:
+                                            users = getattr(r, 'users', None)
+                                            if users is not None:
+                                                if len(users) > 0:
+                                                    occupied += 1
+                                                continue
+                                            # fallback: treat a positive 'count' attribute as occupied
+                                            if getattr(r, 'count', None) is not None:
+                                                if int(getattr(r, 'count', 0)) > 0:
+                                                    occupied += 1
+                                        except Exception:
+                                            continue
+                                    util_m = float(occupied) / max(1.0, float(len(mres)))
+                                else:
+                                    util_m = 0.0
+                            except Exception:
+                                util_m = 0.0
+
+                            # Fallback operator occupancy
+                            try:
+                                og = list(getattr(self.env, 'operator_groups', []) or [])
+                                if og:
+                                    occ_o = 0
+                                    for g in og:
+                                        try:
+                                            users = getattr(g, 'users', None)
+                                            if users is not None:
+                                                if len(users) > 0:
+                                                    occ_o += 1
+                                                continue
+                                            if getattr(g, 'count', None) is not None:
+                                                if int(getattr(g, 'count', 0)) > 0:
+                                                    occ_o += 1
+                                        except Exception:
+                                            continue
+                                    util_o = float(occ_o) / max(1.0, float(len(og)))
+                                else:
+                                    util_o = 0.0
+                            except Exception:
+                                util_o = 0.0
                     except Exception:
                         util_m = 0.0
-
-                    # Compute instantaneous operator/utilization fraction (best-effort)
-                    try:
-                        og = list(getattr(self.env, 'operator_groups', []) or [])
-                        if og:
-                            occ_o = 0
-                            for g in og:
-                                try:
-                                    users = getattr(g, 'users', None)
-                                    if users is not None:
-                                        if len(users) > 0:
-                                            occ_o += 1
-                                        continue
-                                    if getattr(g, 'count', None) is not None:
-                                        if int(getattr(g, 'count', 0)) > 0:
-                                            occ_o += 1
-                                except Exception:
-                                    continue
-                            util_o = float(occ_o) / max(1.0, float(len(og)))
-                        else:
-                            util_o = 0.0
-                    except Exception:
                         util_o = 0.0
-                    makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
-                    makespan = getattr(self.env, "t", makespan)
+                        makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
                     with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
                         f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
             except Exception as e:
@@ -1754,6 +1926,46 @@ class Runner:
             print("[WARN] Could not save episode stats:", e)
 
         print("\n✅ [Runner] Training completed successfully.")
+
+        # Attempt to generate post-training plots (best-effort). We call the
+        # higher-level `generate_all_plots` so all available plots are created
+        # into <history_dir>/plots/. Failures should not interrupt finalization.
+        try:
+            try:
+                from my_data_and_graph.plot_metrics import generate_all_plots
+            except Exception:
+                # Import should be resilient due to compatibility shim in
+                # my_data_and_graph.plot_metrics; if it fails, surface a
+                # warning but continue.
+                generate_all_plots = None
+            if callable(generate_all_plots):
+                try:
+                    generate_all_plots(self.history_dir)
+                    print(f"[Runner] Post-training plots generated in {self.history_dir}/plots/")
+                except Exception as e:
+                    print(f"[Runner] Warning: Plot generation failed: {e}")
+        except Exception:
+            # swallow any unexpected issue here so finalization continues
+            pass
+
+        # Best-effort: restore stdout and close the tee file now that training
+        # finished. atexit handler is also registered during init to cover
+        # abnormal exits, but we attempt an immediate cleanup here so the
+        # remainder of the finalization logs go to the normal console only.
+        try:
+            import sys as _sys
+            if hasattr(self, '_stdout_orig') and getattr(self, '_stdout_orig') is not None:
+                try:
+                    _sys.stdout = getattr(self, '_stdout_orig')
+                except Exception:
+                    pass
+            if hasattr(self, '_stdout_tee_file') and getattr(self, '_stdout_tee_file') is not None:
+                try:
+                    getattr(self, '_stdout_tee_file').close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # === Write detailed scheduling trace and per-job timeline CSVs ===
         try:

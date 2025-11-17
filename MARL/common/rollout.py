@@ -129,6 +129,16 @@ class RolloutWorker:
             logging.getLogger(__name__).exception("RolloutWorker init: RNG init failed")
             self.rng = np.random.RandomState(0)
 
+        # lightweight step counter for diagnostics (do not affect logic)
+        try:
+            self.step_counter = int(getattr(self.args, 'start_step_counter', 0) or 0)
+        except Exception:
+            self.step_counter = 0
+        try:
+            self.epsilon_log_every = int(getattr(self.args, 'epsilon_diagnostics_every', 50) or 50)
+        except Exception:
+            self.epsilon_log_every = 50
+
         # log
         print(f"[RolloutWorker] init | episode_limit={self.episode_limit} | device={self.device}")
 
@@ -989,6 +999,37 @@ class RolloutWorker:
 
             actions = processed_actions
 
+            # --- Epsilon diagnostics (periodic, non-fatal) ---
+            try:
+                try:
+                    self.step_counter += 1
+                except Exception:
+                    self.step_counter = getattr(self, 'step_counter', 0) + 1
+
+                if getattr(self, 'epsilon_log_every', 0) > 0 and (self.step_counter % int(self.epsilon_log_every) == 0):
+                    try:
+                        msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={self.epsilon:.4f}"
+                    except Exception:
+                        try:
+                            msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={float(self.epsilon)}"
+                        except Exception:
+                            msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={getattr(self, 'epsilon', 'NA')}"
+                    try:
+                        print(msg)
+                    except Exception:
+                        pass
+                    try:
+                        history_dir = getattr(self, 'history_dir', None) or getattr(self.env, 'history_dir', None) or './my_data_and_graph/historydata/'
+                        os.makedirs(history_dir, exist_ok=True)
+                        diag_path = os.path.join(history_dir, 'diagnostics_log.txt')
+                        with open(diag_path, 'a', encoding='utf-8') as df:
+                            df.write(msg + '\n')
+                    except Exception:
+                        pass
+            except Exception:
+                # ensure diagnostics never interrupt training
+                pass
+
             # after resuming processes, collect reward accumulated since last decision boundary
             try:
                 r = float(self.env.pop_decision_reward())
@@ -1051,6 +1092,48 @@ class RolloutWorker:
         except Exception as e:
             logging.getLogger(__name__).exception("Exception caught", exc_info=True)
             win_tag = False
+
+        # Optional per-episode reward components logging (append-only)
+        try:
+            try:
+                do_log = bool(getattr(args, 'reward_log_components', False))
+            except Exception:
+                do_log = False
+
+            if do_log and allow_history_writes():
+                try:
+                    hist_dir = getattr(self, 'history_dir', None) or getattr(self.env, 'history_dir', None) or './my_data_and_graph/historydata/'
+                    os.makedirs(hist_dir, exist_ok=True)
+                    out_path = os.path.join(hist_dir, 'reward_components_log.txt')
+
+                    comps = getattr(self.env, 'last_reward_components', {}) or {}
+                    # support a few possible key names
+                    def _getc(keys):
+                        for k in keys:
+                            if k in comps:
+                                try:
+                                    return float(comps.get(k))
+                                except Exception:
+                                    return comps.get(k)
+                        return ''
+
+                    r_global = _getc(['R_global', 'r_global', 'Rglobal'])
+                    r_local = _getc(['R_local_mean', 'r_local_mean', 'Rlocal_mean', 'R_local'])
+                    r_total = _getc(['R_total', 'r_total', 'Rtotal'])
+
+                    header_needed = not os.path.exists(out_path)
+                    with open(out_path, 'a', encoding='utf-8') as rf:
+                        if header_needed:
+                            rf.write('episode,R_global,R_local_mean,R_total\n')
+                        try:
+                            ep_write = int(getattr(self.env, 'episode_id', global_ep_idx))
+                        except Exception:
+                            ep_write = global_ep_idx
+                        rf.write(f"{ep_write},{r_global},{r_local},{r_total}\n")
+                except Exception:
+                    logging.getLogger(__name__).exception("Failed to write reward_components_log", exc_info=True)
+        except Exception:
+            pass
 
         # store episode into replay buffer if available
         try:

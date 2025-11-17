@@ -11,6 +11,9 @@ import copy
 from types import SimpleNamespace
 
 
+# (Preset system removed — defaults are set directly on parser arguments)
+
+
 class ReadOnlyArgs:
     """Lightweight read-only wrapper around an argparse.Namespace.
 
@@ -121,13 +124,13 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=600)
+    parser.add_argument('--episode_limit', type=int, default=500)
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
                         help='Number of jobs created at the start of the simulation (default 4)')
     # allow overriding training loop sizes from CLI
-    parser.add_argument('--n_epoch', type=int, default=5)
-    parser.add_argument('--n_episodes', type=int, default=4)
+    parser.add_argument('--n_epoch', type=int, default=10)
+    parser.add_argument('--n_episodes', type=int, default=12)
     parser.add_argument('--evaluate_cycle', type=int, default=2)
     parser.add_argument('--n_actions', type=int, default=5,
                         help='(fallback) number of actions/workcenters when machine_list is not provided')
@@ -139,23 +142,23 @@ def get_mutable_args():
     # === Replay buffer & training settings ======================
     # ============================================================
     # Reduced defaults so warm-up completes faster but training stays stable
-    parser.add_argument('--buffer_size', type=int, default=1000)   # was 3000
-    parser.add_argument('--batch_size', type=int, default=16)      # was 32
-    parser.add_argument('--train_steps', type=int, default=20)     # was 10
-    parser.add_argument('--min_warmup_size', type=int, default=200)  # new: minimum samples before strict warm-up
+    parser.add_argument('--buffer_size', type=int, default=2500)   # was 3000
+    parser.add_argument('--batch_size', type=int, default=32)      # was 32
+    parser.add_argument('--train_steps', type=int, default=30)     # was 10
+    parser.add_argument('--min_warmup_size', type=int, default=800)  # new: minimum samples before strict warm-up
     parser.add_argument('--target_update_cycle', type=int, default=20)  # ✅ frequent sync
-    parser.add_argument('--grad_norm_clip', type=float, default=10)
+    parser.add_argument('--grad_norm_clip', type=float, default=10.0)
 
     # ============================================================
     # === Learning & optimization ================================
     # ============================================================
-    parser.add_argument('--lr', type=float, default=1e-4)         # ✅ stable learning
+    parser.add_argument('--lr', type=float, default=2e-4)         # ✅ stable learning
 
     # ============================================================
     # === Exploration (epsilon schedule) =========================
     # ============================================================
     parser.add_argument('--epsilon_start', type=float, default=1.0)
-    parser.add_argument('--epsilon_end', type=float, default=0.2)
+    parser.add_argument('--epsilon_end', type=float, default=0.05)
     parser.add_argument('--epsilon_anneal_steps', type=int, default=30000)
     parser.add_argument('--epsilon_anneal_scale', type=str, default='step')
 
@@ -179,6 +182,10 @@ def get_mutable_args():
     parser.add_argument('--clean_history', action='store_true', default=False,
                         help='If set, remove previous historydata artifacts at Runner startup')
 
+    # Optional preset selector (e.g. --preset fast). If provided, apply_preset_if_requested
+    # will mutate the args accordingly after parsing.
+    # --preset removed; defaults are set directly in this file.
+
     # Use parse_known_args to avoid failing when external tooling (pytest)
     # injects unknown CLI flags during test collection.
     args, _unknown = parser.parse_known_args()
@@ -193,14 +200,16 @@ def get_mutable_args():
                 pass
     except Exception:
         pass
-     # Güvenli varsayılanlar (Runner / policies tarafından beklenenler)
+    # Güvenli varsayılanlar (Runner / policies tarafından beklenenler)
     args.evaluate_cycle   = getattr(args, "evaluate_cycle", 2)    # lowered for fast test
-    args.n_epoch          = getattr(args, "n_epoch", 5)          # lowered for fast test
-    args.n_episodes       = getattr(args, "n_episodes", 4)       # lowered for fast test
+    # === Overrides disabled ===
+    # Learning-related defaults are now defined exclusively in get_mixer_args().
+    # args.n_epoch          = getattr(args, "n_epoch", 5)          # lowered for fast test
+    # args.n_episodes       = getattr(args, "n_episodes", 4)       # lowered for fast test
     args.save_cycle       = getattr(args, "save_cycle", 500)
-    args.buffer_size      = getattr(args, "buffer_size", 1000)
-    args.batch_size       = getattr(args, "batch_size", 16)
-    args.train_steps      = getattr(args, "train_steps", 20)
+    # args.buffer_size      = getattr(args, "buffer_size", 1000)
+    # args.batch_size       = getattr(args, "batch_size", 16)
+    # args.train_steps      = getattr(args, "train_steps", 20)
     args.rnn_hidden_dim   = getattr(args, "rnn_hidden_dim", 64)
     args.mix_embed_dim    = getattr(args, "mix_embed_dim", 32)
     args.two_hyper_layers = getattr(args, "two_hyper_layers", False)
@@ -249,6 +258,35 @@ def get_mutable_args():
     # but stored for convenience). Existing code uses epsilon_anneal_steps.
     args.epsilon_decay = getattr(args, 'epsilon_decay', 0.95)
 
+    # (preset system removed; runtime defaults are now set directly below)
+
+    # Safe debug dump: write final active args to historydata/args_dump.txt
+    # This is best-effort and must not raise; it helps debugging CLI/preset
+    # interactions without changing runtime behavior. Dump at the end so it
+    # always records the final active args.
+    try:
+        import os
+        history_dir = getattr(args, 'history_dir', './my_data_and_graph/historydata')
+        # Ensure the history directory exists before attempting to open the dump file
+        os.makedirs(history_dir, exist_ok=True)
+        out_path = os.path.join(history_dir, 'args_dump.txt')
+        with open(out_path, 'w', encoding='utf-8') as fh:
+            fh.write('[DEBUG] Final active arguments before training:\n')
+            for key in sorted(vars(args)):
+                try:
+                    val = getattr(args, key)
+                except Exception:
+                    val = '<unreadable>'
+                fh.write(f"{key} = {val!r}\n")
+        try:
+            print(f"[INFO] Active arguments written to {out_path}")
+            print("[DEBUG_DUMP] args_dump.txt successfully written.")
+        except Exception:
+            # printing should never crash; ignore if stdout is unavailable
+            pass
+    except Exception:
+        # best-effort only; do not let debug I/O affect normal execution
+        pass
     return args
 
 
@@ -275,32 +313,41 @@ def _ensure_mutable(args):
 
 def get_mixer_args(args):
     """Optimized QMIX hyperparameters for MASA-QMIX learning stability."""
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    # Work on a deep-copied mutable namespace so callers' originals are never changed.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.rnn_hidden_dim   = 64
     args.qmix_hidden_dim  = 32
     args.two_hyper_layers = True
     args.hyper_hidden_dim = 64
     args.qtran_hidden_dim = 64
 
-    args.lr     = 1e-4
-    args.gamma  = 0.98
-    args.grad_norm_clip = 10
+    # Learning & optimizer defaults tuned for stable, faster local runs
+    args.lr = 2e-4
+    args.gamma = 0.98
+    args.grad_norm_clip = 10.0
 
-    args.batch_size  = 32
-    args.buffer_size = 3000
-    args.train_steps = 10
+    # Replay & training sizes
+    args.episode_limit = 500
+    args.buffer_size = 2500
+    args.batch_size = 32
+    args.train_steps = 30
     args.target_update_cycle = 20
-    args.save_cycle  = 50
+    args.save_cycle = 50
 
+    # Exploration schedule
     args.epsilon_start = 1.0
-    args.epsilon_end   = 0.05
-    args.epsilon_anneal_steps = 50000
+    args.epsilon_end = 0.05
+    args.epsilon_anneal_steps = 30000
 
-    args.n_epoch     = 5      # lowered for fast test
-    args.n_episodes  = 4      # lowered for fast test
-    args.evaluate_cycle = 2   # lowered for fast test
+    # Epoch/episode sizing for mixer default
+    args.n_epoch = 10
+    args.n_episodes = 12
+    args.evaluate_cycle = 2  # keep same
 
-    args.lambda_opt  = 1
+    args.min_warmup_size = 800
+
+    args.lambda_opt = 1
     args.lambda_nopt = 1
     return args
 
@@ -311,8 +358,9 @@ def get_smoke_args():
     This is a convenience wrapper used by tools/tests to reduce repeated
     local overrides across scripts and test files.
     """
-    # Return a mutable, small configuration for smoke tests
-    args = get_mutable_args()
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    # Return a fresh, mutable configuration for smoke tests (work on its copy).
+    args = copy.deepcopy(get_mutable_args())
     # small, fast defaults for smoke runs
     args.n_epoch = 1
     args.n_episodes = 3
@@ -332,7 +380,8 @@ def get_smoke_args():
 
 
 def get_coma_args(args):
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -352,7 +401,8 @@ def get_coma_args(args):
 
 
 def get_centralv_args(args):
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -371,7 +421,8 @@ def get_centralv_args(args):
 
 
 def get_reinforce_args(args):
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.rnn_hidden_dim = 64
     args.critic_dim     = 128
     args.lr_actor       = 1e-4
@@ -390,13 +441,15 @@ def get_reinforce_args(args):
 
 
 def get_commnet_args(args):
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.k = 2 if args.map == '3m' else 3
     return args
 
 
 def get_g2anet_args(args):
-    args = _ensure_mutable(args)
+    # NOTE: This helper returns a modified copy for smoke/test runs; it does not mutate CLI args.
+    args = copy.deepcopy(_ensure_mutable(args))
     args.attention_dim = 32
     args.hard = True
     return args

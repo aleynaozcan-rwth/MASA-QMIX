@@ -1472,6 +1472,64 @@ class MASAEnv:
                         LOG.debug('[REWARD COMPONENTS] %s', self.last_reward_components)
                     except Exception:
                         pass
+
+                # Append components to a CSV in history_dir when logging is enabled
+                try:
+                    # Respect explicit args.enable_logs when available; default to False
+                    enable_logs = False
+                    if getattr(self, 'args', None) is not None:
+                        enable_logs = bool(getattr(self.args, 'enable_logs', False))
+                    else:
+                        enable_logs = bool(getattr(self, 'enable_logs', False))
+
+                    if enable_logs:
+                        try:
+                            import os
+                            hist_dir = None
+                            if getattr(self, 'args', None) is not None:
+                                hist_dir = getattr(self.args, 'history_dir', None)
+                            if not hist_dir:
+                                hist_dir = getattr(self, 'history_dir', None)
+                            if not hist_dir:
+                                hist_dir = os.path.join('my_data_and_graph', 'historydata')
+                            os.makedirs(hist_dir, exist_ok=True)
+                            out_path = os.path.join(hist_dir, 'reward_components_log.txt')
+                            # env_time,CompletedNorm,AvgWait,WIP,ThroughputDelta,LoadVariance,R_global
+                            with open(out_path, 'a', encoding='utf-8') as fh:
+                                try:
+                                    env_time = float(getattr(self.env, 'now', getattr(self, 't', 0.0)))
+                                except Exception:
+                                    env_time = float(getattr(self, 't', 0.0)) if hasattr(self, 't') else 0.0
+                                try:
+                                    c_completed = float(CompletedNorm)
+                                except Exception:
+                                    c_completed = 0.0
+                                try:
+                                    c_avg = float(AvgWaitNorm)
+                                except Exception:
+                                    c_avg = 0.0
+                                try:
+                                    c_wip = float(WIPNorm)
+                                except Exception:
+                                    c_wip = 0.0
+                                try:
+                                    c_through = float(throughput_delta) if 'throughput_delta' in locals() else 0.0
+                                except Exception:
+                                    c_through = 0.0
+                                try:
+                                    c_loadvar = float(load_variance) if 'load_variance' in locals() else 0.0
+                                except Exception:
+                                    c_loadvar = 0.0
+                                try:
+                                    c_rglob = float(R_global) if 'R_global' in locals() else 0.0
+                                except Exception:
+                                    c_rglob = 0.0
+                                fh.write(f"{env_time},{c_completed},{c_avg},{c_wip},{c_through},{c_loadvar},{c_rglob}\n")
+                        except Exception:
+                            # best-effort only
+                            pass
+                except Exception:
+                    pass
             except Exception:
                 pass
 
