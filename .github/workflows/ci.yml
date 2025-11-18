@@ -19,6 +19,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest numpy simpy matplotlib pyyaml
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests
         run: |
