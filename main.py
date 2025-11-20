@@ -14,12 +14,7 @@ from MARL.runner import Runner
 from MARL.common.arguments import (
     get_common_args,
     get_mutable_args,
-    get_coma_args,
     get_mixer_args,
-    get_centralv_args,
-    get_reinforce_args,
-    get_commnet_args,
-    get_g2anet_args,
 )
 
 
@@ -53,20 +48,8 @@ def marl_agent_wrapper(args):
     # shapes (n_actions, n_agents, obs/state dims, episode_limit). Keep
     # `main.py` strictly as orchestration so it does not set or mutate args.
 
-    # --- Algorithm-specific args (env'den sonra çağrılmalı!) ---
-    if args.alg.find("coma") > -1:
-        args = get_coma_args(args)
-    elif args.alg.find("central_v") > -1:
-        args = get_centralv_args(args)
-    elif args.alg.find("reinforce") > -1:
-        args = get_reinforce_args(args)
-    else:
-        args = get_mixer_args(args)
-
-    if args.alg.find("commnet") > -1:
-        args = get_commnet_args(args)
-    if args.alg.find("g2anet") > -1:
-        args = get_g2anet_args(args)
+    # --- Apply QMIX-specific args ---
+    args = get_mixer_args(args)
 
     # Note: Runner will initialize environment-derived shapes (n_agents,
     # n_actions, obs/state dims, episode_limit). Do not mutate `args` here.

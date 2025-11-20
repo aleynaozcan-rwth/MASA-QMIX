@@ -999,6 +999,16 @@ class RolloutWorker:
 
             actions = processed_actions
 
+            # --- Epsilon decay update (per decision step) ---
+            try:
+                # Only decay during training (not evaluation)
+                if not evaluate:
+                    # Linear annealing: epsilon = max(epsilon_end, epsilon - decay_rate)
+                    self.epsilon = max(float(self.epsilon_end), float(self.epsilon) - float(self._eps_decay))
+            except Exception:
+                # Best-effort: don't break training if epsilon update fails
+                pass
+
             # --- Epsilon diagnostics (periodic, non-fatal) ---
             try:
                 try:
