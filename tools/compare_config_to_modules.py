@@ -141,7 +141,8 @@ def compare_configs_to_module_defaults(cfg_dict):
 def _pretty(v):
     try:
         return json.dumps(v, indent=2, sort_keys=True)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return repr(v)
 
 

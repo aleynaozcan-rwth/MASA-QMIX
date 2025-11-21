@@ -11,6 +11,7 @@ import os
 import torch
 import torch.nn.functional as F
 import time
+import threading  # [PHASE7] For thread-safe target update counter
 from MARL.network.base_net import RNNAgent
 from MARL.network.qmix_net import QMixNet as QMixer
 
@@ -35,6 +36,19 @@ class QMIX:
         if self.args.reuse_network:
             input_shape += self.n_agents
 
+        # [PHASE4-FIX] Validate network dimensions are positive
+        if input_shape <= 0:
+            raise ValueError(
+                f"[PHASE4] Invalid input_shape: {input_shape}. "
+                f"obs_shape={self.obs_shape}, n_actions={self.n_actions}, n_agents={self.n_agents}"
+            )
+        if self.state_shape <= 0:
+            raise ValueError(f"[PHASE4] Invalid state_shape: {self.state_shape}")
+        if self.n_agents <= 0:
+            raise ValueError(f"[PHASE4] Invalid n_agents: {self.n_agents}")
+        if self.n_actions <= 0:
+            raise ValueError(f"[PHASE4] Invalid n_actions: {self.n_actions}")
+
         print(f"[QMIX Init] RNN input shape = {input_shape} "
               f"(obs={self.obs_shape}, last_action={self.args.last_action}, reuse_network={self.args.reuse_network})")
 
@@ -48,8 +62,9 @@ class QMIX:
         self.params = list(self.eval_rnn.parameters()) + list(self.eval_mixer.parameters())
         self.optimizer = torch.optim.RMSprop(self.params, lr=self.args.lr)
         self.train_step = 0
-        # diagnostics
+        # [PHASE7] Task 7.2: Thread-safe target update counter
         self.target_update_count = 0
+        self._target_update_lock = threading.Lock()
 
         # =====================================================
         # === Canonical Model Save Directory (always same) ====
@@ -91,10 +106,12 @@ class QMIX:
         q_evals, q_targets = self._get_q_values_replay(o, o_next, u_onehot)
         q_eval_chosen = torch.gather(q_evals, dim=3, index=u).squeeze(3)
 
+        # [PHASE1-FIX] Apply mask only to q_targets for max operation, NOT to q_evals
+        # Masking q_evals would incorrectly penalize actually-taken actions
+        q_target_max_input = q_targets.clone()
         if avail_u_next is not None:
-            q_targets = q_targets.clone()
-            q_targets[avail_u_next == 0.0] = -1e9
-        q_target_max = q_targets.max(dim=3)[0]
+            q_target_max_input[avail_u_next == 0.0] = -1e9
+        q_target_max = q_target_max_input.max(dim=3)[0]
 
         # --- Mix ---
         q_total_eval = self.eval_mixer(q_eval_chosen, s)
@@ -110,32 +127,14 @@ class QMIX:
         self.optimizer.zero_grad()
         loss.backward()
 
-        # Lightweight diagnostics: gradient norms before/after clipping and avg-Q on this batch
-        try:
-            # compute global grad norm before clipping
-            grad_norm_before = 0.0
-            for p in self.params:
-                if p.grad is not None:
-                    grad_norm_before += float(p.grad.data.norm(2).item() ** 2)
-            grad_norm_before = float(grad_norm_before ** 0.5)
-        except Exception:
-            grad_norm_before = None
-
-        try:
-            torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
-        except Exception:
-            # if clipping fails silently continue
-            pass
-
-        try:
-            # compute global grad norm after clipping
-            grad_norm_after = 0.0
-            for p in self.params:
-                if p.grad is not None:
-                    grad_norm_after += float(p.grad.data.norm(2).item() ** 2)
-            grad_norm_after = float(grad_norm_after ** 0.5)
-        except Exception:
-            grad_norm_after = None
+        # [PHASE6-FIX] Task 6.6: Use clip_grad_norm_ return value for grad norm computation
+        # This is more efficient (computed internally) and avoids manual loops with .item() calls
+        grad_norm_before = torch.nn.utils.clip_grad_norm_(self.params, float('inf'))  # Compute norm without clipping
+        grad_norm_before = float(grad_norm_before)  # Convert to Python float once
+        
+        # [C1] Gradient clipping is CRITICAL for training stability - must not fail silently
+        grad_norm_after = torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+        grad_norm_after = float(grad_norm_after)  # Convert to Python float once
 
         self.optimizer.step()
 
@@ -146,18 +145,46 @@ class QMIX:
         # ======================================================
         # === Safe Auto-Save Checkpoint (every 100 steps) ======
         # ======================================================
+        # [C1] Checkpoint saves are CRITICAL - fail-fast if save fails
+        # [PHASE6-FIX] Task 6.5: Atomic checkpoint save with validation
         if (train_step + 1) % 100 == 0 or train_step == (self.args.train_steps - 1):
+            rnn_path = os.path.join(self.model_dir, "rnn_net_params.pkl")
+            mix_path = os.path.join(self.model_dir, "qmix_net_params.pkl")
+            
+            # Save to temp files first
+            rnn_temp = rnn_path + '.tmp'
+            mix_temp = mix_path + '.tmp'
+            
             try:
-                rnn_path = os.path.join(self.model_dir, "rnn_net_params.pkl")
-                mix_path = os.path.join(self.model_dir, "qmix_net_params.pkl")
-                torch.save(self.eval_rnn.state_dict(), rnn_path)
-                torch.save(self.eval_mixer.state_dict(), mix_path)
+                torch.save(self.eval_rnn.state_dict(), rnn_temp)
+                torch.save(self.eval_mixer.state_dict(), mix_temp)
+                
+                # [PHASE6-FIX] Verify files were written correctly
+                if not os.path.exists(rnn_temp) or os.path.getsize(rnn_temp) == 0:
+                    raise RuntimeError(f"[PHASE6] RNN checkpoint file empty or missing: {rnn_temp}")
+                if not os.path.exists(mix_temp) or os.path.getsize(mix_temp) == 0:
+                    raise RuntimeError(f"[PHASE6] Mixer checkpoint file empty or missing: {mix_temp}")
+                
+                # [PHASE6-FIX] Atomic rename (overwrites old checkpoint only if new one is valid)
+                os.replace(rnn_temp, rnn_path)
+                os.replace(mix_temp, mix_path)
+                
                 print(f"[QMIX] ✅ Checkpoint saved @ step {train_step + 1}\n"
                       f"   RNN  → {rnn_path}\n   MIX  → {mix_path}")
             except Exception as e:
-                print(f"[QMIX WARNING] Failed to save checkpoint: {e}")
+                # Clean up temp files on error
+                try:
+                    if os.path.exists(rnn_temp):
+                        os.remove(rnn_temp)
+                    if os.path.exists(mix_temp):
+                        os.remove(mix_temp)
+                except Exception:
+                    pass
+                # Re-raise original error
+                raise RuntimeError(f"[PHASE6] Checkpoint save failed at step {train_step + 1}: {e}") from e
 
         # --- Logging ---
+        # [C1] Loss/TD logging - best effort (Rule 3), diagnostics are informational only
         try:
             os.makedirs("./my_data_and_graph/historydata", exist_ok=True)
             with open("./my_data_and_graph/historydata/loss.txt", "a") as f:
@@ -165,29 +192,25 @@ class QMIX:
             with open("./my_data_and_graph/historydata/td_error.txt", "a") as f:
                 mean_td = float(td_error.abs().mean().item())
                 print(mean_td, file=f)
+            
             # append diagnostics line (lightweight, rate-limited)
-            try:
-                diagnostics_every = int(getattr(self.args, "diagnostics_every", 20) or 20)
-            except Exception:
-                diagnostics_every = 20
-
-            try:
-                if diagnostics_every > 0 and (train_step % diagnostics_every == 0):
-                    avg_q = float(q_total_eval.mean().detach().cpu().item())
-                    ts = time.time()
-                    diag_path = "./my_data_and_graph/historydata/diagnostics_log.txt"
-                    with open(diag_path, "a") as df:
-                        # CSV: ts,train_step,avg_q,grad_norm_before,grad_norm_after,target_updates,loss,td_error
-                        df.write(f"{ts},{train_step},{avg_q},{grad_norm_before},{grad_norm_after},{self.target_update_count},{float(loss.item())},{float(td_error.abs().mean().item())}\n")
-                    # also print a concise console line
-                    try:
-                        print(f"[QMIX Diagnostics] step={train_step} avg_q={avg_q:.4f} grad_before={grad_norm_before} grad_after={grad_norm_after} target_updates={self.target_update_count}")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+            diagnostics_every = int(getattr(self.args, "diagnostics_every", 20) or 20)
+            if diagnostics_every > 0 and (train_step % diagnostics_every == 0):
+                avg_q = float(q_total_eval.mean().detach().cpu().item())
+                ts = time.time()
+                # [PHASE7] Task 7.2: Use lock when reading target_update_count for logging
+                with self._target_update_lock:
+                    target_update_count_snapshot = self.target_update_count
+                diag_path = "./my_data_and_graph/historydata/diagnostics_log.txt"
+                with open(diag_path, "a") as df:
+                    # CSV: ts,train_step,avg_q,grad_norm_before,grad_norm_after,target_updates,loss,td_error
+                    df.write(f"{ts},{train_step},{avg_q},{grad_norm_before},{grad_norm_after},{target_update_count_snapshot},{float(loss.item())},{float(td_error.abs().mean().item())}\n")
+                # also print a concise console line
+                print(f"[QMIX Diagnostics] step={train_step} avg_q={avg_q:.4f} grad_before={grad_norm_before} grad_after={grad_norm_after} target_updates={target_update_count_snapshot}")
+        except Exception as e:
+            # [C1] Logging failures should not crash training (Rule 3)
+            import logging
+            logging.getLogger(__name__).warning(f"[C1] Diagnostics logging failed (train_step={train_step}): {e}")
 
         return {"loss": float(loss.item()), "td_error": float(td_error.abs().mean().item())}
 
@@ -230,10 +253,14 @@ class QMIX:
     def _update_target_networks(self):
         self.target_rnn.load_state_dict(self.eval_rnn.state_dict())
         self.target_mixer.load_state_dict(self.eval_mixer.state_dict())
+        # [C1] Target update counter is best-effort diagnostics (Rule 3)
+        # [PHASE7] Task 7.2: Use lock to protect counter increment
         try:
-            self.target_update_count += 1
-        except Exception:
-            pass
+            with self._target_update_lock:
+                self.target_update_count += 1
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[C1] Failed to increment target_update_count (diagnostics only): {e}")
 
     def init_hidden(self, episode_num):
         # GRU expects hidden shape (num_layers * num_directions, batch, hidden_size)
@@ -249,69 +276,62 @@ class QMIX:
 
         obs_batch: list or array of shape (n_agents, obs_dim) or list-of-arrays
         avail_batch: optional list of per-agent availability vectors (list or np.array)
+        epsilon: exploration rate (required for training, optional for evaluation)
         Returns: list of integer actions (one per agent)
         """
         import numpy as _np
         to_t = lambda x: torch.tensor(x, dtype=torch.float32, device=self.device)
 
-        # Determine epsilon
+        # [PHASE8-FIX] Task 8.4 & 8.5: Epsilon fallback with warning (required for training)
         if epsilon is None:
-            try:
-                epsilon = float(getattr(self.args, 'epsilon', 0.0))
-            except Exception:
-                epsilon = 0.0
+            epsilon = float(getattr(self.args, 'epsilon', 0.0))
+            if not evaluate:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[PHASE8] select_actions called without epsilon during training. "
+                    f"Falling back to args.epsilon={epsilon}. Please provide epsilon explicitly."
+                )
 
         # Normalize obs_batch to tensor shape (1, n_agents, obs_dim)
-        try:
-            obs_arr = _np.asarray(obs_batch, dtype=_np.float32)
-            if obs_arr.ndim == 1:
-                obs_arr = obs_arr.reshape(1, -1)
-            if obs_arr.ndim == 2:
-                # assume (n_agents, obs_dim)
-                obs_t = to_t(obs_arr).unsqueeze(0)
-            elif obs_arr.ndim == 3:
-                obs_t = to_t(obs_arr)
-            else:
-                obs_t = to_t(obs_arr).unsqueeze(0)
-        except Exception:
-            # fallback: single zeros
-            obs_t = torch.zeros((1, self.n_agents, self.obs_shape), dtype=torch.float32, device=self.device)
+        obs_arr = _np.asarray(obs_batch, dtype=_np.float32)
+        if obs_arr.ndim == 1:
+            obs_arr = obs_arr.reshape(1, -1)
+        if obs_arr.ndim == 2:
+            # assume (n_agents, obs_dim)
+            obs_t = to_t(obs_arr).unsqueeze(0)
+        elif obs_arr.ndim == 3:
+            obs_t = to_t(obs_arr)
+        else:
+            obs_t = to_t(obs_arr).unsqueeze(0)
 
         # Ensure hidden state is initialized for a single-step batch
-        try:
-            self.init_hidden(episode_num=1)
-        except Exception:
-            pass
+        self.init_hidden(episode_num=1)
 
         # Build inputs using the same helper as training
-        try:
-            u_onehot = None
-            inputs = self._get_inputs_t(obs_t, None, episode_num=1)
-        except Exception:
-            inputs = obs_t
+        u_onehot = None
+        inputs = self._get_inputs_t(obs_t, None, episode_num=1)
 
         # Forward through eval_rnn
-        try:
-            q_vals, _ = self.eval_rnn(inputs, self.eval_hidden)
-            # q_vals shape: (episode_num * n_agents, n_actions)
-            q_vals = q_vals.view(1, self.n_agents, -1).squeeze(0).detach().cpu().numpy()
-        except Exception:
-            # fallback random / zeros
-            q_vals = _np.zeros((self.n_agents, int(self.n_actions)))
+        q_vals, _ = self.eval_rnn(inputs, self.eval_hidden)
+        # q_vals shape: (episode_num * n_agents, n_actions)
+        q_vals = q_vals.view(1, self.n_agents, -1).squeeze(0).detach().cpu().numpy()
 
         actions = []
+        # A1: Fail-fast validation - avail_batch must match n_agents if provided
+        if avail_batch is not None:
+            if len(avail_batch) != q_vals.shape[0]:
+                raise ValueError(
+                    f"avail_batch length mismatch: got {len(avail_batch)}, "
+                    f"expected {q_vals.shape[0]} (n_agents)"
+                )
+        
         for a_idx in range(q_vals.shape[0]):
             q_row = q_vals[a_idx]
             # apply availability mask if provided
             allowed = None
             if avail_batch is not None:
-                try:
-                    allowed = list(_np.asarray(avail_batch[a_idx], dtype=_np.int32))
-                except Exception:
-                    try:
-                        allowed = list(_np.asarray(avail_batch[0], dtype=_np.int32))
-                    except Exception:
-                        allowed = None
+                # Fail-fast: if avail_batch is provided, conversion must succeed
+                allowed = list(_np.asarray(avail_batch[a_idx], dtype=_np.int32))
 
             if allowed is not None:
                 # mask unavailable actions by setting very low Q
@@ -326,13 +346,11 @@ class QMIX:
                 if allowed is None:
                     act = int(_np.argmax(masked_q))
                 else:
-                    try:
-                        allowed_inds = [i for i, v in enumerate(mask) if int(v)]
-                        if allowed_inds:
-                            act = int(_np.random.choice(allowed_inds))
-                        else:
-                            act = int(_np.argmax(masked_q))
-                    except Exception:
+                    # Fail-fast: mask processing must succeed
+                    allowed_inds = [i for i, v in enumerate(mask) if int(v)]
+                    if allowed_inds:
+                        act = int(_np.random.choice(allowed_inds))
+                    else:
                         act = int(_np.argmax(masked_q))
             else:
                 # greedy

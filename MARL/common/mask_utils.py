@@ -109,48 +109,42 @@ def build_machine_major_mask(env, job_or_job_id) -> List[int]:
         job_idx = None
 
     if matrix is not None and job_idx is not None:
-        try:
-            row = matrix[int(job_idx)]
-            return [int(bool(x)) for x in list(row)]
-        except Exception:
-            pass
+        # [C1] Matrix lookup is CRITICAL - fail-fast if indexing fails
+        row = matrix[int(job_idx)]
+        return [int(bool(x)) for x in list(row)]
 
     # Fallback: try env._avail_row_for_job(job)
-    try:
-        if job_idx is not None:
-            # try to retrieve JobAgent by id from env.jobs
-            try:
-                job_obj = None
-                for j in getattr(env, 'jobs', []) or []:
-                    try:
-                        if int(getattr(j, 'id', getattr(j, 'job_id', -1))) == int(job_idx):
-                            job_obj = j
-                            break
-                    except Exception:
-                        continue
-                if job_obj is not None:
-                    row = env._avail_row_for_job(job_obj)
-                else:
-                    # last resort: if env.jobs indexed by id equals index
-                    try:
-                        job_obj = getattr(env, 'jobs', [])[int(job_idx)]
-                        row = env._avail_row_for_job(job_obj)
-                    except Exception:
-                        row = None
-            except Exception:
-                row = None
+    if job_idx is not None:
+        # try to retrieve JobAgent by id from env.jobs
+        job_obj = None
+        for j in getattr(env, 'jobs', []) or []:
+            # [C1] Job ID comparison - fail-fast if getattr fails
+            if int(getattr(j, 'id', getattr(j, 'job_id', -1))) == int(job_idx):
+                job_obj = j
+                break
+        
+        if job_obj is not None:
+            row = env._avail_row_for_job(job_obj)
         else:
-            # job_or_job_id might be a JobAgent-like
-            row = env._avail_row_for_job(job_or_job_id)
-        if row is None:
-            return []
-        return [int(bool(x)) for x in list(row)]
-    except Exception:
-        # Conservative permissive fallback: assume all machines available
-        try:
-            mlist = getattr(getattr(env, 'workcenters_meta', None), 'machine_list', []) or []
-            if mlist:
-                return [1] * len(mlist)
-            return [1] * int(getattr(env, 'num_wcs', 1))
-        except Exception:
-            return [1]
+            # last resort: if env.jobs indexed by id equals index
+            try:
+                job_obj = getattr(env, 'jobs', [])[int(job_idx)]
+                row = env._avail_row_for_job(job_obj)
+            except (IndexError, AttributeError) as e:
+                # [C1] Job lookup failed - raise explicit error (Rule 2: no fake defaults)
+                raise RuntimeError(
+                    f"[C1] Failed to find job with idx={job_idx} in env.jobs. "
+                    f"Cannot compute availability mask without valid job reference."
+                ) from e
+    else:
+        # job_or_job_id might be a JobAgent-like
+        row = env._avail_row_for_job(job_or_job_id)
+    
+    if row is None:
+        # [C1] No availability row found - raise explicit error (Rule 2: no fake defaults)
+        raise RuntimeError(
+            f"[C1] Could not determine availability mask for job {job_or_job_id}. "
+            f"env._avail_row_for_job returned None. Check job state and machine configuration."
+        )
+    
+    return [int(bool(x)) for x in list(row)]

@@ -62,11 +62,11 @@ class TaskGenerator:
                         for opname, v in (ops_map or {}).items():
                             try:
                                 proc_by_op.setdefault(opname, {})[mname] = float(v)
-                            except Exception:
+                            except Exception as e:
                                 proc_by_op.setdefault(opname, {})[mname] = v
                     self.proc_time_means = proc_by_op
                     logging.getLogger(__name__).info("[TaskGenerator] Loaded processing_time_means from WorkCenter defaults")
-            except Exception:
+            except Exception as e:
                 # if this fails, keep proc_time_means empty and raise below
                 pass
 
@@ -76,7 +76,7 @@ class TaskGenerator:
         # map machine order -> machine name from WorkCenters
         try:
             self.machine_name_by_wc = {idx: name for idx, name in enumerate(getattr(self.workcenters, 'machine_order', []))}
-        except Exception:
+        except Exception as e:
             self.machine_name_by_wc = {}
 
     def generate_constrained_task(self, num_ops: Optional[int] = None, jobagent_id: Optional[int] = None):
@@ -92,7 +92,7 @@ class TaskGenerator:
         # Precompute available operation indices from WorkCenters as a fallback
         try:
             available_ops_from_wc = list(getattr(self.workcenters, 'operations_map', {}).keys())
-        except Exception:
+        except Exception as e:
             available_ops_from_wc = []
 
         while len(ops_sequence) < num_ops and retries < self.max_retries * num_ops:
@@ -107,14 +107,14 @@ class TaskGenerator:
                     try:
                         wc = self._py_rng.choice(self.workcenters.workcenters_list)
                         valid_ops = [j for j in getattr(wc, 'resource_ids_list', []) if j not in used_job_ids]
-                    except Exception:
+                    except Exception as e:
                         valid_ops = []
 
                     if valid_ops:
                         op_id = self._py_rng.choice(valid_ops)
                         try:
                             job_obj = self.jobs[op_id]
-                        except Exception:
+                        except Exception as e:
                             job_obj = None
                     else:
                         # fallback: sample from jobs registry by integer indices if possible
@@ -123,7 +123,7 @@ class TaskGenerator:
                             idx = int(self._py_rng.randrange(len(self.jobs)))
                             job_obj = self.jobs[idx]
                             op_id = getattr(job_obj, 'index_id', None)
-                        except Exception:
+                        except Exception as e:
                             job_obj = None
 
                 # If job_obj still not found, sample from WorkCenters.operations_map
@@ -139,11 +139,11 @@ class TaskGenerator:
                                     self.name = f"Op{index_id+1}"
                             job_obj = _SimpleJobFallback(op_idx)
                             op_id = op_idx
-                        except Exception:
+                        except Exception as e:
                             job_obj = None
                     else:
                         job_obj = None
-            except Exception:
+            except Exception as e:
                 job_obj = None
 
             if job_obj is None:
@@ -152,7 +152,7 @@ class TaskGenerator:
 
             try:
                 new_job = type(job_obj)(job_obj.index_id, job_obj.codes, job_obj.name)
-            except Exception:
+            except Exception as e:
                 class _SimpleJob:
                     def __init__(self, index_id, codes, name):
                         self.index_id = index_id
@@ -178,7 +178,7 @@ class TaskGenerator:
         # TaskGenerator has a durations mapping available at runtime.
         try:
             logging.getLogger(__name__).info("[Diag] proc_time_means length: %d", len(getattr(self, 'proc_time_means', {}) or {}))
-        except Exception:
+        except Exception as e:
             logging.getLogger(__name__).info("[Diag] proc_time_means length: (failed to compute)")
         # Allow env to be either a bare simpy.Environment or a MASAEnv wrapper.
         # If the provided `env` is a plain simpy.Environment it will not
@@ -195,25 +195,25 @@ class TaskGenerator:
             try:
                 if env is not None and hasattr(env, attr):
                     return getattr(env, attr)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             try:
                 if wrapper_env is not None and hasattr(wrapper_env, attr):
                     return getattr(wrapper_env, attr)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             try:
                 if sim_env is not None and hasattr(sim_env, attr):
                     return getattr(sim_env, attr)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             return default
 
         while float(_get_attr('now', 0.0)) < float(_get_attr('episode_limit', float('inf'))) and not bool(_get_attr('done', False)):
             try:
                 # Use the internal Python RNG for exponential inter-arrival
                 ia = float(self._py_rng.expovariate(lam))
-            except Exception:
+            except Exception as e:
                 ia = float(1.0 / max(1e-12, lam))
             # yield on the simulation environment (simpy.Environment)
             yield sim_env.timeout(ia)
@@ -225,8 +225,8 @@ class TaskGenerator:
                 logging.getLogger(__name__).warning("[TaskGen] generation failed: %s", e, exc_info=True)
                 try:
                     logging.getLogger(__name__).info("[Diag] generate_constrained_task() failed: %s", e)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
 
             converted_ops = []
@@ -237,8 +237,8 @@ class TaskGenerator:
                     caps = list(mdata.get('capabilities', []))
                     for c in caps:
                         capability_map.setdefault(int(c), []).append(int(wc))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             for jobobj in ops_objs:
                 op_type = int(getattr(jobobj, 'index_id', 0))
@@ -262,7 +262,7 @@ class TaskGenerator:
                             if int(mdata.get('workcenter', -1)) == int(wc):
                                 machine_name = mname
                                 break
-                    except Exception:
+                    except Exception as e:
                         machine_name = None
 
                     if not machine_name:
@@ -279,7 +279,7 @@ class TaskGenerator:
                             op_map = env_proc.get(op_name, {}) or {}
                         else:
                             op_map = {}
-                    except Exception:
+                    except Exception as e:
                         op_map = {}
                     if not op_map:
                         op_map = self.proc_time_means.get(op_name, {})
@@ -290,11 +290,11 @@ class TaskGenerator:
                         # map machine name -> machine index when emitting per-machine durations
                         try:
                             mi = int(getattr(getattr(self, '_owner_env', None), 'workcenters_meta', None).machine_index.get(machine_name)) if getattr(self, '_owner_env', None) is not None else None
-                        except Exception:
+                        except Exception as e:
                             try:
                                 # fallback: derive index from machines_cfg ordering
                                 mi = int(self.machine_name_by_wc.get(int(wc), 0))
-                            except Exception:
+                            except Exception as e:
                                 mi = None
                         if mi is None:
                             # best-effort: do not fail here, attempt to use 0
@@ -322,8 +322,8 @@ class TaskGenerator:
                 logging.getLogger(__name__).exception("[Env] Failed to add dynamic job from TaskGenerator: %s", e)
                 try:
                     logging.getLogger(__name__).info("[Diag] add_job() failed during TaskGenerator.arrival_loop at sim.now=%s: %s", getattr(getattr(env, 'env', env), 'now', None), e)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     def start(self, env: simpy.Environment, arrival_lambda: float):
         try:
@@ -368,8 +368,8 @@ class TaskGenerator:
                 caps = list(mdata.get('capabilities', []))
                 for c in caps:
                     capability_map.setdefault(int(c), []).append(int(wc))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         for jobobj in ops_objs:
             op_type = int(getattr(jobobj, 'index_id', 0))
@@ -392,7 +392,7 @@ class TaskGenerator:
             try:
                 if wc_meta is not None:
                     machine_index_map = getattr(wc_meta, 'machine_index', {}) or {}
-            except Exception:
+            except Exception as e:
                 machine_index_map = {}
 
             for wc in allowed_wcs:
@@ -403,7 +403,7 @@ class TaskGenerator:
                         if int(mdata.get('workcenter', -1)) == int(wc):
                             machine_name = mname
                             break
-                except Exception:
+                except Exception as e:
                     machine_name = None
 
                 if not machine_name:
@@ -414,10 +414,10 @@ class TaskGenerator:
 
                 try:
                     mi = int(machine_index_map.get(machine_name))
-                except Exception:
+                except Exception as e:
                     try:
                         mi = int(self.machine_name_by_wc.get(int(wc), 0))
-                    except Exception:
+                    except Exception as e:
                         mi = 0
 
                 per_machine_indices.append(int(mi))

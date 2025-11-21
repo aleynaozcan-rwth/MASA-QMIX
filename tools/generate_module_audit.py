@@ -37,7 +37,8 @@ def parse_imports(path):
     try:
         src = path.read_text()
         tree = ast.parse(src)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return []
     mods = []
     for node in ast.walk(tree):
@@ -54,7 +55,8 @@ def defs_in_file(path):
     try:
         src = path.read_text()
         tree = ast.parse(src)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return {'functions': [], 'classes': []}
     funcs = []
     classes = []
@@ -118,7 +120,8 @@ def find_references(name, all_files):
     for p in all_files:
         try:
             txt = p.read_text(errors='ignore')
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             continue
         if name in txt:
             refs.append(str(p.relative_to(ROOT)))

@@ -24,23 +24,24 @@ from MARL.common.arguments import (
 
 def marl_agent_wrapper(args):
     """Standard MARL training loop (supports QMIX, COMA, etc.)."""
+    
+    # [PHASE9-FIX] Task 9.4: Set NumPy random seed for reproducibility
+    if hasattr(args, 'seed'):
+        np.random.seed(args.seed)
+        import logging
+        logging.getLogger(__name__).info(f"[PHASE9] NumPy random seed set to {args.seed}")
 
     # --- Environment (MASAEnv) ---
-    # Inject the centralized args namespace — environment will not read CLI
-    # itself and must be driven by the orchestrator.
-    # If the orchestrator provided config_path/auto_load_config flags on args
-    # pass them into MASAEnv so it can load/merge runtime configuration.
-    # Construct environment without auto-loading YAML/config to ensure
-    # the environment runs purely from its module defaults and injected args.
+    # Construct environment without config - all parameters come from args
     auto_arrivals = getattr(args, 'arrival_lambda', 0.0) > 0.0
     try:
         if auto_arrivals:
             LOG.info("[Main] Auto-starting TaskGenerator (arrival_lambda=%.3f)", float(getattr(args, 'arrival_lambda', 0.0)))
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     env = MASAEnv(
         args=args,
-        config_path=getattr(args, 'config_path', None),
+        config_path=None,
         auto_load_config=False,
         auto_start_arrivals=auto_arrivals,
     )
@@ -63,19 +64,26 @@ def marl_agent_wrapper(args):
     print(f"Total epochs: {args.n_epoch}")
     print(f"Episodes per epoch: {args.n_episodes}")
     print(f"Evaluation every {args.evaluate_cycle} epochs")
-    print(f"Observation dim: {args.obs_shape}")
-    print(f"State dim: {args.state_shape}")
     print("====================================")
 
     runner = Runner(env, args)
+    
+    # Print environment-derived shapes after Runner initialization
+    print(f"\n=== Environment-Derived Shapes ===")
+    print(f"Observation dim: {args.obs_shape}")
+    print(f"State dim: {args.state_shape}")
+    print(f"Number of agents: {args.n_agents}")
+    print(f"Number of actions: {args.n_actions}")
+    print("==================================\n")
+    
     if args.learn:
         runner.run(num=1)
         # Post-run quick summary for developer visibility
         try:
             for idx, r in enumerate(getattr(runner, 'episode_rewards', [])):
                 print(f"Episode {idx} | Total reward: {r:.4f}")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         print("Episode finished")
     else:
         win_rate, reward, _ = runner.evaluate([], 0)
@@ -93,8 +101,8 @@ def random_agent_wrapper(args):
     try:
         if auto_arrivals:
             LOG.info("[Main] Auto-starting TaskGenerator (arrival_lambda=%.3f)", float(getattr(args, 'arrival_lambda', 0.0)))
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     env = MASAEnv(
         args=args,
         config_path=getattr(args, 'config_path', None),
@@ -171,11 +179,11 @@ if __name__ == "__main__":
                     os.remove(path)
                 elif os.path.isdir(path):
                     shutil.rmtree(path)
-            except Exception:
+            except Exception as e:
                 # best-effort: skip items we can't remove
-                pass
-    except Exception:
-        pass
+                logging.getLogger(__name__).warning(f"[C1] Failed to remove {path}: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # Select execution mode
     if getattr(args, 'mode', 'marl') == "marl":

@@ -16,6 +16,9 @@ import matplotlib.patheffects as patheffects
 from matplotlib.ticker import MultipleLocator, MaxNLocator
 from matplotlib.patches import Patch
 import re
+import threading  # [PHASE7] For thread-safe reward logging
+from dataclasses import dataclass, field, asdict  # [PHASE8] For gantt record schema
+from typing import Optional, Dict, Any  # [PHASE8] Type hints for gantt schema
 # Line2D was previously used for arrival legend; no longer needed
 
 # Rollout
@@ -23,24 +26,97 @@ from MARL.common.rollout import RolloutWorker
 try:
     from MARL.common.rollout import CommRolloutWorker  # type: ignore
 except Exception as e:
-    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+    # [C1] CommRolloutWorker is optional (Rule 3) - fallback to RolloutWorker
+    logging.getLogger(__name__).warning(f"[C1] CommRolloutWorker not available, using RolloutWorker: {e}")
     CommRolloutWorker = RolloutWorker
 
-try:
-    from MARL.common.mask_utils import build_machine_major_mask
-except Exception:
-    build_machine_major_mask = None
+# [C1] mask_utils is REQUIRED for action masking - fail-fast if not available
+from MARL.common.mask_utils import build_machine_major_mask
 
 # Agents / Buffer
 from MARL.agent.agent import Agents, CommAgents
 from MARL.common.replay_buffer import ReplayBuffer
 from MARL.common.terms import t  # unified terminology helper
-# gantt helpers
+# gantt helpers (visualization only - Rule 3)
 try:
     from utils import gantt as gantt_utils
 except Exception as e:
-    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+    logging.getLogger(__name__).warning(f"[C1] Gantt utilities not available (visualization only): {e}")
     gantt_utils = None
+
+
+# [PHASE8] Task 8.1: Gantt record schema for validation and type safety
+@dataclass
+class GanttRecord:
+    """Schema for gantt chart records produced by environment.
+    
+    Required fields:
+        start: Start time of operation
+        end: End time of operation
+        op_idx: Operation index (type)
+        wc_idx: Work center (machine) index
+        job_id: Job identifier
+        op_grp: Operation group identifier
+        arrival: Job arrival time
+        duration: Operation processing duration
+    
+    Optional fields:
+        episode: Episode number (None if not tracked)
+        decision_trace: Decision metadata dict (None if not tracked)
+    """
+    start: float
+    end: float
+    op_idx: int
+    wc_idx: int
+    job_id: int
+    op_grp: Any  # Can be int or str
+    arrival: float
+    duration: float
+    episode: Optional[int] = None
+    decision_trace: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """Validate fields after initialization."""
+        # [PHASE8-FIX] Task 8.1: Comprehensive validation
+        if not isinstance(self.start, (int, float)) or self.start < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.start must be non-negative number, got {self.start}")
+        if not isinstance(self.end, (int, float)) or self.end < self.start:
+            raise ValueError(f"[PHASE8] GanttRecord.end must be >= start, got end={self.end}, start={self.start}")
+        if not isinstance(self.op_idx, int) or self.op_idx < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.op_idx must be non-negative int, got {self.op_idx}")
+        if not isinstance(self.wc_idx, int) or self.wc_idx < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.wc_idx must be non-negative int, got {self.wc_idx}")
+        if not isinstance(self.job_id, int) or self.job_id < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.job_id must be non-negative int, got {self.job_id}")
+        if not isinstance(self.arrival, (int, float)) or self.arrival < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.arrival must be non-negative number, got {self.arrival}")
+        if not isinstance(self.duration, (int, float)) or self.duration < 0:
+            raise ValueError(f"[PHASE8] GanttRecord.duration must be non-negative number, got {self.duration}")
+        if self.episode is not None and (not isinstance(self.episode, int) or self.episode < 0):
+            raise ValueError(f"[PHASE8] GanttRecord.episode must be non-negative int or None, got {self.episode}")
+
+
+def validate_gantt_record(rec: Dict[str, Any]) -> GanttRecord:
+    """Validate and convert dict gantt record to GanttRecord dataclass.
+    
+    Args:
+        rec: Dictionary with gantt record fields
+        
+    Returns:
+        Validated GanttRecord instance
+        
+    Raises:
+        ValueError: If required fields missing or invalid
+    """
+    required_fields = ['start', 'end', 'op_idx', 'wc_idx', 'job_id', 'op_grp', 'arrival', 'duration']
+    for field in required_fields:
+        if field not in rec:
+            raise ValueError(f"[PHASE8] GanttRecord missing required field: {field}")
+    
+    try:
+        return GanttRecord(**rec)
+    except TypeError as e:
+        raise ValueError(f"[PHASE8] GanttRecord validation failed: {e}")
 
 
 def plot_gantt(for_gantt_data, filename="gantt.png"):
@@ -58,8 +134,8 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
     try:
         fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
     # choose color palette keyed by operation type for readability
     # collect unique operation identifiers (int or str) and job ids
     op_vals = []
@@ -72,7 +148,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
                 op_vals.append(rec[2])
                 job_ids.append(int(rec[4]))
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 continue
     op_vals = sorted(list({int(v) if isinstance(v, (int, float)) and float(v).is_integer() else v for v in op_vals}))
     job_ids = sorted(list(set(job_ids)))
@@ -110,7 +186,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
                 if isinstance(operation, (float, int)) and float(operation).is_integer():
                     op_key = int(operation)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
             color = op_color_map.get(op_key, "gray")
             # place bars as full-unit rows with bottom at job id so center is job_id+0.5
@@ -120,7 +196,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
                 ax.axvline(float(start), linestyle=':', alpha=0.35, color='gray', zorder=1)
                 ax.axvline(float(end), linestyle=':', alpha=0.25, color='gray', zorder=1)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
             # choose bar style: default linewidth/alpha and edge; narrow bars get slightly thicker edge
             bar_kwargs = dict(left=float(start), color=color, edgecolor='black', linewidth=0.5, alpha=0.95)
@@ -136,7 +212,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
                 # width computed above
                 pass
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 width = 0.0
             # choose fontsize by thresholds
             # label visibility & size rules per user request
@@ -153,7 +229,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
             plotted_ops.append(op_key)
             # arrival timestamps are kept for CSV only; no on-plot markers
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             continue
 
     jobagent_ids = job_ids
@@ -168,7 +244,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
             # add a small vertical margin so bars don't touch plot edges
             ax.set_ylim(min_j - 0.1, max_j + 1 + 0.1)
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             y_centers = [j + 0.5 for j in jobagent_ids]
             ax.set_yticks(y_centers)
             ax.set_yticklabels([str(j) for j in jobagent_ids])
@@ -201,7 +277,7 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         ax.grid(True, which='major', linestyle='--', alpha=0.35)
         ax.grid(True, which='minor', linestyle='--', alpha=0.15)
     except Exception as e:
-        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
         pass
     # adjust margins: reserve space on the right for the legend and remove excess borders
     try:
@@ -211,19 +287,22 @@ def plot_gantt(for_gantt_data, filename="gantt.png"):
         # legend is visible.
         plt.tight_layout()
         plt.subplots_adjust(left=0.05, right=0.72, top=0.95, bottom=0.08)
-    except Exception:
+    except Exception as e:
+        # [C1] Layout adjustment is best-effort visualization (Rule 3)
         try:
             plt.tight_layout()
-        except Exception:
-            pass
-    # Save with high resolution and trim extra whitespace
+        except Exception as e2:
+            logging.getLogger(__name__).warning(f"[C1] Failed to adjust plot layout (visualization only): {e}, {e2}")
+    
+    # [C1] Save with high resolution - best-effort (Rule 3)
     try:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
-    except Exception:
+    except Exception as e:
         try:
             plt.savefig(filename, dpi=150)
-        except Exception:
-            pass
+        except Exception as e2:
+            logging.getLogger(__name__).warning(f"[C1] Failed to save gantt plot to {filename}: {e}, {e2}")
+    # [PHASE6-FIX] Task 6.4: Always close figure to prevent memory leak
     plt.close()
     return True
 
@@ -240,11 +319,12 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
     """
     logger = logging.getLogger(__name__)
 
-    # prepare debug path (only two files allowed: png and debug txt)
+    # [C1] Prepare debug path - best-effort (Rule 3)
     try:
         debug_dir = os.path.dirname(filename) or '.'
         debug_path = os.path.join(debug_dir, 'gantt_last_evolution.debug.txt')
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[C1] Failed to prepare debug path (using default): {e}")
         debug_path = 'gantt_last_evolution.debug.txt'
 
     def _append_debug(**kwargs):
@@ -252,13 +332,13 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             with open(debug_path, 'a') as df:
                 for k, v in kwargs.items():
                     df.write(f"{k}={v}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # incoming count
     try:
         incoming_count = len(for_gantt_data) if isinstance(for_gantt_data, (list, tuple)) else 0
-    except Exception:
+    except Exception as e:
         incoming_count = 0
     _append_debug(incoming_count=incoming_count)
 
@@ -318,24 +398,26 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
     op_types_seen = []
 
     for rec in for_gantt_data:
+        # [C1] Gantt record unpacking - best-effort data parsing (Rule 3)
         try:
             s, e, op_idx, wc, job_id, operator, arrival, duration = _unpack(rec)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to unpack gantt record {rec}: {e}")
             continue
         # If operator not provided at top-level, try to extract from nested
         # decision trace (many records include chosen_operator inside
         # `decision_trace`). If still missing, mark as UNASSIGNED and
         # continue — we prefer to include operations even when operator
         # wasn't assigned so the Gantt reflects actual scheduling.
+        # [C1] Nested operator extraction - best-effort (Rule 3)
         if operator is None:
-            # try nested decision_trace when record is a dict
             try:
                 if isinstance(rec, dict):
                     dt = rec.get('decision_trace') or rec.get('decision') or {}
                     if isinstance(dt, dict):
                         operator = dt.get('chosen_operator') or dt.get('chosen_op') or operator
-            except Exception:
-                operator = operator
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed to extract operator from decision_trace: {e}")
         # Accept explicit 'UNASSIGNED' marker as valid label; if still None,
         # set to a readable placeholder so the record is not dropped.
         if operator is None:
@@ -343,11 +425,11 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         # normalize machine id
         try:
             mid = int(wc)
-        except Exception:
+        except Exception as e:
             try:
                 m = re.search(r"(\d+)", str(wc))
                 mid = int(m.group(1)) if m else None
-            except Exception:
+            except Exception as e:
                 mid = None
         if mid is None:
             continue
@@ -355,26 +437,28 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         # normalize operator id
         try:
             op_id = str(operator)
-        except Exception:
+        except Exception as e:
             op_id = str(operator)
         operators.add(op_id)
 
         # normalize job id
         try:
             jid = int(job_id)
-        except Exception:
+        except Exception as e:
             try:
                 m = re.search(r"(\d+)", str(job_id))
                 jid = int(m.group(1)) if m else None
-            except Exception:
+            except Exception as e:
                 jid = None
         if jid is None:
             continue
 
+        # [C1] Time conversion - best-effort data validation (Rule 3)
         try:
             start = float(s)
             end = float(e)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to convert gantt times s={s}, e={e}: {e}")
             continue
         if end < start:
             # skip invalid intervals
@@ -382,7 +466,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         if duration is not None:
             try:
                 dur = float(duration)
-            except Exception:
+            except Exception as e:
                 dur = end - start
         else:
             dur = end - start
@@ -409,7 +493,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
     try:
         import matplotlib.cm as cm
         cmap = cm.get_cmap('tab10') if len(op_types_seen) <= 10 else cm.get_cmap('tab20')
-    except Exception:
+    except Exception as e:
         cmap = None
     op_unique = []
     for o in op_types_seen:
@@ -425,7 +509,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             else:
                 palette = list(mcolors.TABLEAU_COLORS.values())
                 color = palette[i % len(palette)]
-        except Exception:
+        except Exception as e:
             color = 'gray'
         op_color_map[op] = color
 
@@ -456,11 +540,13 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         op = r['op']
         color = op_color_map.get(op, 'gray')
         # draw bar using scaled coordinates so even narrow durations stay visible
+        # [C1] Gantt bar drawing - best-effort matplotlib rendering (Rule 3)
         try:
             left = float(start) / scale_factor
             wscaled = float(width) / scale_factor
             ax.barh(y, wscaled, left=left, height=bar_height, color=color, edgecolor='black', linewidth=0.6, zorder=3)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to draw gantt bar for op={r.get('op')}: {e}")
             continue
         # label inside bar: "M{machine} | O{operator} | Op {op}"
         label_text = f"M{m} | O{r['operator']} | Op {op}"
@@ -469,25 +555,25 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             rgb = mcolors.to_rgb(op_color_map.get(op, '#777777'))
             luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
             text_color = 'black' if luminance > 0.6 else 'white'
-        except Exception:
+        except Exception as e:
             text_color = 'white'
         # center label; compute fontsize relative to scaled width and fig size
         try:
             fontsize = int(max(8, min(14, 10 * bar_height)))
-        except Exception:
+        except Exception as e:
             fontsize = 9
         if width >= 0.02:
             try:
                 ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=fontsize, color=text_color, zorder=4, weight='bold', clip_on=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # show original time on x-axis by formatting scaled ticks back to original units
     try:
         from matplotlib.ticker import FuncFormatter
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # Y axis: machines
     y_positions = [machine_to_y[m] for m in machine_list]
@@ -505,8 +591,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         major_step = max(10, int(round(makespan / 10)))
     try:
         ax.xaxis.set_major_locator(MultipleLocator(major_step))
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
     ax.set_xlabel('Simulation Time (s)', fontsize=12)
     ax.set_title(f"Gantt Chart — Last Evolution (Total Time: {makespan:.1f}s)", fontsize=14)
 
@@ -532,8 +618,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         try:
             plt.tight_layout()
             plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
     else:
         plt.tight_layout()
 
@@ -549,15 +635,15 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
                 df.write('op_type_to_color_mapping:\n')
                 for k, v in op_color_map.items():
                     df.write(f"  {k} -> {v}\n")
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # Prepare output paths
     try:
         history_dir = os.path.dirname(filename) or '.'
-    except Exception:
+    except Exception as e:
         history_dir = '.'
     machine_path = os.path.join(history_dir, 'gantt_machine_specific.png')
     job_path = os.path.join(history_dir, 'gantt_job_specific.png')
@@ -580,8 +666,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         try:
             fig.patch.set_facecolor('white')
             ax.set_facecolor('white')
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         # dynamic bar height and font size (scaled to number of bars)
         bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
@@ -605,7 +691,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
                 rgb = mcolors.to_rgb(color)
                 luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
                 text_color = 'black' if luminance > 0.6 else 'white'
-            except Exception:
+            except Exception as e:
                 text_color = 'white'
             if width >= 0.02:
                 ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=font_size, color=text_color, weight='bold', clip_on=True, zorder=4)
@@ -636,8 +722,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             try:
                 plt.tight_layout()
                 plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
         else:
             plt.tight_layout()
             plt.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.1)
@@ -648,26 +734,27 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             ax.xaxis.set_major_locator(MultipleLocator(max(1, step / float(scale_factor))))
             from matplotlib.ticker import FuncFormatter
             ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         # Save machine-specific both as dedicated file and as legacy filename for backward compatibility
         try:
             plt.savefig(machine_path, dpi=300, bbox_inches='tight')
             save_results['gantt_machine_specific'] = True
-        except Exception:
-            logger.exception('Failed to save machine-specific gantt', exc_info=True)
+        except Exception as e:
+            logger.warning(f"[C1] Failed to save machine-specific gantt: {e}")
         try:
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             save_results['gantt_last_evolution'] = True
-        except Exception:
-            logger.exception('Failed to save gantt_last_evolution image', exc_info=True)
+        except Exception as e:
+            logger.warning(f"[C1] Failed to save gantt_last_evolution image: {e}")
+        # [PHASE6-FIX] Task 6.4: Always close figure to prevent memory leak
         try:
             plt.close()
-        except Exception:
-            pass
-    except Exception:
-        logger.exception('Failed to generate machine-specific gantt', exc_info=True)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception closing plot: {e}")
+    except Exception as e:
+        logger.warning(f"[C1] Failed to generate machine-specific gantt: {e}")
 
     # --- Job-Specific Gantt Chart ---
     try:
@@ -682,8 +769,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
         try:
             fig.patch.set_facecolor('white')
             ax.set_facecolor('white')
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         bar_height = max(0.25, min(0.9, 0.6 if n_bars <= 8 else 0.6 * (8.0 / max(8.0, n_bars))))
         font_size = int(max(8, min(14, 10 * bar_height)))
@@ -705,7 +792,7 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
                 rgb = mcolors.to_rgb(color)
                 luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
                 text_color = 'black' if luminance > 0.6 else 'white'
-            except Exception:
+            except Exception as e:
                 text_color = 'white'
             if width >= 0.02:
                 ax.text(left + wscaled / 2.0, y, label_text, va='center', ha='center', fontsize=font_size, color=text_color, weight='bold', clip_on=True, zorder=4)
@@ -735,8 +822,8 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             try:
                 plt.tight_layout()
                 plt.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.1)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
         else:
             plt.tight_layout()
             plt.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.1)
@@ -746,20 +833,20 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
             ax.xaxis.set_major_locator(MultipleLocator(max(1, step / float(scale_factor))))
             from matplotlib.ticker import FuncFormatter
             ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{(x * scale_factor):.1f}"))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         try:
             plt.savefig(job_path, dpi=300, bbox_inches='tight')
             save_results['gantt_job_specific'] = True
-        except Exception:
-            logger.exception('Failed to save job-specific gantt', exc_info=True)
+        except Exception as e:
+            logger.warning(f"[C1] Failed to save job-specific gantt: {e}")
         try:
             plt.close()
-        except Exception:
-            pass
-    except Exception:
-        logger.exception('Failed to generate job-specific gantt', exc_info=True)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+    except Exception as e:
+        logger.warning(f"[C1] Failed to generate job-specific gantt: {e}")
 
     # Write debug entries for save results and op->color mapping
     try:
@@ -773,16 +860,16 @@ def plot_gantt_last_evolution(for_gantt_data, filename="gantt_last_evolution.png
                 for k, v in op_color_map.items():
                     df.write(f"  {k} -> {v}\n")
                 df.write(f"saved_files: {save_results}\n")
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # Also append separate save flags for easy machine parsing
     try:
         _append_debug(**{f"save_{k}": bool(v) for k, v in save_results.items()})
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
     # Return True if at least the legacy filename was saved
     return bool(save_results.get('gantt_last_evolution'))
@@ -800,99 +887,72 @@ class Runner:
     def __init__(self, env, args):
         self.env = env
         self.args = args
+        
+        # STEP 2: Inject environment shape information into args
+        # This must happen BEFORE any agent/mixer/buffer initialization
+        env_info = self.env.get_env_info()
+        args.obs_shape = env_info["obs_shape"]
+        args.state_shape = env_info["state_shape"]
+        args.n_actions = env_info["n_actions"]
+        args.n_agents = env_info["n_agents"]
+        
         # run_args is the run-local copy used by many helper methods; ensure it's available immediately to avoid AttributeError when accessed earlier in the constructor.
         self.run_args = args
         # Configure whether history/artifact writes are allowed for this run.
         # Prefer the centralized decision helper so environment variables
         # and programmatic overrides are respected.
-        try:
-            from utils.io_control import allow_history_writes as _allow_fn
-            self.allow_history_writes = bool(_allow_fn())
-        except Exception:
-            # Conservatively enable history writes if the helper isn't present.
-            self.allow_history_writes = True
+        # [C1] io_control is REQUIRED for history write control - fail-fast if not available
+        from utils.io_control import allow_history_writes as _allow_fn
+        self.allow_history_writes = bool(_allow_fn())
+        
         # Snapshot the canonical args at construction time for audit/comparison.
         # This helps detect ad-hoc mutations to the global args object outside
         # of `MARL/common/arguments.py` or explicit test fixtures.
-        try:
-            self._args_snapshot = dict(copy.deepcopy(vars(self.args)))
-        except Exception:
-            # fallback: shallow copy of reprs
-            try:
-                self._args_snapshot = {k: getattr(self.args, k, None) for k in dir(self.args) if not k.startswith('__')}
-            except Exception:
-                self._args_snapshot = {}
+        # [C1] Args snapshot is CRITICAL for audit trail - fail-fast if deepcopy fails
+        self._args_snapshot = dict(copy.deepcopy(vars(self.args)))
+        
         # Create a run-local copy of args for runtime-derived values so
         # we don't mutate the globally-shared args object. This enforces
         # the repository-wide rule that modules must not write into args.
-        try:
-            run_args = copy.deepcopy(self.args)
-        except Exception:
-            # fallback: use original args object if deepcopy fails
-            run_args = self.args
+        # [C1] run_args deepcopy is CRITICAL - fail-fast if deepcopy fails
+        run_args = copy.deepcopy(self.args)
 
         # propagate quiet flag to environment to suppress verbose SimPy debug prints
-        try:
-            setattr(self.env, "quiet_env", bool(getattr(self.args, "quiet_env", False)))
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # [C1] Quiet env setting is CRITICAL - fail-fast if setattr fails
+        setattr(self.env, "quiet_env", bool(getattr(self.args, "quiet_env", False)))
 
         # If the user requested operator-granular actions, compute and set the
         # effective number of actions (num_wcs * num_ops) early so policy
         # constructors (which read args.n_actions) see the correct value.
-        try:
-            if bool(getattr(run_args, 'use_granular_actions', False)):
-                if hasattr(self.env, 'num_wcs') and hasattr(self.env, 'num_ops'):
-                    run_args.n_actions = int(self.env.num_wcs) * int(self.env.num_ops)
-                    print(f"[Runner] Using granular actions: n_actions={run_args.n_actions}")
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # [C1] Action space configuration is CRITICAL - fail-fast if computation fails
+        if bool(getattr(run_args, 'use_granular_actions', False)):
+            if hasattr(self.env, 'num_wcs') and hasattr(self.env, 'num_ops'):
+                run_args.n_actions = int(self.env.num_wcs) * int(self.env.num_ops)
+                print(f"[Runner] Using granular actions: n_actions={run_args.n_actions}")
 
         # Auto-set number of agents for policies/agents if environment exposes it.
         # Prefer env.get_env_info() as the authoritative source, then fall back
         # to len(env.jobs), and finally to env.num_jobs. This reduces surprises
         # when environments expose a richer info API or generate jobs dynamically.
-        try:
-            # Treat the CLI default (10) as 'unset' for convenience so Runner
-            # can adopt the environment's actual agent count. If the user has
-            # explicitly provided a different value, we keep it.
-            current_n_agents = getattr(self.args, 'n_agents', None)
-            if current_n_agents is None or int(current_n_agents) == 10:
-                info = None
-                try:
-                    if hasattr(self.env, 'get_env_info') and callable(getattr(self.env, 'get_env_info')):
-                        info = self.env.get_env_info()
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    info = None
+        # [C1] n_agents auto-detection is CRITICAL - fail-fast if detection fails
+        # Treat the CLI default (10) as 'unset' for convenience so Runner
+        # can adopt the environment's actual agent count. If the user has
+        # explicitly provided a different value, we keep it.
+        current_n_agents = getattr(self.args, 'n_agents', None)
+        if current_n_agents is None or int(current_n_agents) == 10:
+            info = None
+            if hasattr(self.env, 'get_env_info') and callable(getattr(self.env, 'get_env_info')):
+                info = self.env.get_env_info()
 
-                if info and isinstance(info, dict) and ('n_agents' in info or 'n_agents' in info.keys()):
-                    try:
-                        run_args.n_agents = int(info.get('n_agents'))
-                        print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from env.get_env_info()['n_agents']")
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
-                elif hasattr(self.env, 'jobs'):
-                    try:
-                        run_args.n_agents = int(len(getattr(self.env, 'jobs')))
-                        print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from len(env.jobs)")
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
-                elif hasattr(self.env, 'num_jobs'):
-                    try:
-                        run_args.n_agents = int(getattr(self.env, 'num_jobs'))
-                        print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from env.num_jobs")
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            # keep silent on failures — this is a best-effort convenience
-            pass
+            if info and isinstance(info, dict) and ('n_agents' in info or 'n_agents' in info.keys()):
+                run_args.n_agents = int(info.get('n_agents'))
+                print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from env.get_env_info()['n_agents']")
+            elif hasattr(self.env, 'jobs'):
+                run_args.n_agents = int(len(getattr(self.env, 'jobs')))
+                print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from len(env.jobs)")
+            elif hasattr(self.env, 'num_jobs'):
+                run_args.n_agents = int(getattr(self.env, 'num_jobs'))
+                print(f"[Runner] Auto-set run_args.n_agents = {run_args.n_agents} from env.num_jobs")
 
         # Agents & rollout setup
         # Instantiate Agents, ReplayBuffer and RolloutWorker using centralized shapes
@@ -911,7 +971,7 @@ class Runner:
                     if getattr(run_args, 'obs_shape', None) is not None:
                         setattr(self.buffer, '_obs_dim', int(getattr(run_args, 'obs_shape')))
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             self.rolloutWorker = CommRolloutWorker(env=env, agents=self.agents, buffer=self.buffer, args=run_args)
         else:
             self.agents = Agents(run_args)
@@ -924,13 +984,15 @@ class Runner:
                     if getattr(run_args, 'obs_shape', None) is not None:
                         setattr(self.buffer, '_obs_dim', int(getattr(run_args, 'obs_shape')))
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             self.rolloutWorker = RolloutWorker(env=env, agents=self.agents, buffer=self.buffer, args=run_args)
 
         # n_actions was computed centrally above; no further recomputation here.
 
+        # [PHASE7] Task 7.1: Thread-safe reward logging for multi-worker environments
         self.win_rates = []
         self.episode_rewards = []
+        self._episode_rewards_lock = threading.Lock()  # Protects self.episode_rewards
         self.episode_durations = []
         self.wait_time_records = []
 
@@ -941,9 +1003,17 @@ class Runner:
         try:
             self.history_dir = str(getattr(self.run_args, 'history_dir', './my_data_and_graph/historydata'))
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             self.history_dir = './my_data_and_graph/historydata'
         os.makedirs(self.history_dir, exist_ok=True)
+        
+        # [PHASE7] Task 7.3: Per-worker epsilon diagnostics to prevent concurrent write corruption
+        # Use process ID to distinguish workers in multi-process setups
+        try:
+            worker_id = os.getpid()
+        except Exception:
+            worker_id = 0
+        self._epsilon_log_path = os.path.join(self.history_dir, f'epsilon_diagnostics_{worker_id}.txt')
 
         # Small, resilient stdout "tee" so console prints are mirrored into a
         # debug file inside historydata. This is non-invasive: it preserves
@@ -966,34 +1036,34 @@ class Runner:
                 def write(self, data):
                     try:
                         self._orig.write(data)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                     try:
                         self._fh.write(data)
                         self._fh.flush()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                 def flush(self):
                     try:
                         self._orig.flush()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                     try:
                         self._fh.flush()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                 def isatty(self):
                     try:
                         return self._orig.isatty()
-                    except Exception:
+                    except Exception as e:
                         return False
 
                 def fileno(self):
                     try:
                         return self._orig.fileno()
-                    except Exception:
+                    except Exception as e:
                         return None
 
             _tee = _Tee(_orig, _f)
@@ -1006,36 +1076,35 @@ class Runner:
                 try:
                     if hasattr(self, '_stdout_orig') and getattr(self, '_stdout_orig') is not None:
                         _sys.stdout = getattr(self, '_stdout_orig')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                 try:
                     if hasattr(self, '_stdout_tee_file') and getattr(self, '_stdout_tee_file') is not None:
                         try:
                             getattr(self, '_stdout_tee_file').close()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
             try:
                 _atexit.register(_restore_stdout)
-            except Exception:
+            except Exception as e:
                 # If atexit registration fails, still keep the attributes so
                 # callers can manually restore/close if desired.
                 pass
-        except Exception:
+        except Exception as e:
             # Best-effort only: do not fail Runner initialization if teeing fails
             try:
                 print(f"[WARN] Could not enable stdout tee to {self.history_dir}/debug_output.txt")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         # Log active training args for easy verification (appears in console and debug_output.txt)
         try:
             self._log_active_training_args()
-        except Exception:
-            # Don't let logging of args interfere with Runner startup
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         # snapshot_on_eval: produce gantt snapshots only on evaluation by default
         # if the user explicitly sets --gantt_snapshot_every, training-step snapshots
@@ -1046,19 +1115,63 @@ class Runner:
         try:
             if bool(getattr(self.args, 'clean_history', False)):
                 print(f"[Runner] Cleaning history folder: {self.history_dir}")
-                # remove common artifact types
-                exts = ['*.png', '*.csv', '*.txt', '*.json', '*.npy', '*.pkl']
-                import glob
-                for pat in exts:
-                    for f in glob.glob(os.path.join(self.history_dir, pat)):
+                # [PHASE7] Task 7.4: Safe history cleanup with lock files and retry logic
+                lock_path = os.path.join(self.history_dir, '.cleanup.lock')
+                max_retries = 3
+                retry_delay = 0.1
+                
+                for attempt in range(max_retries):
+                    try:
+                        # Try to create lock file (atomic operation on most filesystems)
+                        import errno
+                        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                         try:
-                            os.remove(f)
+                            os.write(lock_fd, f"{os.getpid()}\n".encode())
+                            os.close(lock_fd)
+                            
+                            # We have the lock, proceed with cleanup
+                            exts = ['*.png', '*.csv', '*.txt', '*.json', '*.npy', '*.pkl']
+                            import glob
+                            for pat in exts:
+                                for f in glob.glob(os.path.join(self.history_dir, pat)):
+                                    try:
+                                        os.remove(f)
+                                    except OSError as e:
+                                        if e.errno != errno.ENOENT:  # Ignore "file not found"
+                                            logging.getLogger(__name__).warning(f"[C1] Failed to remove {f}: {e}")
+                            
+                            # Release lock
+                            try:
+                                os.remove(lock_path)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Failed to remove lock file: {e}")
+                            
+                            print("[Runner] History cleaned.")
+                            break
+                            
                         except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            pass
-                print("[Runner] History cleaned.")
+                            # Ensure lock is released even on error
+                            try:
+                                os.close(lock_fd)
+                                os.remove(lock_path)
+                            except Exception:
+                                pass
+                            raise
+                            
+                    except OSError as e:
+                        if e.errno == errno.EEXIST:
+                            # Lock exists, another process is cleaning
+                            if attempt < max_retries - 1:
+                                time.sleep(retry_delay)
+                                continue
+                            else:
+                                logging.getLogger(__name__).warning(f"[C1] History cleanup timeout (another process holds lock)")
+                                break
+                        else:
+                            raise
+                            
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in history cleanup: {e}")
             pass
 
         # NOTE: removed pre-run creation/overwrite of scheduling_timeline.txt.
@@ -1104,18 +1217,18 @@ class Runner:
                                             for m in allowed_machine_indices:
                                                 try:
                                                     eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
-                                                except Exception:
+                                                except Exception as e:
                                                     eligible = []
                                                 groups_by_machine.append({'machine': int(m), 'eligible_ops': eligible})
                                             hf.write(f"  Op {idx} | Type {op_type} | machines {allowed_machine_indices} | Groups {groups_by_machine} | base_per_machine_durations:\n")
                                             for m in allowed_machine_indices:
                                                 try:
                                                     dur_m = float(per_machine.get(int(m), 0.0))
-                                                except Exception:
+                                                except Exception as e:
                                                     dur_m = 0.0
                                                 try:
                                                     eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
-                                                except Exception:
+                                                except Exception as e:
                                                     eligible = []
                                                 hf.write(f"    M{m} -> dur={dur_m:.3f} | eligible_ops={eligible}\n")
                                         else:
@@ -1125,15 +1238,15 @@ class Runner:
                                             for m in allowed_machine_indices:
                                                 try:
                                                     eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
-                                                except Exception:
+                                                except Exception as e:
                                                     eligible = []
                                                 groups_info.append({'machine': int(m), 'eligible_ops': eligible})
                                             hf.write(f"  Op {idx} | Type {op_type} | machines {allowed_machine_indices} | Groups {groups_info} | base_dur {base_dur:.3f}\n")
-                                except Exception:
+                                except Exception as e:
                                     hf.write(f"  Op {idx} | malformed: {op}\n")
                             hf.write("\n")
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught while appending initial jobs mapping", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Exception while appending initial jobs mapping: {e}")
                     print(f"[WARN] Could not append initial job mapping: {e}")
                 # Append human-readable job list produced by env helper if available (append only)
                 try:
@@ -1150,20 +1263,20 @@ class Runner:
                             with open(init_path, 'a') as hf:
                                 hf.write('\nHuman-readable job list:\n')
                                 hf.write(buf.getvalue())
-                        except Exception:
+                        except Exception as e:
                             # best-effort: attempt to append without capture
                             try:
                                 with open(init_path, 'a') as hf:
                                     hf.write('\nHuman-readable job list (partial):\n')
                                     try:
                                         self.env.print_jobs_human_readable()
-                                    except Exception:
+                                    except Exception as e:
                                         hf.write('  <could not capture human-readable output>\n')
-                            except Exception:
-                                logging.getLogger(__name__).exception("Exception caught while appending human-readable jobs", exc_info=True)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception while appending human-readable jobs: {e}")
                                 pass
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                     pass
         except Exception as e:
             print(f"[WARN] Could not write initial job mapping: {e}")
@@ -1193,7 +1306,7 @@ class Runner:
                         if lines:
                             last_loss = lines[-1]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 last_loss = ''
             try:
                 tpath = os.path.join(self.history_dir, 'td_error.txt')
@@ -1203,7 +1316,7 @@ class Runner:
                         if lines:
                             last_td = lines[-1]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 last_td = ''
 
             # Build the line we'd like to append.
@@ -1220,7 +1333,7 @@ class Runner:
                         if prev:
                             last_line = prev[-1]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 last_line = None
 
             if last_line != new_line:
@@ -1230,10 +1343,10 @@ class Runner:
                             mf.write('episode,epoch,episode_reward,last_loss,last_td\n')
                         mf.write(new_line + '\n')
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                     pass
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             pass
 
     def _log_active_training_args(self):
@@ -1271,26 +1384,26 @@ class Runner:
 
             # --- Epoch-level lightweight diagnostics (epsilon, buffer size) ---
             try:
-                eps = None
-                try:
-                    eps = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
-                except Exception:
-                    eps = getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None))
+                eps = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
                 buf_len = len(self.buffer) if getattr(self, 'buffer', None) is not None else None
                 print(f"[Diagnostics] Epoch {epoch} start | epsilon={eps} | buffer_len={buf_len}")
                 try:
                     os.makedirs(self.history_dir, exist_ok=True)
                     with open(os.path.join(self.history_dir, 'diagnostics_log.txt'), 'a') as df:
                         df.write(f"{time.time()},{epoch},epoch_start,epsilon={eps},buffer_len={buf_len}\n")
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as e:
+                    # [C1] Diagnostics file write is best-effort (Rule 3)
+                    logging.getLogger(__name__).warning(f"[C1] Failed to write epoch diagnostics: {e}")
+            except Exception as e:
+                # [C1] Diagnostics logging is best-effort (Rule 3)
+                logging.getLogger(__name__).warning(f"[C1] Failed to compute epoch diagnostics: {e}")
             # === Periodic evaluation ===
             if epoch % self.args.evaluate_cycle == 0 and epoch != 0:
                 win_rate, ep_reward, global_ep_idx, gantt_eval = self.evaluate(all_gantt_data, global_ep_idx)
                 self.win_rates.append(win_rate)
-                self.episode_rewards.append(ep_reward)
+                # [PHASE7] Task 7.1: Use lock for evaluation reward append
+                with self._episode_rewards_lock:
+                    self.episode_rewards.append(ep_reward)
                 print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
                 # Per-epoch Gantt PNG/CSV generation disabled.
                 # We produce a single, authoritative gantt_last_evolution.png at
@@ -1300,12 +1413,14 @@ class Runner:
                     # still keep the combined gantt in memory for downstream use
                     combined = list(all_gantt_data)
                     try:
+                        # [PHASE3-FIX] Gantt records ownership: Environment owns gantt_records,
+                        # Runner reads them after episode completion. No modification by Runner.
                         if hasattr(self.env, 'gantt_records'):
                             combined.extend(list(self.env.gantt_records))
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
             # collect per-epoch gantt records so we can compute per-evolution metrics
             episodes, avg_rewards = [], []
@@ -1313,51 +1428,60 @@ class Runner:
             # Keep the last episode's gantt records (overwrite each episode)
             # so we can plot a clean Gantt for the most recent episode only.
             last_episode_gantt = []
-            try:
-                before_wait = float(getattr(self.env, 'total_wait_time', 0.0))
-            except Exception:
-                before_wait = 0.0
-            try:
-                # Compute finished job count on-demand (canonical)
-                before_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
-            except Exception:
-                before_completed = 0
+            # [C1] Before episode metrics - fail-fast if computation fails
+            before_wait = float(getattr(self.env, 'total_wait_time', 0.0))
+            # Compute finished job count on-demand (canonical)
+            before_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
 
             for _ in range(self.args.n_episodes):
-                # Use the SimPy event-driven episode execution exclusively.
+                # [C1] Use the SimPy event-driven episode execution - fail-fast if episode fails
                 episode, ep_r, win_tag, gantt_data = self._run_event_driven_episode(global_ep_idx)
 
                 all_gantt_data.extend(gantt_data)
                 # record gantt for this epoch specifically
-                try:
-                    epoch_gantt.extend(gantt_data)
-                    # capture this episode's gantt separately; last assignment
-                    # will therefore represent the latest episode in the epoch
-                    try:
-                        last_episode_gantt = list(gantt_data)
-                    except Exception:
-                        last_episode_gantt = []
-                except Exception:
-                    pass
+                epoch_gantt.extend(gantt_data)
+                # capture this episode's gantt separately; last assignment
+                # will therefore represent the latest episode in the epoch
+                last_episode_gantt = list(gantt_data)
+                
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
+
+                # [PHASE1-FIX] Epsilon decay per episode (not per decision step)
+                # Decay epsilon after each episode completes for consistent exploration schedule
+                if not evaluate:
+                    rollout_worker_epsilon_start = float(getattr(self.rolloutWorker, 'epsilon_start', 1.0))
+                    rollout_worker_epsilon_end = float(getattr(self.rolloutWorker, 'epsilon_end', 0.05))
+                    rollout_worker_epsilon_anneal_episodes = int(getattr(self.args, 'epsilon_anneal_episodes', 
+                                                                         self.args.n_epoch * self.args.n_episodes))
+                    eps_decay_per_episode = (rollout_worker_epsilon_start - rollout_worker_epsilon_end) / max(1, rollout_worker_epsilon_anneal_episodes)
+                    self.rolloutWorker.epsilon = max(rollout_worker_epsilon_end, 
+                                                      float(self.rolloutWorker.epsilon) - eps_decay_per_episode)
+                    
+                    # [PHASE7] Task 7.3: Log epsilon to per-worker file to prevent concurrent write issues
+                    if global_ep_idx % 20 == 0:
+                        try:
+                            with open(self._epsilon_log_path, 'a') as ef:
+                                ef.write(f"{time.time()},{global_ep_idx},{self.rolloutWorker.epsilon:.6f}\n")
+                            print(f"[PHASE1-EPSILON] Episode {global_ep_idx}: epsilon={self.rolloutWorker.epsilon:.4f}")
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Epsilon logging failed (best-effort): {e}")
 
                 # Record per-training-episode reward for visibility and post-run summaries.
                 # Runner previously only appended rewards from evaluation runs; include
                 # training episodes here as well so entrypoints (like main.py) can
                 # print a concise per-episode summary after runner.run() completes.
-                try:
+                # [C1] Episode reward tracking is CRITICAL - fail-fast if append fails
+                # [PHASE7] Task 7.1: Use lock to protect concurrent append
+                with self._episode_rewards_lock:
                     self.episode_rewards.append(float(ep_r))
-                except Exception:
-                    # best-effort: ignore if unable to append (shouldn't happen)
-                    pass
 
                 # Append per-episode metrics via single writer method
                 try:
                     self._append_learning_metrics(global_ep_idx-1, epoch, ep_r)
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                     pass
 
                 # Episode durations
@@ -1370,14 +1494,10 @@ class Runner:
                 if hasattr(self.env, "wait_time_dict"):
                     self.wait_time_records.append(dict(self.env.wait_time_dict))
                 else:
-                    # fallback: try env.total_wait_time / computed completed-count
-                    try:
-                        # Replace legacy counter usage with computed count
-                        _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
-                        self.wait_time_records.append({0: (self.env.total_wait_time / _completed_count)})
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        self.wait_time_records.append({0: ep_r / 20.0})
+                    # [C1] Fallback wait time computation - fail-fast if computation fails
+                    # Replace legacy counter usage with computed count
+                    _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
+                    self.wait_time_records.append({0: (self.env.total_wait_time / _completed_count)})
 
                 # Optionally append a human-readable scheduling timeline for this episode
                 try:
@@ -1386,13 +1506,13 @@ class Runner:
                             # gantt records exist and the central IO gate permits writes.
                             try:
                                 from utils.io_control import allow_history_writes as _allow_fn
-                            except Exception:
+                            except Exception as e:
                                 def _allow_fn():
                                     return False
 
                             try:
                                 gr_count = len(getattr(self.env, 'gantt_records', []) or [])
-                            except Exception:
+                            except Exception as e:
                                 gr_count = 0
 
                             # Only attempt to generate/write the timeline if there are
@@ -1402,8 +1522,8 @@ class Runner:
                                 # Debug print confirming data presence before writing
                                 try:
                                     print(f"[Runner] Writing Scheduling_Timeline.txt for episode {global_ep_idx-1}, gantt_records={gr_count}")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                                 timeline = None
                                 if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
@@ -1412,25 +1532,25 @@ class Runner:
                                         # block (after lifecycle END). Here we only request a
                                         # non-writing preview to avoid duplicate writes.
                                         timeline = gantt_utils.generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=False, out_dir=self.history_dir)
-                                    except Exception:
+                                    except Exception as e:
                                         timeline = None
                                 if timeline is None:
                                     try:
                                         from utils.gantt import generate_scheduling_timeline
                                         # non-writing preview to avoid duplicate authoritative writes
                                         timeline = generate_scheduling_timeline(self.env, episode_id=global_ep_idx-1, episode_reward=ep_r, write_if_allowed=False, out_dir=self.history_dir)
-                                    except Exception:
+                                    except Exception as e:
                                         timeline = None
                                 if timeline:
                                     try:
                                         print(f"[Runner] Scheduling timeline appended for episode {global_ep_idx-1} to {self.history_dir}/scheduling_timeline.txt")
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                             else:
                                 try:
                                     print(f"[Runner] Skipped timeline generation for episode {global_ep_idx-1} (no runtime data yet, gantt_records={gr_count}, allow_history_writes={_allow_fn()})")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                             # Runtime debug logs after each episode: report whether writes are allowed
                             # and how many gantt records the environment has collected.
@@ -1438,20 +1558,20 @@ class Runner:
                                 from utils.io_control import allow_history_writes as _allow_fn2
                                 try:
                                     print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes={_allow_fn2()})")
-                                except Exception:
+                                except Exception as e:
                                     print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes=<error>)")
-                            except Exception:
+                            except Exception as e:
                                 print(f"[Runner] Scheduling timeline updated for episode {global_ep_idx-1} (allow_history_writes=<import-error>)")
                             try:
                                 gr_count = len(getattr(self.env, 'gantt_records', []) or [])
-                            except Exception:
+                            except Exception as e:
                                 gr_count = 0
                             try:
                                 print(f"[Runner] Gantt records collected: {gr_count}")
-                            except Exception:
-                                pass
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught while appending scheduling_timeline", exc_info=True)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception while appending scheduling_timeline: {e}")
                     pass
 
             # === Training updates (Replay-based) ===
@@ -1505,7 +1625,7 @@ class Runner:
                                                 else:
                                                     raise RuntimeError("gantt_utils unavailable")
                                             except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                 # fallback: legacy writer
                                                 try:
                                                     with open(csv_path, 'w') as cf:
@@ -1533,15 +1653,15 @@ class Runner:
                                                                     else:
                                                                         op_name = str(op_idx)
                                                                 except Exception as e:
-                                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                                     op_name = str(op_idx)
                                                                 vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
                                                                 cf.write(','.join([str(x) for x in vals]) + '\n')
                                                             except Exception as e:
-                                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                                 pass
                                                 except Exception as e:
-                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                     pass
                                         # also write a human-readable summary for easier inspection
                                         def _unpack_rec(rec):
@@ -1566,7 +1686,7 @@ class Runner:
                                                         s, e, op_idx, wc, job_id, op_grp, arrival, duration = _unpack_rec(rec)
                                                         jobs_map.setdefault(int(job_id), []).append((s, e, int(op_idx), int(wc), op_grp, arrival, duration))
                                                     except Exception as e:
-                                                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                         continue
                                                 for jid in sorted(jobs_map.keys()):
                                                     tf.write(f"Job {jid}:\n")
@@ -1575,7 +1695,7 @@ class Runner:
                                                         tf.write(f"  Op {op_idx} @ WC{wc} (OpGrp {op_grp}) — start={s:.3f}, end={e:.3f} | arrival={arrival} {dur_str}\n")
                                                     tf.write('\n')
                                         except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                             pass
 
                                         # timeline-style snapshot: list active ops per unique time boundary
@@ -1588,7 +1708,7 @@ class Runner:
                                                     s, e, *_ = _unpack_rec(rec)
                                                     times.add(float(s)); times.add(float(e))
                                                 except Exception as e:
-                                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                     continue
                                             times_list = sorted(times)
                                             with open(timeline_path, 'w') as tf2:
@@ -1601,11 +1721,11 @@ class Runner:
                                                             if float(s) <= float(tval) < float(e):
                                                                 tf2.write(f"  Job {int(job_id)} | OpType {int(op_idx)} @ WC{int(wc)} (Grp {op_grp}) | start={s:.3f} end={e:.3f}\n")
                                                         except Exception as e:
-                                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                             continue
                                                 tf2.write('\n')
                                         except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                             pass
 
                                         # metrics for snapshot (loss/td/avg_wait/avg_reward)
@@ -1625,12 +1745,14 @@ class Runner:
                                                 _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
                                                 metrics['avg_wait'] = float(self.env.total_wait_time) / _completed_count
                                             except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                 metrics['avg_wait'] = None
                                             try:
-                                                metrics['avg_reward'] = float(np.mean(self.episode_rewards)) if self.episode_rewards else None
+                                                # [PHASE7] Task 7.1: Use lock when reading episode_rewards for metrics
+                                                with self._episode_rewards_lock:
+                                                    metrics['avg_reward'] = float(np.mean(self.episode_rewards)) if self.episode_rewards else None
                                             except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                 metrics['avg_reward'] = None
                                             # read last loss/td from files if exist
                                             try:
@@ -1645,18 +1767,18 @@ class Runner:
                                                         lastt = tfm.read().strip().split('\n')[-1]
                                                         metrics['td'] = float(lastt) if lastt else None
                                             except Exception as e:
-                                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                                 pass
                                             with open(metrics_path, 'w') as mf:
                                                 json.dump(metrics, mf, indent=2)
                                         except Exception as e:
-                                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                             pass
                                     print(f"[Runner] Gantt snapshot saved @ step {train_steps}")
                                 except Exception as e:
                                     print(f"[WARN] Could not save gantt snapshot: {e}")
                         except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                             pass
 
             # === KPI LOGGING (Step 8A.6.6) ===
@@ -1667,13 +1789,13 @@ class Runner:
                     eps_end = None
                     try:
                         eps_end = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
-                    except Exception:
+                    except Exception as e:
                         eps_end = getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None))
                     buf_len_end = len(self.buffer) if getattr(self, 'buffer', None) is not None else None
                     with open(os.path.join(self.history_dir, 'diagnostics_log.txt'), 'a') as df:
                         df.write(f"{time.time()},{epoch},epoch_end,epsilon={eps_end},buffer_len={buf_len_end}\n")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                 if getattr(self, 'allow_history_writes', False):
                     # compute avg_wait using computed completed count to avoid legacy counter
                     _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
@@ -1691,22 +1813,30 @@ class Runner:
                         try:
                             if hasattr(self.env, '_compute_utilization_summary') and callable(getattr(self.env, '_compute_utilization_summary')):
                                 util_item = self.env._compute_utilization_summary()
-                        except Exception:
+                        except Exception as e:
                             util_item = None
 
                         if util_item:
                             try:
                                 util_m = float(util_item.get('avg_machine_utilization', 0.0))
-                            except Exception:
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(
+                                    "[C1] Machine util extraction failed (using 0.0): %s", e
+                                )
                                 util_m = 0.0
                             try:
                                 util_o = float(util_item.get('avg_operator_utilization', 0.0))
-                            except Exception:
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(
+                                    "[C1] Operator util extraction failed (using 0.0): %s", e
+                                )
                                 util_o = 0.0
                             try:
                                 makespan = float(util_item.get('average_makespan', makespan))
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(
+                                    "[C1] Makespan extraction failed (keeping default): %s", e
+                                )
                         else:
                             # Fallback: instantaneous snapshot (legacy behaviour)
                             try:
@@ -1724,12 +1854,12 @@ class Runner:
                                             if getattr(r, 'count', None) is not None:
                                                 if int(getattr(r, 'count', 0)) > 0:
                                                     occupied += 1
-                                        except Exception:
+                                        except Exception as e:
                                             continue
                                     util_m = float(occupied) / max(1.0, float(len(mres)))
                                 else:
                                     util_m = 0.0
-                            except Exception:
+                            except Exception as e:
                                 util_m = 0.0
 
                             # Fallback operator occupancy
@@ -1747,14 +1877,14 @@ class Runner:
                                             if getattr(g, 'count', None) is not None:
                                                 if int(getattr(g, 'count', 0)) > 0:
                                                     occ_o += 1
-                                        except Exception:
+                                        except Exception as e:
                                             continue
                                     util_o = float(occ_o) / max(1.0, float(len(og)))
                                 else:
                                     util_o = 0.0
-                            except Exception:
+                            except Exception as e:
                                 util_o = 0.0
-                    except Exception:
+                    except Exception as e:
                         util_m = 0.0
                         util_o = 0.0
                         makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
@@ -1773,7 +1903,10 @@ class Runner:
                         after_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
                         delta_wait = max(0.0, after_wait - float(before_wait))
                         delta_completed = max(0, after_completed - int(before_completed))
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            "[C1] Delta computation failed (using 0): %s", e
+                        )
                         delta_wait = 0.0
                         delta_completed = 0
 
@@ -1782,13 +1915,19 @@ class Runner:
                         n_m = len(getattr(self.env, 'machine_resources', []) or [])
                         if n_m <= 0:
                             n_m = len(getattr(self.env.workcenters_meta, 'machine_list', []) or []) or int(getattr(self.env, 'num_wcs', 1))
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            "[C1] Machine count inference failed (using num_wcs): %s", e
+                        )
                         n_m = int(getattr(self.env, 'num_wcs', 1) or 1)
                     try:
                         n_o = len(getattr(self.env, 'operator_groups', []) or [])
                         if n_o <= 0:
                             n_o = int(getattr(self.env, 'num_ops', 1) or 1)
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            "[C1] Operator count inference failed (using num_ops): %s", e
+                        )
                         n_o = int(getattr(self.env, 'num_ops', 1) or 1)
 
                     # Build a single-item env-like dict describing this epoch
@@ -1829,7 +1968,7 @@ class Runner:
                         try:
                             if hasattr(self.env, '_compute_utilization_summary') and callable(getattr(self.env, '_compute_utilization_summary')):
                                 util_item = self.env._compute_utilization_summary()
-                        except Exception:
+                        except Exception as e:
                             util_item = None
 
                         # Fall back to the constructed epoch_item if env cannot produce summary
@@ -1839,28 +1978,28 @@ class Runner:
                         # Ensure avg_epoch_reward is present on the util summary and preserve any existing util fields
                         try:
                             avg_r = float(np.mean(avg_rewards)) if avg_rewards else 0.0
-                        except Exception:
+                        except Exception as e:
                             try:
                                 avg_r = float(epoch_item.get('avg_epoch_reward', 0.0))
-                            except Exception:
+                            except Exception as e:
                                 avg_r = 0.0
                         try:
                             # prefer not to overwrite existing avg values for machine/operator utils
                             if isinstance(util_item, dict):
                                 util_item['avg_epoch_reward'] = float(avg_r)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                         # Append the enriched util summary directly into run_summary.json
                         try:
                             append_run_summary(util_item, history_dir=self.history_dir)
-                        except Exception:
+                        except Exception as e:
                             # fallback: attempt to write via collect_evolution_summary if append fails
                             try:
                                 from my_data_and_graph.metrics import collect_evolution_summary as _ces
                                 _ces([util_item], epoch)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                         # regenerate plots after appending
                         plot_utilization_and_makespan(history_dir=self.history_dir)
                         # also generate per-id bar charts for latest evolution
@@ -1879,7 +2018,10 @@ class Runner:
                                 # produce a useful artifact when possible.
                                 try:
                                     cand = list(last_episode_gantt) if last_episode_gantt else list(getattr(self.env, 'gantt_records', []) or [])
-                                except Exception:
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(
+                                        "[C1] Gantt last_episode collection failed, trying env.gantt_records: %s", e
+                                    )
                                     cand = list(getattr(self.env, 'gantt_records', []) or [])
                                 if cand:
                                     png_path = os.path.join(self.history_dir, 'gantt_last_evolution.png')
@@ -1889,28 +2031,36 @@ class Runner:
                                             print(f"[Runner] gantt_last_evolution written to {png_path}")
                                         else:
                                             logging.getLogger(__name__).info("gantt_last_evolution: plot routine ran but produced no output (skipped)")
-                                    except Exception:
-                                        logging.getLogger(__name__).exception("Could not write gantt_last_evolution", exc_info=True)
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(
+                                            "[C1] Could not write gantt_last_evolution (non-critical): %s", e
+                                        )
                                 else:
                                     logging.getLogger(__name__).info("gantt_last_evolution: no gantt records available (last_episode and env.gantt_records empty)")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
                         # optional timeline consistency check (heuristic)
                         try:
                             check_timeline_consistency(history_dir=self.history_dir)
-                        except Exception:
-                            pass
-                    except Exception:
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(
+                                "[C1] Timeline consistency check failed (non-critical): %s", e
+                            )
+                    except Exception as e:
                         # best-effort: don't break training if metrics plotting fails
                         logging.getLogger(__name__).exception("Exception while writing per-evolution summary/plots", exc_info=True)
-            except Exception:
+            except Exception as e:
                 logging.getLogger(__name__).exception("Exception in per-evolution summary block", exc_info=True)
 
         # === Save episode statistics ===
         try:
             if getattr(self, 'allow_history_writes', False):
+                # [PHASE7] Task 7.1: Use lock when reading episode_rewards for file write
+                with self._episode_rewards_lock:
+                    episode_rewards_copy = list(self.episode_rewards)
+                
                 with open(os.path.join(self.history_dir, "episode_rewards.txt"), "w") as f_r:
-                    for ep_idx, ep_r in enumerate(self.episode_rewards):
+                    for ep_idx, ep_r in enumerate(episode_rewards_copy):
                         f_r.write(f"{ep_idx},{ep_r:.2f}\n")
 
                 with open(os.path.join(self.history_dir, "times.txt"), "w") as f_t:
@@ -1933,7 +2083,7 @@ class Runner:
         try:
             try:
                 from my_data_and_graph.plot_metrics import generate_all_plots
-            except Exception:
+            except Exception as e:
                 # Import should be resilient due to compatibility shim in
                 # my_data_and_graph.plot_metrics; if it fails, surface a
                 # warning but continue.
@@ -1944,9 +2094,8 @@ class Runner:
                     print(f"[Runner] Post-training plots generated in {self.history_dir}/plots/")
                 except Exception as e:
                     print(f"[Runner] Warning: Plot generation failed: {e}")
-        except Exception:
-            # swallow any unexpected issue here so finalization continues
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         # Best-effort: restore stdout and close the tee file now that training
         # finished. atexit handler is also registered during init to cover
@@ -1957,15 +2106,15 @@ class Runner:
             if hasattr(self, '_stdout_orig') and getattr(self, '_stdout_orig') is not None:
                 try:
                     _sys.stdout = getattr(self, '_stdout_orig')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
             if hasattr(self, '_stdout_tee_file') and getattr(self, '_stdout_tee_file') is not None:
                 try:
                     getattr(self, '_stdout_tee_file').close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
         # === Write detailed scheduling trace and per-job timeline CSVs ===
         try:
@@ -1975,7 +2124,7 @@ class Runner:
                 if hasattr(self.env, 'gantt_records'):
                     combined.extend(list(self.env.gantt_records))
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
 
             sched_path = os.path.join(self.history_dir, 'scheduling_trace.csv')
@@ -1987,12 +2136,12 @@ class Runner:
                     try:
                         gantt_utils.write_scheduling_trace(sched_path, combined)
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                         pass
                     try:
                         gantt_utils.write_job_timeline(jt_path, combined)
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                         pass
                 else:
                     # fallback: write a minimal scheduling_trace if utils unavailable
@@ -2000,7 +2149,7 @@ class Runner:
                         with open(sched_path, 'w') as sf:
                             sf.write('start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration\n')
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                         pass
 
                 print(f"[Runner] Scheduling trace and job timelines written to {self.history_dir}")
@@ -2016,20 +2165,20 @@ class Runner:
                             # a deterministic placeholder at startup.
                             try:
                                 from utils.io_control import allow_history_writes as _allow_fn
-                            except Exception:
+                            except Exception as e:
                                 def _allow_fn():
                                     return False
 
                             try:
                                 gr_count = len(getattr(self.env, 'gantt_records', []) or [])
-                            except Exception:
+                            except Exception as e:
                                 gr_count = 0
 
                             if _allow_fn() and gr_count > 0:
                                 try:
                                     print(f"[Runner] Writing Scheduling_Timeline.txt (final) gantt_records={gr_count}")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
 
                                 if gantt_utils is not None and hasattr(gantt_utils, 'generate_scheduling_timeline'):
                                     try:
@@ -2039,7 +2188,7 @@ class Runner:
                                         # duplicate episode blocks we only request a
                                         # non-writing preview from the final sweep.
                                         timeline = gantt_utils.generate_scheduling_timeline(self.env, write_if_allowed=False)
-                                    except Exception:
+                                    except Exception as e:
                                         # fall through to direct import fallback
                                         timeline = None
                                 if timeline is None:
@@ -2050,25 +2199,24 @@ class Runner:
                                         # happen elsewhere).
                                         from utils.gantt import generate_scheduling_timeline
                                         timeline = generate_scheduling_timeline(self.env, write_if_allowed=False)
-                                    except Exception:
+                                    except Exception as e:
                                         timeline = None
                                 # If the generator returned text, log a short message indicating where it was written.
                                 if timeline:
                                     try:
                                         tl_path = os.path.join(self.history_dir, 'scheduling_timeline.txt')
                                         print(f"[Runner] Scheduling timeline generated and written to {tl_path}")
-                                    except Exception:
+                                    except Exception as e:
                                         print("[Runner] Scheduling timeline generated.")
                             else:
                                 try:
                                     print(f"[Runner] Skipped final timeline generation (no runtime data yet, gantt_records={gr_count}, allow_history_writes={_allow_fn()})")
-                                except Exception:
-                                    pass
-                        except Exception:
-                            logging.getLogger(__name__).exception("Exception caught while generating scheduling_timeline", exc_info=True)
-                except Exception:
-                    # non-fatal: do not break the runner if timeline generation fails
-                    pass
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception while generating scheduling_timeline: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         except Exception as e:
             print("[WARN] Could not write scheduling/job timeline files:", e)
 
@@ -2089,7 +2237,7 @@ class Runner:
                                 if len(parts) >= 2:
                                     rewards.append(float(parts[1]))
                             except Exception as e:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                 continue
                 # fallback to learning_metrics.csv if needed
                 if not rewards:
@@ -2103,11 +2251,11 @@ class Runner:
                                     try:
                                         rewards.append(float(parts[2]))
                                     except Exception as e:
-                                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                         continue
                 summary['last_10_avg_reward'] = float(sum(rewards[-10:]) / max(1, len(rewards[-10:]))) if rewards else None
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 summary['last_10_avg_reward'] = None
 
             # average loss and td over last 10 entries
@@ -2121,7 +2269,7 @@ class Runner:
                                     v = float(ln.strip())
                                     vals.append(v)
                                 except Exception as e:
-                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                     continue
                     return vals[-n:]
 
@@ -2130,7 +2278,7 @@ class Runner:
                 summary['last_10_avg_loss'] = float(sum(loss_vals) / max(1, len(loss_vals))) if loss_vals else None
                 summary['last_10_avg_td'] = float(sum(td_vals) / max(1, len(td_vals))) if td_vals else None
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 summary['last_10_avg_loss'] = None
                 summary['last_10_avg_td'] = None
 
@@ -2148,7 +2296,7 @@ class Runner:
                                     util_m_vals.append(float(parts[2]))
                                     util_o_vals.append(float(parts[3]))
                                 except Exception as e:
-                                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                     continue
                 # fallback to env util functions if kpi not available
                 if not util_m_vals or not util_o_vals:
@@ -2168,12 +2316,12 @@ class Runner:
                                         if getattr(r, 'count', None) is not None:
                                             if int(getattr(r, 'count', 0)) > 0:
                                                 occupied += 1
-                                    except Exception:
+                                    except Exception as e:
                                         continue
                                 util_m = float(occupied) / max(1.0, float(len(mres)))
                             else:
                                 util_m = 0.0
-                        except Exception:
+                        except Exception as e:
                             util_m = 0.0
                         try:
                             og = list(getattr(self.env, 'operator_groups', []) or [])
@@ -2189,22 +2337,22 @@ class Runner:
                                         if getattr(g, 'count', None) is not None:
                                             if int(getattr(g, 'count', 0)) > 0:
                                                 occ_o += 1
-                                    except Exception:
+                                    except Exception as e:
                                         continue
                                 util_o = float(occ_o) / max(1.0, float(len(og)))
                             else:
                                 util_o = 0.0
-                        except Exception:
+                        except Exception as e:
                             util_o = 0.0
                         util_m_vals.append(util_m); util_o_vals.append(util_o)
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                         pass
 
                 summary['avg_machine_utilization'] = float(sum(util_m_vals) / max(1, len(util_m_vals))) if util_m_vals else None
                 summary['avg_operator_utilization'] = float(sum(util_o_vals) / max(1, len(util_o_vals))) if util_o_vals else None
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 summary['avg_machine_utilization'] = None
                 summary['avg_operator_utilization'] = None
 
@@ -2218,7 +2366,7 @@ class Runner:
                         if os.path.exists(summary_path):
                             with open(summary_path, 'r', encoding='utf-8') as rf:
                                 out_data = json.load(rf) or {}
-                    except Exception:
+                    except Exception as e:
                         out_data = {}
 
                     # Preserve existing evolutions list if present
@@ -2247,9 +2395,8 @@ class Runner:
                             out_data['avg_operator_utilization'] = last.get('avg_operator_utilization', 0)
                             out_data['avg_epoch_reward'] = last.get('avg_epoch_reward', 0)
                             out_data['avg_makespan'] = last.get('avg_makespan', last.get('average_makespan', 0))
-                    except Exception:
-                        # best-effort: do not fail the final write if mirroring fails
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
                     with open(summary_path, 'w', encoding='utf-8') as sf:
                         json.dump(out_data, sf, indent=2)
@@ -2265,7 +2412,8 @@ class Runner:
             if getattr(self, 'allow_history_writes', False):
                 loss = np.loadtxt(f"{self.history_dir}/loss.txt")
                 td = np.loadtxt(f"{self.history_dir}/td_error.txt")
-                window = 50
+                # [PHASE9-FIX] Task 9.1: Configurable moving average window
+                window = int(getattr(self.args, 'mavg_window', 50))
                 if len(loss) > window:
                     loss_smooth = np.convolve(loss, np.ones(window)/window, mode='valid')
                     td_smooth = np.convolve(td, np.ones(window)/window, mode='valid')
@@ -2276,6 +2424,7 @@ class Runner:
                     plt.title("Step 8A.6.6 – Learning Stability Trends")
                     plt.tight_layout()
                     plt.savefig(f"{self.history_dir}/learning_stability.png", dpi=300)
+                    # [PHASE6-FIX] Task 6.4: Close figure to prevent memory leak
                     plt.close()
                     print("[Runner] Learning stability plot saved.")
         except Exception as e:
@@ -2299,7 +2448,7 @@ class Runner:
                 _plt.savefig(os.path.join(self.history_dir, 'loss.png'), dpi=150)
                 _plt.close()
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
 
             # TD error raw plot
@@ -2315,7 +2464,7 @@ class Runner:
                 _plt.savefig(os.path.join(self.history_dir, 'td_error.png'), dpi=150)
                 _plt.close()
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
 
             # Episode reward plot from learning_metrics.csv
@@ -2331,7 +2480,7 @@ class Runner:
                                 episodes.append(int(row.get('episode', len(episodes))))
                                 rewards.append(float(row.get('episode_reward', 0.0)))
                             except Exception as e:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                                 continue
                 if rewards:
                     _plt.figure()
@@ -2342,7 +2491,7 @@ class Runner:
                     _plt.savefig(os.path.join(self.history_dir, 'episode_rewards.png'), dpi=150)
                     _plt.close()
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 pass
 
             print('[Runner] Loss/TD/Reward PNGs saved.')
@@ -2394,27 +2543,27 @@ class Runner:
                     if ar is not None:
                         try:
                             ops = int(getattr(self.env, 'num_ops', 1))
-                        except Exception:
+                        except Exception as e:
                             ops = 1
                         r = np.asarray(ar, dtype=np.int32)
                         expanded = np.repeat(r.astype(np.int32), ops)
                         avail_batch.append(expanded.tolist())
                         continue
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                 # Try to compute canonical per-machine row deterministically
                 ar = None
                 try:
                     if build_machine_major_mask is not None:
                         jid = item.get('job_id')
                         ar = build_machine_major_mask(self.env, jid)
-                except Exception:
+                except Exception as e:
                     ar = None
 
                 if ar is not None:
                     try:
                         ops = int(getattr(self.env, 'num_ops', 1))
-                    except Exception:
+                    except Exception as e:
                         ops = 1
                     r = np.asarray(ar, dtype=np.int32)
                     expanded = np.repeat(r.astype(np.int32), ops)
@@ -2427,7 +2576,7 @@ class Runner:
                     ops = int(getattr(self.env, 'num_ops', 1))
                     avail_batch.append([1] * (max(1, num_m) * max(1, ops)))
                     continue
-                except Exception:
+                except Exception as e:
                     avail_batch.append([1])
                     continue
 
@@ -2442,8 +2591,8 @@ class Runner:
                     per_machine = [1 if int(bool(x)) else 0 for x in list(ar)]
                     avail_batch.append(per_machine)
                     continue
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
 
             # Try to compute canonical per-machine row deterministically
             try:
@@ -2454,8 +2603,8 @@ class Runner:
                         per_machine = [1 if int(bool(x)) else 0 for x in list(row)]
                         avail_batch.append(per_machine)
                         continue
-            except Exception:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
 
             # final fallback: None (no mask info)
             avail_batch.append(None)
@@ -2469,7 +2618,7 @@ class Runner:
             if hasattr(self.agents, "act"):
                 return self.agents.act(obs_batch, avail_batch, evaluate=evaluate)
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             pass
 
         # fallback to rolloutWorker if it provides a decision helper
@@ -2477,7 +2626,7 @@ class Runner:
             if hasattr(self.rolloutWorker, "decide_batch"):
                 return self.rolloutWorker.decide_batch(batch, evaluate=evaluate)
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             pass
 
     # last resort: simple deterministic / random pick from allowed_machine_indices
@@ -2494,7 +2643,7 @@ class Runner:
                     try:
                         actions.append(int(self.rolloutWorker.rng.choice(allowed)))
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
                         actions.append(int(np.random.choice(allowed)))
         return actions
 
@@ -2510,7 +2659,10 @@ class Runner:
         plt.ylabel('win_rate')
 
         plt.subplot(2, 1, 2)
-        plt.plot(range(len(self.episode_rewards)), self.episode_rewards)
+        # [PHASE7] Task 7.1: Use lock when reading episode_rewards for plotting
+        with self._episode_rewards_lock:
+            episode_rewards_copy = list(self.episode_rewards)
+        plt.plot(range(len(episode_rewards_copy)), episode_rewards_copy)
         plt.xlabel(f'epoch × {self.args.evaluate_cycle}')
         plt.ylabel('episode_rewards')
 
@@ -2518,7 +2670,11 @@ class Runner:
         outdir = self.save_path
         os.makedirs(outdir, exist_ok=True)
         plt.savefig(os.path.join(outdir, f'plt_{num}.png'), format='png')
+        # [PHASE6-FIX] Task 6.4: Close figure to prevent memory leak
+        plt.close()
         np.save(os.path.join(outdir, f'win_rates_{num}.npy'), self.win_rates)
-        np.save(os.path.join(outdir, f'episode_rewards_{num}.npy'), self.episode_rewards)
+        # [PHASE7] Task 7.1: Use lock when saving episode_rewards to numpy
+        with self._episode_rewards_lock:
+            np.save(os.path.join(outdir, f'episode_rewards_{num}.npy'), self.episode_rewards)
         print(f"[Runner] Plots saved to {outdir}")
 # ...existing code...

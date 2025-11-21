@@ -99,8 +99,8 @@ def main():
         try:
             if tmp.exists():
                 tmp.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return 3
 
     # Report diff-ish summary: counts before/after of numeric operator occurrences

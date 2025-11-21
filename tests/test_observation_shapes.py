@@ -11,5 +11,5 @@ def test_observation_and_state_shapes():
     state = env._build_state_vector()
     assert isinstance(obs, np.ndarray)
     assert isinstance(state, np.ndarray)
-    assert obs.shape == (6,)
+    assert obs.shape == (7,), f"Expected shape (7,), got {obs.shape}"
     assert state.shape == (env.state_dim,)

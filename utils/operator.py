@@ -41,7 +41,7 @@ class Operator:
             else:
                 # keep stringy ids as-is but ensure type is str
                 self.operator_id = str(operator_id)
-        except Exception:
+        except Exception as e:
             self.operator_id = str(operator_id)
         # qualified_machines: list of machine name strings (e.g., 'M0')
         self.qualified_machines = list(qualified_machines)
@@ -53,7 +53,7 @@ class Operator:
             try:
                 import simpy
                 self.resource = simpy.Resource(env, capacity=1)
-            except Exception:
+            except Exception as e:
                 self.resource = None
         self.is_busy = False
         self.current_job = None
@@ -86,7 +86,7 @@ class Operator:
                 if int(op_idx) in caps:
                     return True
             return False
-        except Exception:
+        except Exception as e:
             # conservative fallback: try older WorkCenter object path
             try:
                 wc_obj = self.workcenters_ref.workcenters_list[workcenter_id]
@@ -98,7 +98,8 @@ class Operator:
                     if int(op_idx) in caps:
                         return True
                 return False
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 return False
 
     # ============================================================
@@ -152,13 +153,13 @@ class Operators:
         # mode.
         try:
             provided = getattr(workcenters_ref, 'operators', None)
-        except Exception:
+        except Exception as e:
             provided = None
         if provided is None:
             try:
                 cfg = getattr(workcenters_ref, 'config', None) or {}
                 provided = cfg.get('operators') if isinstance(cfg, dict) else None
-            except Exception:
+            except Exception as e:
                 provided = None
         if isinstance(provided, (list, tuple)) and len(provided) > 0:
             merged_operators = list(provided)
@@ -211,7 +212,8 @@ class Operators:
         def machine_for_num(n, fallback=None):
             try:
                 return machine_order[n - 1]
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 return fallback
 
         # fallback default names if we couldn't build an order
@@ -239,7 +241,8 @@ class Operators:
                             # try to infer id from position
                             oid = len(objs) + 1
                         objs.append(Operator(oid, q, workcenters_ref, env=env))
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                         continue
                 self.operators_object_list = objs
             else:
@@ -247,7 +250,7 @@ class Operators:
                     Operator(1, op1_machines, workcenters_ref, env=env),
                     Operator(2, op2_machines, workcenters_ref, env=env),
                 ]
-        except Exception:
+        except Exception as e:
             # fallback to original explicit default
             self.operators_object_list = [
                 Operator(1, op1_machines, workcenters_ref, env=env),
@@ -301,12 +304,12 @@ class Operators:
                         if wc_idx is None:
                             continue
                         qualified_wcs.add(int(wc_idx))
-                    except Exception:
+                    except Exception as e:
                         # be resilient: skip any machine we can't resolve
                         continue
                 # attach a stable sorted list for downstream tools
                 op.qualified_workcenters = sorted(list(qualified_wcs))
-        except Exception:
+        except Exception as e:
             # if anything fails, leave attribute absent for backward compatibility
             pass
 
@@ -325,7 +328,8 @@ class Operators:
             try:
                 if (not op.is_busy) and op.can_do_job(op_idx, workcenter_id):
                     return op
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
         return None
 
@@ -337,7 +341,7 @@ class Operators:
         """
         try:
             registry = getattr(self.operators_object_list[0].workcenters_ref, 'machine_registry', {}) or {}
-        except Exception:
+        except Exception as e:
             registry = {}
         for op in self.operators_object_list:
             try:
@@ -350,9 +354,88 @@ class Operators:
                 caps = registry.get(machine_name, {}).get('capabilities', [])
                 if int(op_idx) in caps:
                     return op
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
         return None
+
+    def find_free_operator_seeded_random(self, op_idx, workcenter_id, rng):
+        """C7 FIX: Deterministic but balanced operator selection using seeded RNG.
+        
+        This replaces the nondeterministic find_free_operator() which was
+        timing-dependent due to SimPy event ordering. Uses seeded random
+        selection for reproducibility while maintaining load balance.
+        
+        Args:
+            op_idx: Operation index
+            workcenter_id: Workcenter ID
+            rng: numpy.random.RandomState (seeded)
+            
+        Returns:
+            Operator object if found, None if all busy or none qualified
+        """
+        # Get all qualified FREE operators
+        qualified_free = []
+        for op in self.operators_object_list:
+            try:
+                if (not op.is_busy) and op.can_do_job(op_idx, workcenter_id):
+                    qualified_free.append(op)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+                continue
+        
+        if not qualified_free:
+            return None
+        
+        # C7 FIX: Sort by operator ID for deterministic ordering (critical for RNG consistency)
+        qualified_free.sort(key=lambda op: int(op.operator_id))
+        
+        # C7 FIX: Select randomly using seeded RNG
+        selected_idx = rng.integers(0, len(qualified_free))
+        return qualified_free[selected_idx]
+
+    def find_free_operator_for_machine_seeded_random(self, op_idx, machine_name, rng):
+        """C7 FIX: Machine-specific deterministic but balanced operator selection.
+        
+        Args:
+            op_idx: Operation index
+            machine_name: Machine name (e.g., 'M0', 'M1')
+            rng: numpy.random.RandomState (seeded)
+            
+        Returns:
+            Operator object if found, None otherwise
+        """
+        try:
+            registry = getattr(self.operators_object_list[0].workcenters_ref, 'machine_registry', {}) or {}
+        except Exception as e:
+            registry = {}
+        
+        # Get all qualified FREE operators for this machine
+        qualified_free = []
+        for op in self.operators_object_list:
+            try:
+                if op.is_busy:
+                    continue
+                # must be qualified for the machine by name
+                if machine_name not in op.qualified_machines:
+                    continue
+                # check machine capabilities
+                caps = registry.get(machine_name, {}).get('capabilities', [])
+                if int(op_idx) in caps:
+                    qualified_free.append(op)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+                continue
+        
+        if not qualified_free:
+            return None
+        
+        # C7 FIX: Sort by operator ID for deterministic ordering
+        qualified_free.sort(key=lambda op: int(op.operator_id))
+        
+        # C7 FIX: Select randomly using seeded RNG
+        selected_idx = rng.integers(0, len(qualified_free))
+        return qualified_free[selected_idx]
 
     def release_all(self):
         """Free all operators (for environment resets)."""

@@ -93,7 +93,8 @@ class DummyEnv:
         # simplistic fallback: use _build_avail_actions row 0
         try:
             return self._build_avail_actions()[0]
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             return [1] * self.num_wcs
 
 

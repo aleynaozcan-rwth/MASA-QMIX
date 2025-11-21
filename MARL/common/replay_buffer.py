@@ -16,7 +16,7 @@ Episode = List[Transition]
 
 
 class ReplayBuffer:
-    def __init__(self, episode_capacity: int = 1000, seed: int = 123, n_agents: Optional[int] = None, obs_dim: Optional[int] = None):
+    def __init__(self, episode_capacity: int = 1000, seed: int = 123, n_agents: Optional[int] = None, obs_dim: Optional[int] = None, state_shape: Optional[int] = None, episode_limit: Optional[int] = None):
         self._episodes: deque[Episode] = deque(maxlen=int(episode_capacity))
         self._current: Episode = []
         self._rng = random.Random(seed)
@@ -24,11 +24,38 @@ class ReplayBuffer:
         # Optional pre-specified runtime shapes (preferred over inference)
         self._n_agents = int(n_agents) if n_agents is not None else None
         self._obs_dim = int(obs_dim) if obs_dim is not None else None
+        # [PHASE5-FIX] Task 5.2: Add state_shape for validation
+        self._state_shape = int(state_shape) if state_shape is not None else None
+        # [PHASE6-FIX] Task 6.1: Store episode_limit for length clamping
+        self._episode_limit = int(episode_limit) if episode_limit is not None else 10000
+        
+        # [PHASE5-FIX] Task 5.4: Warn if critical shapes not provided
+        if self._n_agents is None or self._obs_dim is None:
+            logging.getLogger(__name__).warning(
+                f"[PHASE5] ReplayBuffer created without explicit n_agents or obs_dim. "
+                f"Shape inference will be used but is less robust. "
+                f"Recommend passing n_agents and obs_dim to constructor. "
+                f"n_agents={self._n_agents}, obs_dim={self._obs_dim}"
+            )
 
     # -----------------------------------------------------------
     # Store a full episode (as list of transitions OR dict batch)
     # -----------------------------------------------------------
     def store_episode(self, episode_batch: Union[Episode, Dict[str, np.ndarray]]):
+        # [PHASE5-FIX] Task 5.4: Validate episode structure matches declared shapes
+        if self._n_agents is not None and isinstance(episode_batch, list):
+            # Check first transition has correct number of agents
+            if len(episode_batch) > 0 and "o" in episode_batch[0]:
+                obs = np.asarray(episode_batch[0]["o"])
+                if obs.ndim >= 2:
+                    actual_agents = obs.shape[0]
+                    if actual_agents != self._n_agents:
+                        raise ValueError(
+                            f"[PHASE5] Episode agent count mismatch: "
+                            f"expected n_agents={self._n_agents}, got {actual_agents} in first transition. "
+                            f"Check environment produces consistent agent counts."
+                        )
+        
         # Case 1: classic list of transitions
         if isinstance(episode_batch, list):
             self._episodes.append(episode_batch)
@@ -65,9 +92,9 @@ class ReplayBuffer:
         batch_size: int = 32,
         n_actions: Optional[int] = None,
         max_seq_len: Optional[int] = None,
-    ) -> Optional[Dict[str, np.ndarray]]:
+    ) -> Dict[str, np.ndarray]:
         if len(self._episodes) == 0 and len(self._current) == 0:
-            return None
+            raise ValueError("ReplayBuffer is empty, cannot sample. Ensure episodes are stored before sampling.")
 
         pool = list(self._episodes)
         if len(self._current) > 0:
@@ -77,7 +104,18 @@ class ReplayBuffer:
         episodes = self._rng.sample(pool, k=B)
 
         ep_lengths = [len(ep) for ep in episodes]
-        T = max(ep_lengths) if max_seq_len is None else int(max_seq_len)
+        # [PHASE6-FIX] Task 6.1: Clamp T to prevent OOM on anomalous long episodes
+        T_raw = max(ep_lengths) if max_seq_len is None else int(max_seq_len)
+        # Clamp to reasonable limit (episode_limit if available, else 10000)
+        episode_limit = getattr(self, '_episode_limit', 10000)
+        T = min(T_raw, episode_limit)
+        
+        if T_raw > T:
+            logging.getLogger(__name__).warning(
+                f"[PHASE6] Episode length clamped: raw_max={T_raw} > limit={T}. "
+                f"Long episode detected, truncating to prevent OOM. "
+                f"Episode lengths: {ep_lengths}"
+            )
 
         # Prefer runner-provided shapes when available; otherwise infer from episodes
         if getattr(self, '_n_agents', None) is not None and getattr(self, '_obs_dim', None) is not None:
@@ -110,6 +148,10 @@ class ReplayBuffer:
         r      = np.zeros((B, T, 1), dtype=np.float32)
         terminated = np.zeros((B, T, 1), dtype=np.float32)
         filled     = np.zeros((B, T, 1), dtype=np.float32)
+        
+        # [PHASE1-FIX] Strict shape validation - no silent padding
+        # Track if we need to validate shapes strictly
+        strict_validation = True
 
         # Optional blocks
         have_avail = have_state = have_u_onehot = False
@@ -130,50 +172,33 @@ class ReplayBuffer:
 
                 # Observations
                 if "o" in tr:
-                    try:
-                        arr_o = _as_agents_obs(tr["o"], ensure_shape=(n_agents, obs_dim))
-                    except Exception:
-                        arr_o = _as_agents_obs(tr["o"]) if 'o' in tr else np.zeros((n_agents, obs_dim), dtype=np.float32)
+                    arr_o = _as_agents_obs(tr["o"], ensure_shape=(n_agents, obs_dim))
                     if __debug__:
                         try:
                             print(f"[DEBUG shapes] o target={(n_agents, obs_dim)} src={arr_o.shape} (b={b},t={t})")
                         except Exception:
                             print(f"[DEBUG shapes] o src={getattr(arr_o, 'shape', None)} (b={b},t={t})")
-                    # ensure safe copy to avoid broadcasting errors
-                    if arr_o.shape != (n_agents, obs_dim):
-                        tmp = np.zeros((n_agents, obs_dim), dtype=np.float32)
-                        r = min(arr_o.shape[0], n_agents)
-                        c = min(arr_o.shape[1], obs_dim if arr_o.ndim > 1 else arr_o.shape[1])
-                        try:
-                            tmp[:r, :c] = arr_o[:r, :c]
-                        except Exception:
-                            # final fallback: flatten and copy leading elements
-                            flat = np.asarray(arr_o).reshape(-1)
-                            flat = np.pad(flat, (0, max(0, n_agents * obs_dim - flat.size)), mode='constant')[: n_agents * obs_dim]
-                            tmp = flat.reshape((n_agents, obs_dim))
-                        arr_o = tmp
+                    # [PHASE1-FIX] Strict shape validation - fail if mismatch
+                    if strict_validation and arr_o.shape != (n_agents, obs_dim):
+                        raise ValueError(
+                            f"[PHASE1] Observation shape mismatch at (b={b}, t={t}): "
+                            f"got {arr_o.shape}, expected ({n_agents}, {obs_dim}). "
+                            f"Environment must produce consistent batch sizes. "
+                            f"Check env.get_env_info() and ensure n_agents is stable."
+                        )
                     o[b, t] = arr_o
                 if "o_next" in tr:
-                    try:
-                        arr_on = _as_agents_obs(tr["o_next"], ensure_shape=(n_agents, obs_dim))
-                    except Exception:
-                        arr_on = _as_agents_obs(tr.get("o_next", []))
+                    arr_on = _as_agents_obs(tr["o_next"], ensure_shape=(n_agents, obs_dim))
                     if __debug__:
                         try:
                             print(f"[DEBUG shapes] o_next target={(n_agents, obs_dim)} src={arr_on.shape} (b={b},t={t})")
                         except Exception:
                             print(f"[DEBUG shapes] o_next src={getattr(arr_on, 'shape', None)} (b={b},t={t})")
-                    if arr_on.shape != (n_agents, obs_dim):
-                        tmp = np.zeros((n_agents, obs_dim), dtype=np.float32)
-                        r = min(arr_on.shape[0], n_agents)
-                        c = min(arr_on.shape[1], obs_dim if arr_on.ndim > 1 else arr_on.shape[1])
-                        try:
-                            tmp[:r, :c] = arr_on[:r, :c]
-                        except Exception:
-                            flat = np.asarray(arr_on).reshape(-1)
-                            flat = np.pad(flat, (0, max(0, n_agents * obs_dim - flat.size)), mode='constant')[: n_agents * obs_dim]
-                            tmp = flat.reshape((n_agents, obs_dim))
-                        arr_on = tmp
+                    if strict_validation and arr_on.shape != (n_agents, obs_dim):
+                        raise ValueError(
+                            f"[PHASE1] o_next shape mismatch at (b={b}, t={t}): "
+                            f"got {arr_on.shape}, expected ({n_agents}, {obs_dim})"
+                        )
                     o_next[b, t] = arr_on
 
                 # Actions (indices)
@@ -199,58 +224,59 @@ class ReplayBuffer:
 
                 # Avail masks
                 if "avail_a" in tr:
-                    try:
-                        mask = _as_agents_mask(tr["avail_a"], n_agents)
-                        # mask shape: (n_agents, current_len)
-                        curr_len = mask.shape[1]
-                        if __debug__:
-                            try:
-                                print(f"[DEBUG shapes] avail_a target=(B={B},T={T},n_agents={n_agents},max_avail={max_avail_len}) src={mask.shape} (b={b},t={t})")
-                            except Exception:
-                                print(f"[DEBUG shapes] avail_a src={getattr(mask,'shape',None)} (b={b},t={t})")
-                        if avail_u is None:
-                            # allocate conservative buffer if not pre-allocated
-                            avail_u = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
-                            avail_u_next = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
-                            have_avail = True
-                        # copy into the pre-allocated buffer (pad/truncate as needed)
-                        # be careful: mask may have different second-dim than buffer
-                        cpy = min(curr_len, avail_u.shape[3]) if avail_u.ndim >= 4 else curr_len
+                    mask = _as_agents_mask(tr["avail_a"], n_agents)
+                    # mask shape: (n_agents, current_len)
+                    curr_len = mask.shape[1]
+                    if __debug__:
                         try:
-                            avail_u[b, t, :mask.shape[0], :cpy] = mask[:, :cpy]
+                            print(f"[DEBUG shapes] avail_a target=(B={B},T={T},n_agents={n_agents},max_avail={max_avail_len}) src={mask.shape} (b={b},t={t})")
                         except Exception:
-                            # best-effort flatten-copy
-                            mm = np.zeros((n_agents, avail_u.shape[3]), dtype=np.float32)
-                            mm[:, :min(mask.shape[1], mm.shape[1])] = mask[:, :mm.shape[1]]
-                            avail_u[b, t] = mm
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                            print(f"[DEBUG shapes] avail_a src={getattr(mask,'shape',None)} (b={b},t={t})")
+                    if avail_u is None:
+                        # allocate conservative buffer if not pre-allocated
+                        avail_u = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
+                        avail_u_next = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)
+                        have_avail = True
+                    # copy into the pre-allocated buffer (pad/truncate as needed)
+                    # be careful: mask may have different second-dim than buffer
+                    cpy = min(curr_len, avail_u.shape[3]) if avail_u.ndim >= 4 else curr_len
+                    avail_u[b, t, :mask.shape[0], :cpy] = mask[:, :cpy]
                 if "avail_a_next" in tr and have_avail:
-                    try:
-                        maskn = _as_agents_mask(tr["avail_a_next"], n_agents)
-                        curr_len_n = maskn.shape[1]
-                        cpy = min(curr_len_n, avail_u_next.shape[3]) if avail_u_next.ndim >= 4 else curr_len_n
-                        try:
-                            avail_u_next[b, t, :maskn.shape[0], :cpy] = maskn[:, :cpy]
-                        except Exception:
-                            mm = np.zeros((n_agents, avail_u_next.shape[3]), dtype=np.float32)
-                            mm[:, :min(maskn.shape[1], mm.shape[1])] = maskn[:, :mm.shape[1]]
-                            avail_u_next[b, t] = mm
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        pass
+                    maskn = _as_agents_mask(tr["avail_a_next"], n_agents)
+                    curr_len_n = maskn.shape[1]
+                    cpy = min(curr_len_n, avail_u_next.shape[3]) if avail_u_next.ndim >= 4 else curr_len_n
+                    avail_u_next[b, t, :maskn.shape[0], :cpy] = maskn[:, :cpy]
 
                 # State vectors (global state)
                 if "s" in tr:
+                    state_vec = np.asarray(tr["s"], dtype=np.float32).reshape(-1)
+                    # [PHASE5-FIX] Task 5.2: Validate state shape if known
+                    if self._state_shape is not None:
+                        if state_vec.size != self._state_shape:
+                            raise ValueError(
+                                f"[PHASE5] State shape mismatch in episode {b}, timestep {t}: "
+                                f"expected size={self._state_shape}, got size={state_vec.size}. "
+                                f"State corruption detected. Check environment state builder."
+                            )
                     if not have_state:
-                        sd = int(np.asarray(tr["s"]).size)
+                        sd = int(state_vec.size)
+                        # [PHASE5-FIX] If state_shape provided, use it; otherwise infer
+                        if self._state_shape is not None:
+                            sd = self._state_shape
                         state = np.zeros((B, T, sd), dtype=np.float32)
                         state_next = np.zeros((B, T, sd), dtype=np.float32)
                         have_state = True
-                    state[b, t] = np.asarray(tr["s"], dtype=np.float32).reshape(-1)
+                    state[b, t] = state_vec
                 if "s_next" in tr and have_state:
-                    state_next[b, t] = np.asarray(tr["s_next"], dtype=np.float32).reshape(-1)
+                    state_next_vec = np.asarray(tr["s_next"], dtype=np.float32).reshape(-1)
+                    # [PHASE5-FIX] Task 5.2: Validate next state shape
+                    if self._state_shape is not None:
+                        if state_next_vec.size != self._state_shape:
+                            raise ValueError(
+                                f"[PHASE5] Next state shape mismatch in episode {b}, timestep {t}: "
+                                f"expected size={self._state_shape}, got size={state_next_vec.size}"
+                            )
+                    state_next[b, t] = state_next_vec
 
                 # One-hot actions (optional)
                 if "u_onehot" in tr:
@@ -281,12 +307,8 @@ class ReplayBuffer:
             "terminated": terminated,
             "filled": filled,
         }
-        # include machine mapping per action if present
-        try:
-            batch["u_machine"] = u_machine
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # [C1] Include machine mapping per action - fail-fast if assignment fails
+        batch["u_machine"] = u_machine
         if have_state:
             batch["state"] = state
             batch["state_next"] = state_next
@@ -379,7 +401,7 @@ def _infer_agents_obs(episodes: List[Episode]) -> Tuple[int, int]:
     environment emits variable-sized decision batches across timesteps.
     """
     max_agents = 1
-    obs_dim = 6
+    obs_dim = 7
     for ep in episodes:
         for tr in ep:
             # observations

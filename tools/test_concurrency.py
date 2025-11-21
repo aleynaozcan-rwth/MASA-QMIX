@@ -66,8 +66,8 @@ def main():
             import pprint
             print('[DEBUG] batch items:')
             pprint.pprint(batch)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         # for each pending decision, pick the first allowed machine index
         for d in batch:
             # prefer explicit allowed_machine_indices, but fallback to avail_row
@@ -91,8 +91,8 @@ def main():
             # call resume (this will succeed the job's resume event)
             try:
                 d.get('resume')(choice)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # After run, inspect gantt_records
     gantt = getattr(env, 'gantt_records', [])

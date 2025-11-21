@@ -138,17 +138,20 @@ class JobAgent :
             if self .finished or int (self .current_op_idx )>=len (self .operations ):
                 return None 
             return self .operations [int (self .current_op_idx )]
-        except Exception :
-        # fallback to left_job items if operations not suitable
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to get operation from operations list: {e}")
+            # fallback to left_job items if operations not suitable
             try :
                 return self .left_job [0 ]
-            except Exception :
+            except Exception as e2:
+                logging.getLogger(__name__).warning(f"[C1] Failed to get operation from left_job: {e2}")
                 return None 
 
     def progress_ratio (self ):
         try :
             return float (self .current_op_idx )/max (1.0 ,float (len (self .operations )))
-        except Exception :
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to compute progress_ratio: {e}")
             return 0.0 
 
             # ------------------------------------------------------------------
@@ -191,8 +194,8 @@ class JobAgent :
         if self .left_job :
             try :
                 self .finished_job .append (self .left_job .pop (0 ))
-            except Exception :
-                pass 
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 # update env-like pointers
         try :
             self .current_op_idx =int (self .current_op_idx )+1 
@@ -237,14 +240,13 @@ class JobAgent :
             # mark finished flag as well for compatibility
         try :
             self .finished =True 
-        except Exception :
-            pass 
-
+        except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             # Log the event and return success
         try :
             LOG .info ("[JobAgent] JobAgent %s completed all jobs at t=%s",self .agent_id ,self .completed_at )
-        except Exception :
-            pass 
+        except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return True 
 
     def reset (self ):

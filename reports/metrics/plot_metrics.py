@@ -35,11 +35,11 @@ def _compute_metrics_from_gantt(records):
             else:
                 try:
                     s = float(r[0])
-                except Exception:
+                except Exception as e:
                     s = 0.0
                 try:
                     e = float(r[1])
-                except Exception:
+                except Exception as e:
                     e = s
                 wc = r[3] if len(r) > 3 else None
                 op = r[5] if len(r) > 5 else None
@@ -53,10 +53,10 @@ def _compute_metrics_from_gantt(records):
             # machine
             try:
                 mid = int(wc) if wc is not None else None
-            except Exception:
+            except Exception as e:
                 try:
                     mid = int(str(wc))
-                except Exception:
+                except Exception as e:
                     mid = None
             if mid is not None:
                 total_machine_busy[mid] = total_machine_busy.get(mid, 0.0) + dur
@@ -73,11 +73,12 @@ def _compute_metrics_from_gantt(records):
                     if arrival is not None:
                         try:
                             job_arrival[jid_i] = float(arrival)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-        except Exception:
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             continue
 
     if starts and ends:
@@ -96,25 +97,25 @@ def _compute_metrics_from_gantt(records):
 
     try:
         avg_machine_util = float(mm_total) / (episode_length * max(1, int(total_machines)))
-    except Exception:
+    except Exception as e:
         avg_machine_util = 0.0
     try:
         avg_operator_util = float(oo_total) / (episode_length * max(1, int(total_operators)))
-    except Exception:
+    except Exception as e:
         avg_operator_util = 0.0
 
     per_machine_util = {}
     for mid, busy in total_machine_busy.items():
         try:
             per_machine_util[mid] = float(min(max(busy / float(episode_length), 0.0), 1.0))
-        except Exception:
+        except Exception as e:
             per_machine_util[mid] = 0.0
 
     per_operator_util = {}
     for oid, busy in total_operator_busy.items():
         try:
             per_operator_util[oid] = float(min(max(busy / float(episode_length), 0.0), 1.0))
-        except Exception:
+        except Exception as e:
             per_operator_util[oid] = 0.0
 
     # average wait time per job if arrival info present
@@ -126,7 +127,7 @@ def _compute_metrics_from_gantt(records):
                 waits.append(float(start) - float(job_arrival[jid]))
         if waits:
             avg_wait = float(_np.mean(waits))
-    except Exception:
+    except Exception as e:
         avg_wait = None
 
     return {
@@ -148,7 +149,7 @@ def plot_utilization_and_makespan(history_dir: str = "my_data_and_graph/historyd
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
         return
 
     evols = data.get("evolutions", []) if isinstance(data, dict) else []
@@ -164,12 +165,12 @@ def plot_utilization_and_makespan(history_dir: str = "my_data_and_graph/historyd
         m = None
         try:
             m = e.get('avg_makespan', None)
-        except Exception:
+        except Exception as e:
             m = None
         if m is None:
             try:
                 m = e.get('average_makespan', None)
-            except Exception:
+            except Exception as e:
                 m = None
         # Fallback: compute from embedded gantt if present
         if m is None or (isinstance(m, (int, float)) and float(m) == 0.0):
@@ -178,8 +179,8 @@ def plot_utilization_and_makespan(history_dir: str = "my_data_and_graph/historyd
                 if gantt:
                     comp = _compute_metrics_from_gantt(gantt)
                     m = comp.get('avg_makespan', comp.get('average_makespan', m))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         y_makespan.append(float(m) if m is not None else 0.0)
 
     if plt is None:
@@ -216,7 +217,7 @@ def plot_per_machine_utilization(history_dir: str = "my_data_and_graph/historyda
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
         return
     evols = data.get("evolutions", []) if isinstance(data, dict) else []
     if not evols:
@@ -250,7 +251,7 @@ def plot_per_machine_utilization(history_dir: str = "my_data_and_graph/historyda
                         v = pm.get(int(mid), None)
                     if v is None:
                         v = pm.get(mid, None)
-                except Exception:
+                except Exception as e:
                     v = pm.get(mid, 0.0)
                 # Fallback: if per-machine map missing, try computing from gantt
                 if v is None:
@@ -264,9 +265,9 @@ def plot_per_machine_utilization(history_dir: str = "my_data_and_graph/historyda
                                     v = pm_comp.get(int(mid), None)
                                 if v is None:
                                     v = pm_comp.get(mid, None)
-                            except Exception:
+                            except Exception as e:
                                 v = pm_comp.get(mid, 0.0)
-                    except Exception:
+                    except Exception as e:
                         v = None
                 vals.append(float(v) if v is not None else 0.0)
             plt.plot(x, vals, marker='o', label=f"M{mid}", color=cmap(i % 10))
@@ -293,7 +294,7 @@ def plot_per_operator_utilization(history_dir: str = "my_data_and_graph/historyd
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
         return
     evols = data.get("evolutions", []) if isinstance(data, dict) else []
     if not evols:
@@ -325,7 +326,7 @@ def plot_per_operator_utilization(history_dir: str = "my_data_and_graph/historyd
                         v = po.get(int(oid), None)
                     if v is None:
                         v = po.get(oid, None)
-                except Exception:
+                except Exception as e:
                     v = po.get(oid, 0.0)
                 # Fallback: compute from gantt records if missing
                 if v is None:
@@ -337,7 +338,7 @@ def plot_per_operator_utilization(history_dir: str = "my_data_and_graph/historyd
                             v = po_comp.get(oid, None)
                             if v is None and oid.isdigit():
                                 v = po_comp.get(int(oid), None)
-                    except Exception:
+                    except Exception as e:
                         v = None
                 vals.append(float(v) if v is not None else 0.0)
             plt.plot(x, vals, marker='o', label=f"O{oid}", color=cmap(i % 10))
@@ -374,7 +375,7 @@ def utilization_summary_grid(history_dir: str = "my_data_and_graph/historydata",
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
         return
     evols = data.get("evolutions", []) if isinstance(data, dict) else []
     if not evols:
@@ -387,7 +388,7 @@ def utilization_summary_grid(history_dir: str = "my_data_and_graph/historydata",
         # reward
         try:
             avg_r = e.get('avg_epoch_reward') if e.get('avg_epoch_reward') is not None else None
-        except Exception:
+        except Exception as e:
             avg_r = None
         avg_rewards.append(avg_r)
         # makespan: prefer normalized keys then gantt fallback
@@ -400,8 +401,8 @@ def utilization_summary_grid(history_dir: str = "my_data_and_graph/historydata",
                 if gantt:
                     comp = _compute_metrics_from_gantt(gantt)
                     m = comp.get('avg_makespan', comp.get('average_makespan', m))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         makespans.append(float(m) if m is not None else 0.0)
 
     if plt is None:
@@ -497,7 +498,7 @@ def check_timeline_consistency(history_dir: str = "my_data_and_graph/historydata
     try:
         with open(summary_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
         return
     evols = data.get('evolutions', []) or []
     if not evols:
@@ -519,8 +520,8 @@ def check_timeline_consistency(history_dir: str = "my_data_and_graph/historydata
                         machine_counts[m] = machine_counts.get(m, 0) + 1
                     for o in re.findall(r"O(\d+)", ln):
                         operator_counts[o] = operator_counts.get(o, 0) + 1
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # warn heuristically
     try:
@@ -530,7 +531,8 @@ def check_timeline_consistency(history_dir: str = "my_data_and_graph/historydata
                     cnt = machine_counts.get(mid_str, 0)
                     if cnt < 2:
                         print(f"WARNING: Machine {mid_str} shows high utilization ({util:.2f}) but only {cnt} mentions in timeline.")
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
         for oid, util in po.items():
             try:
@@ -538,7 +540,8 @@ def check_timeline_consistency(history_dir: str = "my_data_and_graph/historydata
                     cnt = operator_counts.get(str(oid), 0)
                     if cnt < 2:
                         print(f"WARNING: Operator {oid} shows high utilization ({util:.2f}) but only {cnt} mentions in timeline.")
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")

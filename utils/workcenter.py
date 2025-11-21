@@ -181,6 +181,11 @@ class WorkCenters:
         for mname, mmeta in self.machine_registry.items():
             for op in mmeta.get('capabilities', []):
                 self.operations_map.setdefault(int(op), []).append(mname)
+        
+    @property
+    def machine_list(self):
+        """Alias for machine_order to maintain compatibility with environment code."""
+        return self.machine_order
 
     # Utilities
     def machine_name_for_number(self, n: int) -> str:
@@ -282,7 +287,8 @@ class WorkCenters:
                     if op_idx_local in caps:
                         allowed_machines.append(mname)
                         allowed_machine_indices.append(int(mindex.get(mname, len(allowed_machine_indices))))
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
 
             # extract processing_time_means from env.config if present and
@@ -329,7 +335,8 @@ class WorkCenters:
                 try:
                     wc_idx = int(self.machine_registry.get(m, {}).get('workcenter', 0))
                     eligible_ops_by_wc[wc_idx] = getattr(self, 'eligible_operator_groups_by_wc', {}).get(int(wc_idx), [])
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
         except Exception:
             eligible_ops_by_wc = {}

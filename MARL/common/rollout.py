@@ -4,31 +4,21 @@ import os
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-# try to import torch for RNN hidden handling; degrade gracefully if not available
-try:
-    import torch
-except Exception as e:
-    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-    torch = None
+# [C1] torch is REQUIRED for RNN hidden handling - fail-fast if not available
+import torch
 
-# mask utilities
-try:
-    from MARL.common.mask_utils import build_machine_major_mask
-except Exception as e:
-    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-    build_machine_major_mask = None
-# gantt helpers (selection logging) and IO control
+# [C1] mask utilities are REQUIRED for action masking - fail-fast if not available
+from MARL.common.mask_utils import build_machine_major_mask
+
+# gantt helpers (selection logging) - best effort
 try:
     from utils import gantt as gantt_utils
 except Exception as e:
-    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+    logging.getLogger(__name__).warning(f"[C1] Gantt utilities not available (visualization only): {e}")
     gantt_utils = None
-try:
-    # io_control provides central allow flag
-    from utils.io_control import allow_history_writes
-except Exception:
-    def allow_history_writes():
-        return False
+
+# [C1] io_control is REQUIRED for history writes control - fail-fast if not available
+from utils.io_control import allow_history_writes
 
 
 class RolloutWorker:
@@ -55,64 +45,45 @@ class RolloutWorker:
         self.agents = agents
         self.buffer = buffer
         self.args = args or type("A", (), {})()
-        # Use episode_limit coming from runner-provided args when available.
-        # Fall back to the explicit constructor value or 300 as a safe default.
-        try:
-            if hasattr(self.args, "episode_limit") and getattr(self.args, "episode_limit") is not None:
-                self.episode_limit = int(getattr(self.args, "episode_limit"))
-            elif episode_limit is not None:
-                self.episode_limit = int(episode_limit)
-            else:
-                # extend default rollout episode_limit to match environment
-                # default (300) so short runs include initial arrivals.
-                self.episode_limit = int(getattr(self.args, 'episode_limit', 300))
-        except Exception as e:
-            logging.getLogger(__name__).exception("RolloutWorker init: failed to determine episode_limit", exc_info=True)
-            self.episode_limit = 300
+        # [C1] Use episode_limit from runner-provided args when available (fail-fast if invalid)
+        if hasattr(self.args, "episode_limit") and getattr(self.args, "episode_limit") is not None:
+            self.episode_limit = int(getattr(self.args, "episode_limit"))
+        elif episode_limit is not None:
+            self.episode_limit = int(episode_limit)
+        else:
+            # extend default rollout episode_limit to match environment default (300)
+            self.episode_limit = int(getattr(self.args, 'episode_limit', 300))
 
+        # [C1] Device configuration must be valid (fail-fast if invalid)
         if hasattr(self.args, "device") and getattr(self.args, "device") is not None:
             self.device = getattr(self.args, "device")
         elif device is not None:
             self.device = device
         else:
-            # fallback to a sensible default
-            try:
-                self.device = getattr(self.args, 'device', 'cpu')
-            except Exception:
-                self.device = 'cpu'
+            self.device = getattr(self.args, 'device', 'cpu')
         self.log_prefix = log_prefix
 
-        # epsilon schedule: prefer centralized args values, then constructor
-        # params, then the global defaults from arguments.py.
-        try:
-            if hasattr(self.args, 'epsilon_start') and getattr(self.args, 'epsilon_start') is not None:
-                self.epsilon_start = float(getattr(self.args, 'epsilon_start'))
-            elif epsilon_start is not None:
-                self.epsilon_start = float(epsilon_start)
-            else:
-                self.epsilon_start = float(getattr(self.args, 'epsilon_start', 1.0))
-        except Exception:
-            self.epsilon_start = 1.0
+        # [C1] Epsilon schedule configuration must be valid (fail-fast if invalid)
+        if hasattr(self.args, 'epsilon_start') and getattr(self.args, 'epsilon_start') is not None:
+            self.epsilon_start = float(getattr(self.args, 'epsilon_start'))
+        elif epsilon_start is not None:
+            self.epsilon_start = float(epsilon_start)
+        else:
+            self.epsilon_start = float(getattr(self.args, 'epsilon_start', 1.0))
 
-        try:
-            if hasattr(self.args, 'epsilon_end') and getattr(self.args, 'epsilon_end') is not None:
-                self.epsilon_end = float(getattr(self.args, 'epsilon_end'))
-            elif epsilon_end is not None:
-                self.epsilon_end = float(epsilon_end)
-            else:
-                self.epsilon_end = float(getattr(self.args, 'epsilon_end', 0.05))
-        except Exception:
-            self.epsilon_end = 0.05
+        if hasattr(self.args, 'epsilon_end') and getattr(self.args, 'epsilon_end') is not None:
+            self.epsilon_end = float(getattr(self.args, 'epsilon_end'))
+        elif epsilon_end is not None:
+            self.epsilon_end = float(epsilon_end)
+        else:
+            self.epsilon_end = float(getattr(self.args, 'epsilon_end', 0.05))
 
-        try:
-            if hasattr(self.args, 'epsilon_anneal_steps') and getattr(self.args, 'epsilon_anneal_steps') is not None:
-                self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps'))
-            elif epsilon_anneal_steps is not None:
-                self.epsilon_anneal_steps = int(epsilon_anneal_steps)
-            else:
-                self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps', 50000))
-        except Exception:
-            self.epsilon_anneal_steps = 50000
+        if hasattr(self.args, 'epsilon_anneal_steps') and getattr(self.args, 'epsilon_anneal_steps') is not None:
+            self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps'))
+        elif epsilon_anneal_steps is not None:
+            self.epsilon_anneal_steps = int(epsilon_anneal_steps)
+        else:
+            self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps', 50000))
 
         self.epsilon = float(self.epsilon_start)
         self._eps_decay = (self.epsilon_start - self.epsilon_end) / max(1, self.epsilon_anneal_steps)
@@ -121,23 +92,13 @@ class RolloutWorker:
         self.eval_hidden = None
         self.episode_duration = 0
 
-        # RNG for Runner fallback
+        # [C1] RNG initialization is CRITICAL for reproducibility (fail-fast if invalid)
         seed = getattr(self.args, "seed", None)
-        try:
-            self.rng = np.random.RandomState(seed if seed is not None else 0)
-        except Exception as e:
-            logging.getLogger(__name__).exception("RolloutWorker init: RNG init failed")
-            self.rng = np.random.RandomState(0)
+        self.rng = np.random.RandomState(seed if seed is not None else 0)
 
-        # lightweight step counter for diagnostics (do not affect logic)
-        try:
-            self.step_counter = int(getattr(self.args, 'start_step_counter', 0) or 0)
-        except Exception:
-            self.step_counter = 0
-        try:
-            self.epsilon_log_every = int(getattr(self.args, 'epsilon_diagnostics_every', 50) or 50)
-        except Exception:
-            self.epsilon_log_every = 50
+        # [C1] Step counter and diagnostics - configuration must be valid (fail-fast)
+        self.step_counter = int(getattr(self.args, 'start_step_counter', 0) or 0)
+        self.epsilon_log_every = int(getattr(self.args, 'epsilon_diagnostics_every', 50) or 50)
 
         # log
         print(f"[RolloutWorker] init | episode_limit={self.episode_limit} | device={self.device}")
@@ -159,27 +120,19 @@ class RolloutWorker:
         Return (actions_list, hidden_state) where actions_list is a list of int actions
         This wrapper tries common agent APIs then falls back to deterministic/random picks.
         """
-        # Try batch API on agents
-        try:
-            if hasattr(self.agents, "select_actions"):
-                return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
-            if hasattr(self.agents, "choose_actions"):
-                return self.agents.choose_actions(obs_batch, avail_batch, evaluate=evaluate), None
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # [C1] Try batch API on agents - fail-fast if select_actions/choose_actions fail
+        if hasattr(self.agents, "select_actions"):
+            return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
+        if hasattr(self.agents, "choose_actions"):
+            return self.agents.choose_actions(obs_batch, avail_batch, evaluate=evaluate), None
 
-        # Try per-observation act method
-        try:
-            if hasattr(self.agents, "act"):
-                actions = []
-                for ob in obs_batch:
-                    a = self.agents.act(ob, None, evaluate=evaluate)
-                    actions.append(a)
-                return actions, None
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            pass
+        # [C1] Try per-observation act method - fail-fast if fails
+        if hasattr(self.agents, "act"):
+            actions = []
+            for ob in obs_batch:
+                a = self.agents.act(ob, None, evaluate=evaluate)
+                actions.append(a)
+            return actions, None
 
             # Fallback: pick first allowed or random
         actions = []
@@ -192,18 +145,15 @@ class RolloutWorker:
                 # no info — pick 0
                 actions.append(0)
             else:
-                try:
-                    allowed_list = list(allowed)
-                    if len(allowed_list) == 0:
-                        actions.append(None)
+                # [C1] Fallback action selection - fail-fast if conversion fails
+                allowed_list = list(allowed)
+                if len(allowed_list) == 0:
+                    actions.append(None)
+                else:
+                    if evaluate:
+                        actions.append(int(allowed_list[0]))
                     else:
-                        if evaluate:
-                            actions.append(int(allowed_list[0]))
-                        else:
-                            actions.append(int(self.rng.choice(allowed_list)))
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    actions.append(0)
+                        actions.append(int(self.rng.choice(allowed_list)))
         return actions, None
 
     # ------------------------------------------------------------------
@@ -218,52 +168,28 @@ class RolloutWorker:
         if not batch:
             return []
         obs_list = [item.get("obs") for item in batch]
-        try:
-            avail = [item.get("avail_row") for item in batch]
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            avail = None
+        # [C1] Avail extraction is CRITICAL - fail-fast if batch access fails
+        avail = [item.get("avail_row") for item in batch]
 
-        try:
-            # Ensure every decision item has a machine-major availability row.
-            # Prefer existing `item['avail_row']` populated by the environment; when
-            # missing, compute using the canonical helper `build_machine_major_mask`.
-            for item in batch:
+        # [C1] Ensure every decision item has a machine-major availability row.
+        # Prefer existing `item['avail_row']` populated by the environment; when
+        # missing, compute using the canonical helper `build_machine_major_mask`.
+        for item in batch:
+            if item is None:
+                continue
+            if item.get('avail_row') is None and build_machine_major_mask is not None:
+                jid = item.get('job_id')
                 try:
-                    if item is None:
-                        continue
-                    if item.get('avail_row') is None and build_machine_major_mask is not None:
-                        jid = item.get('job_id')
-                        try:
-                            row = build_machine_major_mask(self.env, jid)
-                            if row:
-                                item['avail_row'] = row
-                        except Exception:
-                            # leave item unchanged if we can't compute
-                            pass
-                except Exception:
-                    continue
+                    row = build_machine_major_mask(self.env, jid)
+                    if row:
+                        item['avail_row'] = row
+                except Exception as e:
+                    # [C1] Mask computation is best-effort (Rule 3)
+                    logging.getLogger(__name__).warning(f"[C1] Failed to compute mask for job {jid}: {e}")
 
-            actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
-            return actions
-        except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            # fallback deterministic/random pick
-            outs = []
-            for item in batch:
-                allowed = item.get("allowed_machine_indices", [])
-                if not allowed:
-                    outs.append(None)
-                else:
-                    if evaluate:
-                        outs.append(int(allowed[0]))
-                    else:
-                        try:
-                            outs.append(int(self.rng.choice(allowed)))
-                        except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            outs.append(int(np.random.choice(allowed)))
-            return outs
+        # [C1] Action selection is CRITICAL - fail-fast if _select_actions fails
+        actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
+        return actions
 
     def collect_gantt_from_batch(self, batch, sim_time):
         """Optional hook to build gantt records from a decision batch. Default: empty."""
@@ -282,123 +208,86 @@ class RolloutWorker:
         for item, act in zip(batch, (raw_actions or [])):
             chosen = act
             chosen_machine_name = None
-            try:
-                if bool(getattr(args, 'use_machine_actions', False)):
-                    mlist = getattr(self.env.workcenters_meta, 'machine_list', []) or []
-                    ops = int(getattr(self.env, 'num_ops', 1))
-                    allowed_m_inds = item.get('allowed_machine_indices') or []
+            # [C1] Machine action conversion is CRITICAL - fail-fast (Rule 1)
+            if bool(getattr(args, 'use_machine_actions', False)):
+                mlist = getattr(self.env.workcenters_meta, 'machine_list', []) or []
+                ops = int(getattr(self.env, 'num_ops', 1))
+                allowed_m_inds = item.get('allowed_machine_indices') or []
 
-                    try:
-                        chosen_i = int(act) if act is not None else None
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        chosen_i = None
+                chosen_i = int(act) if act is not None else None
 
-                    if chosen_i is None or chosen_i < 0 or chosen_i >= len(mlist):
-                        if allowed_m_inds:
-                            chosen_i = int(self.rng.choice(allowed_m_inds))
+                if chosen_i is None or chosen_i < 0 or chosen_i >= len(mlist):
+                    if allowed_m_inds:
+                        chosen_i = int(self.rng.choice(allowed_m_inds))
+                    else:
+                        if len(mlist) > 0:
+                            chosen_i = max(0, min(len(mlist) - 1, (chosen_i or 0)))
                         else:
-                            if len(mlist) > 0:
-                                chosen_i = max(0, min(len(mlist) - 1, (chosen_i or 0)))
-                            else:
-                                chosen_i = 0
+                            chosen_i = 0
 
-                    # Prefer per-machine availability (avail_row) for validation.
-                    # This makes the default action-space machine-length. If
-                    # per-machine information is missing we attempt to compute
-                    # it deterministically; we do not expand the action-space
-                    # here to include operator-level slots.
-                    per_machine = None
-                    try:
-                        per_machine = item.get('avail_row') if item.get('avail_row') is not None else None
-                    except Exception:
-                        per_machine = None
+                # Prefer per-machine availability (avail_row) for validation.
+                per_machine = item.get('avail_row') if item.get('avail_row') is not None else None
 
-                    validated = False
-                    if per_machine is not None:
-                        try:
-                            if 0 <= int(chosen_i) < len(per_machine) and int(bool(per_machine[int(chosen_i)])):
-                                validated = True
-                            else:
-                                # try to find a permitted machine that is available
-                                found = None
-                                for cand in (allowed_m_inds or list(range(len(mlist)))):
-                                    if 0 <= int(cand) < len(per_machine) and int(bool(per_machine[int(cand)])):
-                                        found = int(cand)
-                                        break
-                                if found is not None:
-                                    chosen_i = found
-                                    validated = True
-                                elif allowed_m_inds:
-                                    chosen_i = int(allowed_m_inds[0])
-                                    validated = False
-                        except Exception:
+                validated = False
+                if per_machine is not None:
+                    if 0 <= int(chosen_i) < len(per_machine) and int(bool(per_machine[int(chosen_i)])):
+                        validated = True
+                    else:
+                        # try to find a permitted machine that is available
+                        found = None
+                        for cand in (allowed_m_inds or list(range(len(mlist)))):
+                            if 0 <= int(cand) < len(per_machine) and int(bool(per_machine[int(cand)])):
+                                found = int(cand)
+                                break
+                        if found is not None:
+                            chosen_i = found
+                            validated = True
+                        elif allowed_m_inds:
+                            chosen_i = int(allowed_m_inds[0])
                             validated = False
 
-                    if not validated:
-                        # Attempt to recompute a per-machine row deterministically
-                        # using the canonical helper if available. Otherwise fall
-                        # back to the allowed_machine_indices list or a permissive
-                        # choice to maintain determinism and backward-compat.
+                if not validated:
+                    # [C1] Mask recomputation is best-effort (Rule 3)
+                    if build_machine_major_mask is not None:
+                        jid = item.get('job_id')
                         try:
-                            if build_machine_major_mask is not None:
-                                jid = item.get('job_id')
-                                try:
-                                    new_row = build_machine_major_mask(self.env, jid)
-                                    if new_row is not None:
-                                        if 0 <= int(chosen_i) < len(new_row) and int(bool(new_row[int(chosen_i)])):
-                                            validated = True
-                                            # chosen_i stays the same
-                                        else:
-                                            found = None
-                                            for cand in (allowed_m_inds or list(range(len(mlist)))):
-                                                if 0 <= int(cand) < len(new_row) and int(bool(new_row[int(cand)])):
-                                                    found = int(cand); break
-                                            if found is not None:
-                                                chosen_i = found; validated = True
-                                            elif allowed_m_inds:
-                                                chosen_i = int(allowed_m_inds[0])
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-                        # final fallback: choose first allowed or clamp
-                        if not validated:
-                            if allowed_m_inds:
-                                try:
-                                    chosen_i = int(allowed_m_inds[0])
-                                except Exception:
-                                    chosen_i = int(allowed_m_inds[0])
+                            new_row = build_machine_major_mask(self.env, jid)
+                            if new_row is not None:
+                                if 0 <= int(chosen_i) < len(new_row) and int(bool(new_row[int(chosen_i)])):
+                                    validated = True
+                                else:
+                                    found = None
+                                    for cand in (allowed_m_inds or list(range(len(mlist)))):
+                                        if 0 <= int(cand) < len(new_row) and int(bool(new_row[int(cand)])):
+                                            found = int(cand); break
+                                    if found is not None:
+                                        chosen_i = found; validated = True
+                                    elif allowed_m_inds:
+                                        chosen_i = int(allowed_m_inds[0])
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Mask recomputation failed for job {jid}: {e}")
+                    # final fallback: choose first allowed or clamp
+                    if not validated:
+                        if allowed_m_inds:
+                            chosen_i = int(allowed_m_inds[0])
 
-                    if not (0 <= chosen_i < len(mlist)) and len(mlist) > 0:
-                        chosen_i = max(0, min(len(mlist) - 1, chosen_i if chosen_i is not None else 0))
+                if not (0 <= chosen_i < len(mlist)) and len(mlist) > 0:
+                    chosen_i = max(0, min(len(mlist) - 1, chosen_i if chosen_i is not None else 0))
 
-                    chosen = int(chosen_i)
-                    try:
-                        chosen_machine_name = mlist[chosen]
-                    except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                        chosen_machine_name = None
-                else:
-                    chosen = int(act) if act is not None else None
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                try:
-                    chosen = int(act) if act is not None else 0
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    chosen = 0
-
-            # human-readable logging message (best-effort)
+                chosen = int(chosen_i)
+                chosen_machine_name = mlist[chosen]
+            else:
+                chosen = int(act) if act is not None else None
+            # [C1] Machine action conversion complete - fail-fast design            # [C1] Human-readable machine name lookup - best-effort logging (Rule 3)
             try:
                 if chosen_machine_name is None and bool(getattr(args, 'use_machine_actions', False)):
                     mlist = getattr(self.env.workcenters_meta, 'machine_list', []) or []
                     if 0 <= chosen < len(mlist):
                         chosen_machine_name = mlist[chosen]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
+                logging.getLogger(__name__).warning(f"[C1] Failed to lookup machine name for chosen={chosen}: {e}")
 
+            # [C1] Action selection logging - best-effort (Rule 3)
             try:
                 if bool(getattr(args, 'use_machine_actions', False)) and chosen_machine_name is not None:
                     wc_for_m = int(self.env.workcenters_meta.machine_registry.get(chosen_machine_name, {}).get('workcenter', -1))
@@ -408,8 +297,7 @@ class RolloutWorker:
                 print(msg)
                 logging.getLogger(__name__).info(msg)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
+                logging.getLogger(__name__).warning(f"[C1] Failed to log action selection for job {item.get('job_id')}: {e}")
 
             # append scheduling trace line (best-effort) — delegate to utils.gantt
             try:
@@ -420,13 +308,11 @@ class RolloutWorker:
                 allowed_machine_indices = item.get('allowed_machine_indices', [])
                 # use canonical machine-major availability
                 avail_actions = item.get('avail_row')
-                try:
-                    chosen_idx = int(chosen) if chosen is not None else None
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    chosen_idx = None
+                # [C1] chosen_idx conversion is CRITICAL - fail-fast if invalid
+                chosen_idx = int(chosen) if chosen is not None else None
                 chosen_name = chosen_machine_name
 
+                # [C1] Availability check for reason logging - best-effort (Rule 3)
                 reason = ''
                 try:
                     if avail_actions is not None and chosen_idx is not None:
@@ -435,19 +321,17 @@ class RolloutWorker:
                             if int(arr[int(chosen_idx)]) == 0:
                                 reason = 'machine_not_available'
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    reason = reason or ''
+                    logging.getLogger(__name__).warning(f"[C1] Failed availability check for chosen_idx={chosen_idx}: {e}")
 
+                # [C1] Scheduling trace file writes - best-effort I/O (Rule 3)
                 if not allow_history_writes():
-                    # history writes disabled; skip logging
-                    pass
+                    pass  # history writes disabled; skip logging
                 else:
                     if gantt_utils is not None:
                         try:
                             gantt_utils.append_selection_log(sched_path, sim_time, job_id, allowed_machine_indices, avail_actions, chosen_idx, chosen_name, reason)
                         except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            pass
+                            logging.getLogger(__name__).warning(f"[C1] Failed to append selection log for job {job_id}: {e}")
                     else:
                         try:
                             header_needed = not os.path.exists(sched_path)
@@ -456,46 +340,55 @@ class RolloutWorker:
                                     sf.write('time,job_id,allowed_machine_indices,avail_actions,chosen_machine_idx,chosen_machine_name,reason\n')
                                 sf.write(f"{sim_time},{job_id},{allowed_machine_indices},{avail_actions},{chosen_idx},{repr(chosen_name)},{reason}\n")
                         except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                            pass
+                            logging.getLogger(__name__).warning(f"[C1] Failed to write scheduling trace for job {job_id}: {e}")
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                pass
+                logging.getLogger(__name__).warning(f"[C1] Failed scheduling trace block for job {item.get('job_id')}: {e}")
 
             processed_actions.append(chosen)
             processed_machine_names.append(chosen_machine_name)
 
-            # finally, attempt to resume the decision with chosen value.
-            # Prefer the SimPy resume Event interface (`resume_evt.succeed(choice)`) —
-            # fallback to older `resume` callable if present for backward compatibility.
+            # [C1] Resume decision event/callback - best-effort SimPy integration (Rule 3)
+            # [PHASE5-FIX] Task 5.3: Check if event already triggered to prevent EventProcessed error
             try:
                 resume_evt = item.get('resume_evt')
                 if resume_evt is not None:
-                    try:
-                        resume_evt.succeed(chosen)
-                    except Exception:
+                    # [PHASE5-FIX] Check if event already triggered before calling succeed()
+                    if not resume_evt.triggered:
                         try:
-                            resume_evt.succeed(int(chosen))
-                        except Exception:
+                            resume_evt.succeed(chosen)
+                        except Exception as e:
                             try:
-                                resume_evt.succeed(chosen_machine_name)
-                            except Exception:
-                                # swallow to avoid breaking runtime
-                                pass
+                                resume_evt.succeed(int(chosen))
+                            except Exception as e:
+                                try:
+                                    resume_evt.succeed(chosen_machine_name)
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Failed to resume decision event for job {item.get('job_id')}: {e}")
+                    else:
+                        logging.getLogger(__name__).warning(
+                            f"[PHASE5] Resume event already triggered for job {item.get('job_id')}, skipping. "
+                            f"This may indicate a race condition or duplicate event handling."
+                        )
                 else:
                     # backward compatibility: old resume callable
                     try:
                         item.get('resume')(chosen)
-                    except Exception:
+                    except Exception as e1:
                         try:
                             item.get('resume')(int(chosen))
-                        except Exception:
+                        except Exception as e2:
                             try:
                                 item.get('resume')(chosen_machine_name)
-                            except Exception:
-                                pass
+                            except Exception as e3:
+                                logging.getLogger(__name__).warning(
+                                    f"[C1] Failed to resume decision with chosen={chosen}, "
+                                    f"int(chosen)={int(chosen) if chosen is not None else None}, "
+                                    f"machine_name={chosen_machine_name}: {e1}, {e2}, {e3}"
+                                )
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught when resuming decision", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Failed resume decision block for job {item.get('job_id')}: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception when resuming decision (item processing): {e}")
 
         return processed_actions, processed_machine_names
 
@@ -503,12 +396,19 @@ class RolloutWorker:
     # Utility: ensure hidden
     # -------------------------
     def _ensure_hidden(self, n_agents: int):
-        """Ensure RNN hidden state exists (best-effort)."""
+        """Ensure RNN hidden state exists (best-effort).
+        
+        [PHASE2-FIX] Support multi-layer RNNs by creating shape (n_layers, n_agents, hdim)
+        instead of just (n_agents, hdim). Single-layer networks still work since
+        n_layers defaults to 1.
+        """
         hdim = getattr(self.args, "rnn_hidden_dim", 64)
+        n_layers = getattr(self.args, "rnn_num_layers", 1)  # [PHASE2-FIX] Support multi-layer
         if torch is None:
             self.eval_hidden = None
             return
-        self.eval_hidden = torch.zeros((n_agents, hdim), dtype=torch.float32, device=self.device)
+        # [PHASE2-FIX] Create (n_layers, n_agents, hdim) for multi-layer RNN support
+        self.eval_hidden = torch.zeros((n_layers, n_agents, hdim), dtype=torch.float32, device=self.device)
 
     def build_transitions_from_decision_batch(self, batch, processed_actions, processed_machine_names, r, s_before=None, s_after=None, avail_after=None, runner_args=None):
         """Build list-of-transition dicts from a Runner decision batch.
@@ -533,14 +433,14 @@ class RolloutWorker:
         try:
             obs_batch = [item.get('obs') for item in batch]
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
             obs_batch = None
 
         # Determine granularity
         try:
             use_gran = bool(getattr(args, 'use_granular_actions', False))
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
             use_gran = False
 
         # Build avail_batch similar to Runner
@@ -553,13 +453,13 @@ class RolloutWorker:
             # behavior while avoiding operator-selection during mask build.
             try:
                 ops = int(getattr(self.env, 'num_ops', 1))
-            except Exception:
+            except Exception as e:
                 ops = 1
             try:
                 num_m = int(len(getattr(self.env.workcenters_meta, 'machine_list', []) or []))
                 if num_m == 0:
                     num_m = int(getattr(self.env, 'num_wcs', 0))
-            except Exception:
+            except Exception as e:
                 num_m = int(getattr(self.env, 'num_wcs', 0))
 
             for item in batch:
@@ -585,22 +485,24 @@ class RolloutWorker:
                             expanded = np.repeat(r.astype(np.int32), ops)
                             avail_batch.append(expanded.tolist())
                             continue
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Failed to expand avail row (using permissive fallback): {e}")
 
                     # final fallback: all-ones (permissive)
                     avail_batch.append([1] * (max(1, num_m) * max(1, ops)))
-                except Exception:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Failed to build avail for item (using None): {e}")
                     avail_batch.append(None)
         else:
+            # [C1] Extract avail_row from batch items - best-effort (Rule 3)
             try:
                 avail_batch = [item.get('avail_row') for item in batch]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Failed to extract avail_row from batch: {e}")
                 avail_batch = None
 
         # Build u_list and u_machine mappings similar to Runner
+        # [C1] Action list construction - best-effort (Rule 3)
         try:
             u_list = []
             u_machine_list = []
@@ -608,7 +510,7 @@ class RolloutWorker:
                 try:
                     u_list.append(int(a) if a is not None else 0)
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Failed to convert action {a} to int: {e}")
                     u_list.append(0)
                 try:
                     uname = processed_machine_names[i] if i < len(processed_machine_names) else None
@@ -617,10 +519,10 @@ class RolloutWorker:
                     else:
                         u_machine_list.append(-1)
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Failed to map machine name {uname if 'uname' in locals() else 'N/A'}: {e}")
                     u_machine_list.append(-1)
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Failed to build u_list (using fallback): {e}")
             u_list = [int(a) if a is not None else 0 for a in (processed_actions or [])]
             u_machine_list = [-1] * len(u_list)
 
@@ -653,7 +555,7 @@ class RolloutWorker:
                 else:
                     o_arr = o_tmp[:n_agents, :obs_dim]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 o_arr = np.zeros((n_agents, obs_dim if obs_dim is not None else 1), dtype=np.float32)
 
         # Prepare avail array
@@ -674,7 +576,7 @@ class RolloutWorker:
                 else:
                     avail_arr = a_tmp[:n_agents, :n_actions]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 avail_arr = None
 
         # Build per-item transition dicts
@@ -686,7 +588,7 @@ class RolloutWorker:
             try:
                 tr['u_machine_name'] = [(None if x is None else str(x)) for x in processed_machine_names]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 tr['u_machine_name'] = [None] * len(u_list)
             tr['r'] = r
             # attach avail_a / avail_a_next
@@ -695,7 +597,7 @@ class RolloutWorker:
                     try:
                         ops = int(self.env.num_ops)
                     except Exception as e:
-                        logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                        logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                         ops = None
                     n_agents_local = len(batch)
                     if ops is not None and hasattr(self.env, 'num_wcs'):
@@ -718,8 +620,8 @@ class RolloutWorker:
                                     else:
                                         avail_flat.append(r)
                                         continue
-                            except Exception:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
 
                             try:
                                 # fallback: avail_arr (post-decision availability) if present
@@ -734,8 +636,8 @@ class RolloutWorker:
                                     else:
                                         avail_flat.append(row)
                                         continue
-                            except Exception:
-                                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
 
                             # final fallback: zeros
                             if n_actions_local is not None:
@@ -748,7 +650,7 @@ class RolloutWorker:
                     if avail_arr is not None:
                         tr['avail_a'] = avail_arr
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 pass
 
             # avail_a_next
@@ -771,11 +673,11 @@ class RolloutWorker:
                             elif row.ndim == 1:
                                 avail_next_arr[idx_item, :] = row[:n_actions_local]
                         except Exception as e:
-                            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                             pass
                     tr['avail_a_next'] = avail_next_arr
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 pass
 
             if s_before is not None:
@@ -786,12 +688,9 @@ class RolloutWorker:
 
             tr_list.append(tr)
         # -------------------------
-        # Dev-only runtime shape assertions
-        # If `args.debug_assert_shapes` is True the code will raise AssertionError
-        # on mismatches; otherwise it logs a warning. This helps surface
-        # silent failures caused by broad exception swallowing during refactors.
+        # [PHASE5-FIX] Task 5.5: Shape validation always enabled (not just in debug mode)
+        # Critical shape mismatches should always raise errors, not just warnings
         try:
-            debug_assert = bool(getattr(args, 'debug_assert_shapes', False))
             n_agents_expected = getattr(args, 'n_agents', None)
             obs_dim_expected = getattr(args, 'obs_shape', None) or getattr(args, 'obs_dim_agent', None) or None
             if n_agents_expected is not None:
@@ -800,46 +699,39 @@ class RolloutWorker:
                 obs_dim_expected = int(obs_dim_expected)
 
             for idx_tr, tr in enumerate(tr_list):
-                # check observation shape
-                try:
-                    if 'o' in tr and n_agents_expected is not None and obs_dim_expected is not None:
-                        o_arr = np.asarray(tr['o'], dtype=np.float32)
-                        if o_arr.ndim == 2:
-                            if o_arr.shape[0] != n_agents_expected:
-                                msg = f"Transition[{idx_tr}]['o'] has {o_arr.shape[0]} agents, expected {n_agents_expected}"
-                                if debug_assert:
-                                    raise AssertionError(msg)
-                                else:
-                                    logging.getLogger(__name__).warning(msg)
-                            if o_arr.shape[1] != obs_dim_expected:
-                                msg = f"Transition[{idx_tr}]['o'] obs_dim {o_arr.shape[1]} != expected {obs_dim_expected}"
-                                if debug_assert:
-                                    raise AssertionError(msg)
-                                else:
-                                    logging.getLogger(__name__).warning(msg)
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    # don't break production flow; warnings already emitted above
-                    logging.getLogger(__name__).debug("Failed to validate transition['o'] shape", exc_info=True)
+                # [PHASE5-FIX] Check observation shape - ALWAYS validate, not optional
+                if 'o' in tr and n_agents_expected is not None and obs_dim_expected is not None:
+                    o_arr = np.asarray(tr['o'], dtype=np.float32)
+                    if o_arr.ndim == 2:
+                        if o_arr.shape[0] != n_agents_expected:
+                            raise ValueError(
+                                f"[PHASE5] Transition[{idx_tr}]['o'] shape mismatch: "
+                                f"got {o_arr.shape[0]} agents, expected {n_agents_expected}. "
+                                f"Check environment decision batch consistency."
+                            )
+                        if o_arr.shape[1] != obs_dim_expected:
+                            raise ValueError(
+                                f"[PHASE5] Transition[{idx_tr}]['o'] obs_dim mismatch: "
+                                f"got {o_arr.shape[1]}, expected {obs_dim_expected}. "
+                                f"Check observation builder."
+                            )
 
-                # check action vector length
-                try:
-                    if 'u' in tr and n_agents_expected is not None:
-                        u_val = tr['u']
-                        if isinstance(u_val, (list, tuple, np.ndarray)):
-                            if len(u_val) != n_agents_expected:
-                                msg = f"Transition[{idx_tr}]['u'] length {len(u_val)} != expected n_agents {n_agents_expected}"
-                                if debug_assert:
-                                    raise AssertionError(msg)
-                                else:
-                                    logging.getLogger(__name__).warning(msg)
-                except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                    logging.getLogger(__name__).debug("Failed to validate transition['u'] length", exc_info=True)
+                # [PHASE5-FIX] Check action vector length - ALWAYS validate
+                if 'u' in tr and n_agents_expected is not None:
+                    u_val = tr['u']
+                    if isinstance(u_val, (list, tuple, np.ndarray)):
+                        if len(u_val) != n_agents_expected:
+                            raise ValueError(
+                                f"[PHASE5] Transition[{idx_tr}]['u'] length mismatch: "
+                                f"got {len(u_val)}, expected n_agents={n_agents_expected}"
+                            )
+        except ValueError:
+            # [PHASE5-FIX] Re-raise ValueError (validation errors should propagate)
+            raise
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-            # Best-effort: don't let assertion scaffolding break normal runs
-            logging.getLogger(__name__).debug("Transition assertions encountered an unexpected error", exc_info=True)
+            # Only catch unexpected errors, log and continue
+            logging.getLogger(__name__).warning(f"[C1] Unexpected error in shape validation: {e}")
+            logging.getLogger(__name__).debug("Shape validation encountered unexpected error", exc_info=True)
 
         return tr_list
 
@@ -865,77 +757,50 @@ class RolloutWorker:
         # 4) Call env.reset() to perform environment reset
         try:
             # Close previous lifecycle block if present and episode_id known
+            # [C1] Handle lifecycle traces - best-effort logging (Rule 3)
+            # Only close a previous lifecycle block when the env reports a
+            # different episode id than the one we're about to run. This
+            # avoids writing an END for episode 0 at startup when the env's
+            # default episode_id is 0 (causing duplicate ENDs).
             try:
-                # Only close a previous lifecycle block when the env reports a
-                # different episode id than the one we're about to run. This
-                # avoids writing an END for episode 0 at startup when the env's
-                # default episode_id is 0 (causing duplicate ENDs).
                 if hasattr(self.env, "end_lifecycle_trace") and hasattr(self.env, 'episode_id'):
+                    prev_ep = getattr(self.env, 'episode_id')
                     try:
-                        prev_ep = getattr(self.env, 'episode_id')
-                        # prefer integer when possible
-                        try:
-                            prev_ep_int = int(prev_ep)
-                        except Exception:
-                            prev_ep_int = prev_ep
-                        try:
-                            new_ep_int = int(global_ep_idx)
-                        except Exception:
-                            new_ep_int = global_ep_idx
+                        prev_ep_int = int(prev_ep) if prev_ep is not None else None
+                        new_ep_int = int(global_ep_idx)
                         # Only end previous if it's a different episode value
-                        if prev_ep is not None and prev_ep_int != new_ep_int:
-                            try:
-                                self.env.end_lifecycle_trace(prev_ep_int)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        if prev_ep_int is not None and prev_ep_int != new_ep_int:
+                            self.env.end_lifecycle_trace(prev_ep_int)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Failed to end lifecycle trace for prev episode {prev_ep}: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed lifecycle trace check: {e}")
 
             # Assign new episode id (numeric preferred)
             try:
                 self.env.episode_id = int(global_ep_idx)
-            except Exception:
-                try:
-                    setattr(self.env, 'episode_id', global_ep_idx)
-                except Exception:
-                    pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed to assign episode_id={global_ep_idx}: {e}")
 
-            # Write lifecycle START for the new episode BEFORE reset()
+            # [C1] Write lifecycle START for the new episode BEFORE reset() - best-effort (Rule 3)
             try:
                 if hasattr(self.env, "start_lifecycle_trace"):
-                    try:
-                        # Explicitly pass the canonical episode index that was
-                        # provided to this method (global_ep_idx). Using the
-                        # env.episode_id value here may be racy or off-by-one
-                        # if other code mutates the env between assignment and
-                        # this call; pass the argument to ensure alignment.
-                        try:
-                            ep_to_start = int(global_ep_idx)
-                        except Exception:
-                            ep_to_start = global_ep_idx
-                        self.env.start_lifecycle_trace(ep_to_start)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
-        # Ensure the environment has a history_dir for timeline writes
+                    ep_to_start = int(global_ep_idx)
+                    self.env.start_lifecycle_trace(ep_to_start)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed to start lifecycle trace for episode {global_ep_idx}: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed lifecycle/episode setup: {e}")
+        
+        # [C1] Ensure the environment has a history_dir for timeline writes - best-effort (Rule 3)
         try:
             if not hasattr(self.env, 'history_dir') or getattr(self.env, 'history_dir', None) is None:
                 import os
                 default_hist = os.path.join(os.getcwd(), 'my_data_and_graph', 'historydata')
-                try:
-                    self.env.history_dir = default_hist
-                except Exception:
-                    setattr(self.env, 'history_dir', default_hist)
-                try:
-                    os.makedirs(self.env.history_dir, exist_ok=True)
-                except Exception:
-                    pass
-        except Exception:
+                self.env.history_dir = default_hist
+                os.makedirs(self.env.history_dir, exist_ok=True)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to setup history_dir: {e}")
             pass
         try:
             obs_init, info = self.env.reset()
@@ -947,13 +812,14 @@ class RolloutWorker:
         # Stamp the env with the current episode index so environment-level
         # appenders can record which episode a gantt record belongs to.
         try:
+            # [C1] Episode ID assignment - best-effort metadata (Rule 3)
             try:
                 self.env.current_episode = int(global_ep_idx)
-            except Exception:
-                # best-effort: if conversion fails, still attach raw value
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed to set current_episode as int, using raw value: {e}")
                 setattr(self.env, 'current_episode', global_ep_idx)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to assign episode metadata: {e}")
 
         episode = {"r": []}
         gantt = []
@@ -971,7 +837,7 @@ class RolloutWorker:
             try:
                 s_before = np.asarray(self.env._build_state_vector(), dtype=np.float32)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 s_before = None
 
             # get actions for the batch via the worker's agent wrapper
@@ -979,72 +845,66 @@ class RolloutWorker:
             try:
                 avail = [item.get('avail_row') for item in batch]
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 avail = None
             try:
                 # _select_actions returns (actions_list, hidden_state).
                 # Unpack the pair so callers receive the actions list.
                 actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 actions = []
 
             # Process and apply actions via RolloutWorker helper (centralized logic)
             try:
                 processed_actions, processed_machine_names = self.process_and_apply_actions(batch, actions, sim_time, runner_args=args)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 processed_actions = actions or []
                 processed_machine_names = [None] * len(processed_actions)
 
             actions = processed_actions
 
-            # --- Epsilon decay update (per decision step) ---
-            try:
-                # Only decay during training (not evaluation)
-                if not evaluate:
-                    # Linear annealing: epsilon = max(epsilon_end, epsilon - decay_rate)
-                    self.epsilon = max(float(self.epsilon_end), float(self.epsilon) - float(self._eps_decay))
-            except Exception:
-                # Best-effort: don't break training if epsilon update fails
-                pass
-
+            # [PHASE1-FIX] Epsilon decay moved to per-episode level in runner.py
+            # No longer decay per decision step - this caused circular dependency
+            # where epsilon schedule depended on number of decisions made
+            
             # --- Epsilon diagnostics (periodic, non-fatal) ---
             try:
                 try:
                     self.step_counter += 1
-                except Exception:
+                except Exception as e:
                     self.step_counter = getattr(self, 'step_counter', 0) + 1
 
+                # [C1] Epsilon decay logging - best-effort diagnostics (Rule 3)
                 if getattr(self, 'epsilon_log_every', 0) > 0 and (self.step_counter % int(self.epsilon_log_every) == 0):
                     try:
                         msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={self.epsilon:.4f}"
-                    except Exception:
+                    except Exception as e:
                         try:
                             msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={float(self.epsilon)}"
-                        except Exception:
+                        except Exception as e2:
                             msg = f"[EPSILON_DECAY] step={self.step_counter}, epsilon={getattr(self, 'epsilon', 'NA')}"
                     try:
                         print(msg)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Failed to print epsilon decay message: {e}")
                     try:
                         history_dir = getattr(self, 'history_dir', None) or getattr(self.env, 'history_dir', None) or './my_data_and_graph/historydata/'
                         os.makedirs(history_dir, exist_ok=True)
                         diag_path = os.path.join(history_dir, 'diagnostics_log.txt')
                         with open(diag_path, 'a', encoding='utf-8') as df:
-                            df.write(msg + '\n')
-                    except Exception:
-                        pass
-            except Exception:
-                # ensure diagnostics never interrupt training
-                pass
+                            df.write(msg + '\\n')
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Failed to write epsilon decay to diagnostics log: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in epsilon decay diagnostics: {e}")
 
             # after resuming processes, collect reward accumulated since last decision boundary
             try:
                 r = float(self.env.pop_decision_reward())
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 r = 0.0
             episode["r"].append(r)
 
@@ -1052,7 +912,7 @@ class RolloutWorker:
             try:
                 s_after = np.asarray(self.env._build_state_vector(), dtype=np.float32)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 s_after = None
 
             # capture availabilities after decision (for avail_a_next)
@@ -1061,7 +921,7 @@ class RolloutWorker:
                 if hasattr(self.env, '_build_avail_actions'):
                     avail_after = self.env._build_avail_actions()
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 avail_after = None
 
             # --- build a replay transition for this decision boundary ---
@@ -1079,14 +939,14 @@ class RolloutWorker:
                 for tr in tr_list:
                     ep_transitions.append(tr)
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 pass
 
             # collect possible lightweight gantt info if present on env or items
             try:
                 gantt.extend(self.collect_gantt_from_batch(batch, sim_time))
             except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 pass
 
             # stop if env signals done
@@ -1100,14 +960,14 @@ class RolloutWorker:
         try:
             win_tag = all(j.finished for j in getattr(self.env, "jobs", []))
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
             win_tag = False
 
         # Optional per-episode reward components logging (append-only)
         try:
             try:
                 do_log = bool(getattr(args, 'reward_log_components', False))
-            except Exception:
+            except Exception as e:
                 do_log = False
 
             if do_log and allow_history_writes():
@@ -1117,13 +977,14 @@ class RolloutWorker:
                     out_path = os.path.join(hist_dir, 'reward_components_log.txt')
 
                     comps = getattr(self.env, 'last_reward_components', {}) or {}
-                    # support a few possible key names
+                    # [C1] Reward component parsing - best-effort data extraction (Rule 3)
                     def _getc(keys):
                         for k in keys:
                             if k in comps:
                                 try:
                                     return float(comps.get(k))
-                                except Exception:
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Failed to convert reward component {k} to float: {e}")
                                     return comps.get(k)
                         return ''
 
@@ -1137,13 +998,13 @@ class RolloutWorker:
                             rf.write('episode,R_global,R_local_mean,R_total\n')
                         try:
                             ep_write = int(getattr(self.env, 'episode_id', global_ep_idx))
-                        except Exception:
+                        except Exception as e:
                             ep_write = global_ep_idx
                         rf.write(f"{ep_write},{r_global},{r_local},{r_total}\n")
-                except Exception:
+                except Exception as e:
                     logging.getLogger(__name__).exception("Failed to write reward_components_log", exc_info=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
 
         # store episode into replay buffer if available
         try:
@@ -1151,10 +1012,10 @@ class RolloutWorker:
                 try:
                     self.buffer.store_episode(ep_transitions)
                 except Exception as e:
-                    logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+                    logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                     pass
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
             pass
 
         # include environment-level gantt records if present
@@ -1162,7 +1023,7 @@ class RolloutWorker:
             if hasattr(self.env, "gantt_records") and isinstance(self.env.gantt_records, (list, tuple)):
                 gantt.extend(list(self.env.gantt_records))
         except Exception as e:
-            logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
             pass
 
         # Clear the temporary episode stamp so other callers are not confused
@@ -1170,13 +1031,13 @@ class RolloutWorker:
             if hasattr(self.env, 'current_episode'):
                 try:
                     delattr(self.env, 'current_episode')
-                except Exception:
+                except Exception as e:
                     try:
                         del self.env.current_episode
-                    except Exception:
+                    except Exception as e:
                         setattr(self.env, 'current_episode', None)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
 
         # Ensure we close the lifecycle trace for this episode after it finishes
         if hasattr(self.env, 'end_lifecycle_trace'):
@@ -1193,14 +1054,14 @@ class RolloutWorker:
             try:
                 import os
                 os.makedirs(history_dir, exist_ok=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
 
             if ended_ep is not None:
                 try:
                     try:
                         ep_int = int(ended_ep)
-                    except Exception:
+                    except Exception as e:
                         ep_int = ended_ep
 
                     # Unwrap wrapper-shaped gantt records when present so the
@@ -1214,17 +1075,17 @@ class RolloutWorker:
                                     try:
                                         if inner.get('episode') is None and rec.get('episode') is not None:
                                             inner['episode'] = rec.get('episode')
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
                                     tmp.append(inner)
                                 else:
                                     tmp.append(rec)
-                            except Exception:
+                            except Exception as e:
                                 tmp.append(rec)
                         cleaned = tmp
-                    except Exception:
+                    except Exception as e:
                         cleaned = list(gantt or [])
-                except Exception:
+                except Exception as e:
                     cleaned = list(gantt or [])
 
             # end lifecycle (best-effort) — write the END footer first so the
@@ -1234,7 +1095,7 @@ class RolloutWorker:
             # header immediately before the TIMELINE/SUMMARY blocks.
             try:
                 self.env.end_lifecycle_trace(ended_ep)
-            except Exception:
+            except Exception as e:
                 # swallow to avoid breaking runner flow
                 pass
 
@@ -1243,19 +1104,19 @@ class RolloutWorker:
             if ended_ep is not None:
                 try:
                     from utils.gantt import generate_scheduling_timeline
-                except Exception:
+                except Exception as e:
                     generate_scheduling_timeline = None
                 if generate_scheduling_timeline is not None:
                     try:
                         # Lightweight console diagnostics
                         try:
                             print(f"[DEBUG] generate_scheduling_timeline called with len(gantt)={len(gantt)} cleaned_len={len(cleaned)}")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
                         try:
                             print(f"[DEBUG] allow_history_writes()={allow_history_writes()}")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
 
                         try:
                             generate_scheduling_timeline(
@@ -1267,11 +1128,11 @@ class RolloutWorker:
                                 out_dir=history_dir,
                                 records=cleaned,
                             )
-                        except Exception:
+                        except Exception as e:
                             # non-fatal; timeline generation best-effort
                             pass
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in rollout: {e}")
 
         return episode, ep_reward, bool(win_tag), gantt
 

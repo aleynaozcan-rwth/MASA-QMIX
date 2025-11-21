@@ -40,8 +40,8 @@ try:
         env.workcenters_meta.machine_index = {'M0': 0}
         env.num_wcs = 1
         env.n_actions = 1
-except Exception:
-    pass
+except Exception as e:
+    logging.getLogger(__name__).warning(f"[C1] Failed to setup env metadata: {e}")
 
 # Create a few deterministic jobs with simple ops
 ops_template = [

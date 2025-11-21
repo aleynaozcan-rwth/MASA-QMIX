@@ -1,18 +1,19 @@
 """utils/env_obs.py
 Canonical observation and state helpers for MASAEnv.
 
-This module implements a strict, minimal 6-element per-agent observation
+This module implements a strict, minimal 7-element per-agent observation
 compatible with the MASAEnv canonical attributes. The observation builder
-does NOT contain any legacy 6D (canonical) features or silent fallbacks — if a
+does NOT contain any legacy features or silent fallbacks — if a
 required canonical attribute is missing or invalid the builder raises.
 
-Observation layout (length 6, dtype float32):
- 0. current_op_type_norm      -> job.current_operation().type / env.n_operation_types
- 1. total_ops_count_norm      -> len(job.operations) / env.max_operations_per_job
- 2. remaining_ops_count_norm  -> job.remaining_ops() / env.max_operations_per_job
- 3. n_jobs_active_norm        -> env.active_jobs_count() / env.max_jobs
- 4. finished_flag             -> 1.0 if job.finished else 0.0
- 5. wait_time_norm            -> job.wait_time / env.max_wait_time
+Observation layout (length 7, dtype float32, all integers cast to float):
+ 0. current_op_type           -> job.current_op_idx (integer)
+ 1. total_operations          -> len(job.operations) (integer)
+ 2. remaining_operations      -> remaining ops count (integer)
+ 3. wait_time                 -> job.wait_time (float)
+ 4. theoretical_machine_count -> count of machines qualified for current operation
+ 5. free_machine_count        -> count of qualified machines currently available
+ 6. n_jobs_active             -> env.active_jobs_count() (integer)
 
 The state builder here is intentionally small and only uses canonical
 environment attributes. It will raise on missing/invalid attributes so
@@ -36,132 +37,160 @@ def _require_positive (env :Any ,attr :str ):
     return f 
 
 
-def build_agent_obs (env :Any ,job :Any )->np .ndarray :
-    """Build and return the canonical 6-element per-agent observation.
+def build_agent_obs (env :Any ,job :Any ,job_index :Any =None )->np .ndarray :
+    """Build and return the canonical 7-element per-agent observation.
 
-    This function enforces the presence of canonical env attributes and
-    does not swallow errors or provide fallbacks.
+    All elements are integers (cast to float32 for numpy array).
+    No normalization is applied.
+    
+    Args:
+        env: Environment instance
+        job: Job object to build observation for
+        job_index: Optional job index in env.jobs list (needed for free_machine_count)
+    
+    Returns:
+        7-element numpy array (float32)
     """
-    # validate canonical divisors/refs
-    n_op_types =int (_require_positive (env ,'n_operation_types'))
-    max_ops =int (_require_positive (env ,'max_operations_per_job'))
-    max_wait =float (_require_positive (env ,'max_wait_time'))
-    max_jobs =float (_require_positive (env ,'max_jobs'))
-
-    # current operation type — accept either JobAgent-like objects or raw op lists
-    cur_op =None 
-    if hasattr (job ,'current_operation'):
-        cur_op =job .current_operation ()
-
-        # if there is no callable current_operation, try to infer from operations list
-    if cur_op is None :
-        if hasattr (job ,'operations')and len (getattr (job ,'operations',[]))>0 :
-        # infer from operations list using current_op_idx when present
-            idx =int (getattr (job ,'current_op_idx',0 ))
-            op_candidate =job .operations [idx ]
-            if isinstance (op_candidate ,(list ,tuple ))and len (op_candidate )>0 :
-                op_type_val =float (op_candidate [0 ])
-            elif hasattr (op_candidate ,'type'):
-                op_type_val =float (op_candidate .type )
-            else :
-            # last resort: attempt to coerce the element to float
-                op_type_val =float (op_candidate )
-        elif isinstance (job ,(list ,tuple ))and len (job )>0 :
-        # job is a raw operations list
-            op_candidate =job [0 ]
-            if isinstance (op_candidate ,(list ,tuple ))and len (op_candidate )>0 :
-                op_type_val =float (op_candidate [0 ])
-            else :
-                op_type_val =float (op_candidate )
-        else :
-            raise AttributeError ('job missing current_operation() and operations list')
-    else :
-    # tolerate a few common shapes for cur_op: object with .type, or a tuple/list
-        if hasattr (cur_op ,'type'):
-            op_type_val =float (cur_op .type )
-        elif isinstance (cur_op ,(list ,tuple ))and len (cur_op )>0 :
-            op_type_val =float (cur_op [0 ])
-        elif hasattr (cur_op ,'op_type'):
-            op_type_val =float (getattr (cur_op ,'op_type'))
-        else :
-        # fallback to operations list if available
-            if hasattr (job ,'operations')and len (getattr (job ,'operations',[]))>0 :
-                op_type_val =float (getattr (job .operations [job .current_op_idx ],0 ))
-            else :
-                raise AttributeError ('current operation object must expose .type or be indexable')
-
-    current_op_type_norm =np .clip (op_type_val /float (n_op_types ),0.0 ,1.0 )
-
-    # total and remaining ops
-    if not hasattr (job ,'operations'):
-        raise AttributeError ('job missing operations attribute')
-    total_ops =float (len (job .operations ))
-    total_ops_count_norm =np .clip (total_ops /float (max_ops ),0.0 ,1.0 )
-
-    if not hasattr (job ,'current_op_idx'):
-        raise AttributeError ('job missing current_op_idx')
-    remaining_ops_val =float (max (0 ,len (job .operations )-int (job .current_op_idx )))
-    remaining_ops_count_norm =np .clip (remaining_ops_val /float (max_ops ),0.0 ,1.0 )
-
-    # number of active jobs
-    if not hasattr (env ,'active_jobs_count'):
-        raise AttributeError ('env missing active_jobs_count() helper')
-    active_jobs_val =float (env .active_jobs_count ())
-    n_jobs_active_norm =np .clip (active_jobs_val /float (max_jobs ),0.0 ,1.0 )
-
-    # finished flag
-    if not hasattr (job ,'finished'):
-        raise AttributeError ('job missing finished attribute')
-    finished_flag =1.0 if bool (job .finished )else 0.0 
-
-    # wait time
-    if not hasattr (job ,'wait_time'):
-        raise AttributeError ('job missing wait_time')
-    wait_time_val =float (job .wait_time )
-    wait_time_norm =np .clip (wait_time_val /float (max_wait ),0.0 ,1.0 )
-
-    obs =np .array ([
-    current_op_type_norm ,
-    total_ops_count_norm ,
-    remaining_ops_count_norm ,
-    n_jobs_active_norm ,
-    finished_flag ,
-    wait_time_norm ,
-    ],dtype =np .float32 )
-
-    if obs .shape [0 ]!=6 :
-        raise RuntimeError ('Canonical observation must be length 6')
+    # No normalization needed, just extract raw integer values
+    
+    # Element 0: current_op_type (integer)
+    current_op_type = float(getattr(job, 'current_op_idx', 0))
+    
+    # Element 1: total_operations (integer)
+    total_operations = float(len(job.operations))
+    
+    # Element 2: remaining_operations (integer)
+    remaining_operations = float(max(0, len(job.operations) - int(job.current_op_idx)))
+    
+    # Element 3: wait_time (integer)
+    wait_time = float(job.wait_time)
+    
+    # Element 4: theoretical_machine_count (integer, from avail_row)
+    avail_row = env._avail_row_for_job(job)
+    theoretical_machine_count = float(sum(avail_row))
+    
+    # Element 5: free_machine_count (integer, from build_avail_actions)
+    avail_actions = env._build_avail_actions()
+    free_machine_count = float(np.sum(avail_actions[job_index]))
+    
+    # Element 6: n_jobs_active (integer)
+    n_jobs_active = float(env.active_jobs_count())
+    
+    obs = np.array([
+        current_op_type,
+        total_operations,
+        remaining_operations,
+        wait_time,
+        theoretical_machine_count,
+        free_machine_count,
+        n_jobs_active,
+    ], dtype=np.float32)
+    
+    if obs.shape[0] != 7:
+        raise RuntimeError('Canonical observation must be length 7')
     return obs 
 
 
-def build_state_vector (env :Any )->np .ndarray :
-    """Build a compact global state vector using canonical env attributes.
+def _count_processing_ops(env: Any) -> int:
+    """Count how many operations are currently being processed."""
+    count = 0
+    for job in env.jobs:
+        if not job.finished and hasattr(job, 'is_active') and job.is_active:
+            # If job is active, its current op is being processed
+            count += 1
+    return count
 
-    This function is intentionally small and will raise if canonical
-    attributes required for the basic state are missing. It does NOT use
-    legacy helpers such as _wip, _recent_rewards or completed-count.
+
+def _calculate_machine_utilization(env: Any) -> float:
+    """Calculate average machine utilization [0-1]."""
+    if not hasattr(env, 'machine_resources') or not env.machine_resources:
+        return 0.0
+    
+    total_busy = 0
+    total_capacity = 0
+    for machine_res in env.machine_resources:
+        busy = len(machine_res.users)
+        capacity = machine_res.capacity
+        total_busy += busy
+        total_capacity += capacity
+    
+    if total_capacity == 0:
+        return 0.0
+    return min(1.0, total_busy / total_capacity)
+
+
+def _calculate_operator_utilization(env: Any) -> float:
+    """Calculate average operator utilization [0-1]."""
+    if not hasattr(env, 'operator_groups') or not env.operator_groups:
+        return 0.0
+    
+    total_busy = 0
+    total_capacity = 0
+    for op_res in env.operator_groups:
+        busy = len(op_res.users)
+        capacity = op_res.capacity
+        total_busy += busy
+        total_capacity += capacity
+    
+    if total_capacity == 0:
+        return 0.0
+    return min(1.0, total_busy / total_capacity)
+
+
+def build_state_vector(env: Any) -> np.ndarray:
+    """Build 10-element global state vector (hybrid: raw counts + normalized utils).
+    
+    State layout (length 10, dtype float32):
+     0. n_jobs_arrived       -> total jobs arrived (raw count)
+     1. n_jobs_processing    -> jobs currently active (raw count)
+     2. n_jobs_waiting       -> jobs waiting (raw count)
+     3. n_ops_arrived        -> total operations arrived (raw count)
+     4. n_ops_processing     -> operations being processed (raw count)
+     5. n_ops_waiting        -> operations waiting (raw count)
+     6. avg_machine_util     -> machine utilization [0-1] (normalized)
+     7. avg_operator_util    -> operator utilization [0-1] (normalized)
+     8. global_avg_wait      -> cumulative wait time (raw)
+     9. episode_time_fraction -> time progress [0-1] (normalized)
+    
+    Returns:
+        10-element numpy array (float32)
     """
-    # require a few canonical attributes for a minimal state summary
-    _require_positive (env ,'max_jobs')
-    _require_positive (env ,'max_wait_time')
-    _require_positive (env ,'max_operations_per_job')
-
-    # avg_wait normalized: total_wait_time / (env.env.now * 1.0)
-    if not hasattr (env ,'total_wait_time')or not hasattr (env ,'env'):
-        raise AttributeError ('env missing total_wait_time or env.now for state builder')
-    now =float (getattr (env .env ,'now',0.0 ))
-    if now <=0.0 :
-        avg_wait =0.0 
-    else :
-        avg_wait =float (env .total_wait_time )/(now *1.0 )
-    avg_wait =np .clip (avg_wait ,0.0 ,1.0 )
-
-    # n_jobs active normalized
-    active_norm =float (env .active_jobs_count ())/float (getattr (env ,'max_jobs'))
-    active_norm =np .clip (active_norm ,0.0 ,1.0 )
-
-    core =np .array ([avg_wait ,active_norm ,float (env .n_operation_types )/float (max (1 ,env .n_operation_types ))],dtype =np .float32 )
-    # pad/truncate to env.state_dim
-    dim =int (getattr (env ,'state_dim',3 ))
-    core =np .pad (core ,(0 ,max (0 ,dim -core .shape [0 ])))[:dim ]
-    return core 
+    # Get current simulation time
+    now = float(getattr(env.env, 'now', 0.0)) if hasattr(env, 'env') else 0.0
+    
+    # RAW COUNTS (0-5): No normalization
+    n_jobs_arrived = float(getattr(env, 'total_jobs_arrived', 0))
+    n_jobs_processing = float(env.active_jobs_count())
+    n_jobs_waiting = float(max(0, n_jobs_arrived - n_jobs_processing))
+    
+    n_ops_arrived = float(getattr(env, 'total_ops_arrived', 0))
+    n_ops_processing = float(_count_processing_ops(env))
+    n_ops_waiting = float(max(0, n_ops_arrived - n_ops_processing))
+    
+    # NORMALIZED UTILIZATIONS (6-7): Percentage [0-1]
+    avg_machine_util = _calculate_machine_utilization(env)
+    avg_operator_util = _calculate_operator_utilization(env)
+    
+    # RAW TIME (8): Total cumulative wait time
+    global_avg_wait = float(getattr(env, 'total_wait_time', 0.0))
+    
+    # NORMALIZED TIME FRACTION (9): Episode progress [0-1]
+    episode_limit = float(getattr(env, 'episode_limit', 1.0))
+    episode_time_fraction = min(1.0, now / max(1.0, episode_limit))
+    
+    state = np.array([
+        n_jobs_arrived,
+        n_jobs_processing,
+        n_jobs_waiting,
+        n_ops_arrived,
+        n_ops_processing,
+        n_ops_waiting,
+        avg_machine_util,
+        avg_operator_util,
+        global_avg_wait,
+        episode_time_fraction,
+    ], dtype=np.float32)
+    
+    if state.shape[0] != 10:
+        raise RuntimeError('Canonical state must be length 10')
+    return state 

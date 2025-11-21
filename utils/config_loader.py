@@ -29,8 +29,8 @@ def load_config(path: str = "configs/env_config.yaml"):
     logger = logging.getLogger(__name__)
     try:
         logger.debug("load_config called for %s but YAML loading is disabled in config-free mode; returning {}", path)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     return {}
 
 

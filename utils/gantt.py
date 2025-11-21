@@ -10,7 +10,7 @@ from typing import Iterable, List, Tuple
 from pathlib import Path
 try:
     from utils.io_control import allow_history_writes
-except Exception:
+except Exception as e:
     # defensive: if import fails, default to denying writes
     def allow_history_writes():
         return False
@@ -21,7 +21,7 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     import matplotlib.cm as cm
-except Exception:
+except Exception as e:
     plt = None
     mpatches = None
     cm = None
@@ -39,7 +39,7 @@ def format_gantt_records(records: Iterable[Record], max_items: int = 10) -> str:
         try:
             start, end, op, wc, job_id, op_grp, arrival, dur = r
             lines.append(f"({start:.2f},{end:.2f},op={op},wc={wc},job={job_id},grp={op_grp},arr={arrival:.2f},dur={dur:.2f})")
-        except Exception:
+        except Exception as e:
             lines.append(str(r))
         cnt += 1
     if cnt < len(list(records)):
@@ -57,7 +57,7 @@ def gantt_records_to_csv(records: Iterable[Record]) -> str:
         try:
             start, end, op, wc, job_id, op_grp, arrival, dur = r
             out_lines.append(f"{start},{end},{op},{wc},{job_id},{op_grp},{arrival},{dur}")
-        except Exception:
+        except Exception as e:
             out_lines.append(",".join([str(x) for x in r]))
     return "\n".join(out_lines)
 
@@ -101,11 +101,12 @@ def write_scheduling_trace(path: str, records: Iterable[Record]) -> None:
                     op_name = f"Op{int(op_idx) + 1}"
                 else:
                     op_name = str(op_idx)
-            except Exception:
+            except Exception as e:
                 op_name = str(op_idx)
             vals = [start, end, op_idx, op_name, wc, job_id, op_grp, arrival, duration]
             out_lines.append(','.join([str(x) for x in vals]))
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
     if not allow_history_writes():
         return
@@ -139,7 +140,8 @@ def write_job_timeline(path: str, records: Iterable[Record]) -> None:
                     continue
                 jid = int(job_id)
                 jobs_map.setdefault(jid, []).append({'start': float(s), 'end': float(e), 'op_idx': int(op_idx) if isinstance(op_idx, (int, float)) and float(op_idx).is_integer() else op_idx, 'wc': wc, 'op_grp': op_grp, 'arrival': arrival, 'duration': duration})
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                 continue
 
         import json
@@ -151,7 +153,7 @@ def write_job_timeline(path: str, records: Iterable[Record]) -> None:
                 ops = sorted(jobs_map[jid], key=lambda x: x.get('start', 0.0))
                 arrival = ops[0].get('arrival') if ops and ops[0].get('arrival') is not None else ''
                 jf.write(f"{jid},{arrival},{len(ops)},{json.dumps(ops)}\n")
-    except Exception:
+    except Exception as e:
         # best-effort: do not raise from utils writer
         return
 
@@ -171,8 +173,8 @@ def append_selection_log(path: str, sim_time, job_id, allowed_machine_indices, a
             if header_needed:
                 sf.write('time,job_id,allowed_machine_indices,avail_actions,chosen_machine_idx,chosen_machine_name,reason\n')
             sf.write(f"{sim_time},{job_id},{allowed_machine_indices},{avail_actions},{chosen_idx},{repr(chosen_name)},{reason}\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
 
 def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, write_if_allowed: bool = True, out_dir: str = None, records=None, skip_header: bool = False) -> str:
@@ -190,7 +192,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
     """
     try:
         from utils.io_control import allow_history_writes
-    except Exception:
+    except Exception as e:
         def allow_history_writes():
             return False
 
@@ -204,7 +206,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
             # ensure we have a list copy so downstream filtering is safe
             try:
                 records = list(records)
-            except Exception:
+            except Exception as e:
                 records = []
         # Normalize runtime wrapper-shaped records: some appenders wrap the
         # canonical per-op dict under {'record': {...}, 'episode': X, ...}.
@@ -219,19 +221,18 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                         try:
                             if inner.get('episode') is None and r.get('episode') is not None:
                                 inner['episode'] = r.get('episode')
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                         normalized.append(inner)
                     else:
                         normalized.append(r)
-                except Exception:
+                except Exception as e:
                     normalized.append(r)
             records = normalized
-        except Exception:
-            # fallback: leave records as-is
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         sim_now = float(getattr(getattr(env, 'env', None), 'now', getattr(env, 't', 0.0)))
-    except Exception:
+    except Exception as e:
         jobs = []
         records = []
         sim_now = 0.0
@@ -253,21 +254,21 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                         return int(r[8])
                     if isinstance(r, dict) and r.get('episode') is not None:
                         return int(r.get('episode'))
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                     return None
                 return None
 
             records = [r for r in records if _rec_ep(r) is not None and int(_rec_ep(r)) == int(episode_id)]
-        except Exception:
-            # fallback: leave records unchanged
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # Determine earliest arrival among jobs (initial set)
     arrivals = {}
     for j in jobs:
         try:
             at = float(getattr(j, 'arrival_time', 0.0))
-        except Exception:
+        except Exception as e:
             at = 0.0
         arrivals.setdefault(at, []).append(j)
     earliest = min(arrivals.keys()) if arrivals else 0.0
@@ -292,14 +293,14 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                         else:
                             op_type = None
                             allowed_machine_indices = []
-                    except Exception:
+                    except Exception as e:
                         op_type = None
                         allowed_machine_indices = []
                     opname = f"Op{(op_type + 1) if op_type is not None else i+1}"
                     op_names.append(opname)
                     eligible[opname] = list(allowed_machine_indices)
                 lines.append(f"Job_{jid} → {len(ops)} ops: [{', '.join(op_names)}] | Eligible: {{{', '.join([f'{k}:{v}' for k,v in eligible.items()])}}}")
-            except Exception:
+            except Exception as e:
                 lines.append(str(job))
 
     # Build timeline events: job arrivals + op start/finish events from gantt records
@@ -314,7 +315,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 ops = getattr(j, 'operations', []) or []
                 op_names = [f"Op{(int(o[0]) + 1) if isinstance(o, (list, tuple)) and isinstance(o[0], (int, float)) else idx+1}" for idx, o in enumerate(ops)]
                 text = f"[t={atime:.2f}] New job Job_{jid} arrived with {len(ops)} ops: [{', '.join(op_names)}]"
-            except Exception:
+            except Exception as e:
                 text = f"[t={atime:.2f}] New job arrived"
             events.append((float(atime), 0, text))
 
@@ -334,12 +335,13 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                         allowed_machine_indices = list(op[1])
                     else:
                         allowed_machine_indices = []
-                except Exception:
+                except Exception as e:
                     allowed_machine_indices = []
                 opname = f"Op{(int(op[0]) + 1) if isinstance(op, (list, tuple)) and isinstance(op[0], (int, float)) else idx+1}"
                 amap[opname] = list(allowed_machine_indices)
             jobs_allowed[jid] = amap
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
 
     # Operation start and finish events from gantt records
@@ -363,29 +365,31 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 try:
                     # rec layout in this module: (start, end, op, wc, job_id, op_grp, arrival, dur)
                     start, end, op_idx, wc_idx, job_id, op_grp, arrival, dur = rec[:8]
-                except Exception:
+                except Exception as e:
                     # try other fallbacks
                     try:
                         start, end, op_idx, wc_idx, job_id = rec[:5]
                         arrival = None; dur = None; op_grp = None
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                         continue
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
         try:
             op_name = f"Op{int(op_idx) + 1}" if isinstance(op_idx, (int, float)) and float(op_idx).is_integer() else str(op_idx)
-        except Exception:
+        except Exception as e:
             op_name = str(op_idx)
         try:
             machine_name = mlist[int(wc_idx)] if mlist and 0 <= int(wc_idx) < len(mlist) else f"M{int(wc_idx)}"
-        except Exception:
+        except Exception as e:
             machine_name = str(wc_idx)
 
         # Prepare eligible machine names if available
         try:
             eligible_idxs = jobs_allowed.get(int(job_id), {}).get(op_name, [])
             eligible_names = [mlist[i] if mlist and 0 <= int(i) < len(mlist) else f"M{int(i)}" for i in eligible_idxs]
-        except Exception:
+        except Exception as e:
             eligible_idxs = []
             eligible_names = []
 
@@ -396,7 +400,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 op_label = 'UNASSIGNED'
             else:
                 op_label = str(op_grp)
-        except Exception:
+        except Exception as e:
             op_label = 'UNASSIGNED'
 
         start_text = f"[t={start:.2f}] Job_{int(job_id)}.{op_name} started on {machine_name} by {op_label} (duration={float(dur) if dur is not None else (end - start):.2f}) | eligible={eligible_names}"
@@ -447,12 +451,13 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                 else:
                                     note = f"{mid} {mstate} / {opid} unknown"
                         other_parts.append(note)
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                         continue
                 if other_parts:
                     reason = reason + " | Other: " + "; ".join(other_parts)
                 start_text = start_text + f"\n  Reason: {reason}"
-            except Exception:
+            except Exception as e:
                 # if anything goes wrong while decoding trace, fall back
                 start_text = start_text + "\n  Reason: (decision_trace present but failed to render)"
         else:
@@ -464,12 +469,13 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 for other in records:
                     try:
                         os_ = float(other[0]); oe_ = float(other[1]); owc = other[3]
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                         continue
                     # skip self-record equality checks by identity if possible
                     try:
                         same = (other is rec)
-                    except Exception:
+                    except Exception as e:
                         same = False
                     if same:
                         continue
@@ -477,17 +483,17 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                     try:
                         if int(owc) == int(wc_idx) and os_ < float(start) and oe_ > float(start):
                             machine_busy = True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     # operator busy if operator identifier matches and overlaps start
                     try:
                         other_op = other[5]
                         if (not operator_unknown) and other_op is not None and str(other_op) == op_label and float(other[0]) < float(start) and float(other[1]) > float(start):
                             operator_busy = True
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             # Build per-eligible-machine reasons to explain why other eligible
             # machines were or were not chosen. For each eligible machine, indicate
@@ -504,13 +510,15 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                         for other in records:
                             try:
                                 os_ = float(other[0]); oe_ = float(other[1]); owc = other[3]
-                            except Exception:
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                                 continue
                             try:
                                 if int(owc) == int(midx) and os_ < float(start) and oe_ > float(start):
                                     m_busy = True
                                     break
-                            except Exception:
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                                 continue
 
                         # determine operator busy state for operators qualified for this machine
@@ -532,13 +540,15 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                                     if str(other_op) == str(getattr(op_obj, 'operator_id', '')) and float(other[0]) < float(start) and float(other[1]) > float(start):
                                                         op_busy_for_machine = True
                                                         break
-                                                except Exception:
+                                                except Exception as e:
+                                                    logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                                                     continue
                                         if op_busy_for_machine:
                                             break
-                                    except Exception:
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                                         continue
-                        except Exception:
+                        except Exception as e:
                             op_busy_for_machine = False
 
                         # compose short reason
@@ -549,13 +559,14 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                 txt = f"{mname} available"
                                 if op_busy_for_machine:
                                     txt += " (operator busy)"
-                        except Exception:
+                        except Exception as e:
                             txt = str(mname)
                         others_reasons.append(txt)
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                         continue
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             # top-level reason for the chosen machine/operator (preserve existing phrasing)
             if not machine_busy and not operator_busy:
@@ -577,8 +588,8 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                     filtered = [r for r in others_reasons if not r.startswith(machine_name)]
                     if filtered:
                         reason = reason + " | Other eligibilities: " + "; ".join(filtered)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             start_text = start_text + f"\n  Reason: {reason}"
         events.append((float(start), 1, start_text))
@@ -598,7 +609,8 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
         try:
             jid = int(getattr(j, 'id', getattr(j, 'job_id', -1)))
             job_total_ops[jid] = len(getattr(j, 'operations', []) or [])
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
 
     # For completion detection, count finish events per job
@@ -617,7 +629,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                     jid = int(jid_str)
                 else:
                     jid = None
-            except Exception:
+            except Exception as e:
                 jid = None
             if jid is not None and jid in job_finished_count:
                 job_finished_count[jid] += 1
@@ -637,7 +649,8 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 end = float(rec[1])
             if end > max_end:
                 max_end = end
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
     total_simpy_time = float(sim_now if sim_now and sim_now > 0 else max_end)
     try:
@@ -647,7 +660,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
         if completed_count <= 0:
             raise ValueError("Cannot compute average wait time: no completed jobs available")
         avg_wait = total_wait / float(completed_count)
-    except Exception:
+    except Exception as e:
         # Do not silently fallback; re-raise so callers become aware of missing data
         raise
     # average makespan: average of job last end times
@@ -662,7 +675,8 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 s, e, op_idx, wc_idx, job_id = rec[:5]
             jid = int(job_id)
             job_last_end[jid] = max(job_last_end.get(jid, 0.0), float(e))
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
     avg_makespan = 0.0
     if job_last_end:
@@ -698,10 +712,10 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 if os.path.exists(latest_path):
                     try:
                         os.remove(latest_path)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             # Only write the authoritative timeline when history writes are allowed
             # and when there are gantt records to report. This prevents creating
@@ -726,16 +740,17 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                         ep_set.add(int(r[8]))
                                     elif isinstance(r, dict) and r.get('episode') is not None:
                                         ep_set.add(int(r.get('episode')))
-                                except Exception:
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                                     continue
                             ep_ids = sorted(ep_set)
-                        except Exception:
+                        except Exception as e:
                             ep_ids = []
                         for i, ep in enumerate(ep_ids):
                             try:
                                 # produce per-episode text without triggering writes
                                 ep_report = generate_scheduling_timeline(env, episode_id=ep, episode_reward=None, write_if_allowed=False, out_dir=out_dir)
-                            except Exception:
+                            except Exception as e:
                                 ep_report = ''
                             # Skip writing empty episode reports
                             if not ep_report or ep_report.strip() == '':
@@ -761,10 +776,10 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                         df.write(dbg_line)
                                     try:
                                         print(dbg_line.strip())
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
                                 # Write an EPISODE header immediately before the
                                 # per-episode report unless the caller asked to
@@ -782,16 +797,15 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                     try:
                                         f.write("--- EPISODE METADATA ---\n")
                                         f.write(f"episode_reward = {None}\n")
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                                     f.write(f"total_jobs_generated = {total_jobs_generated}\n")
                                     f.write(f"total_operations_executed = {total_operations_executed}\n")
                                     f.write(f"average_wait_time = {avg_wait:.2f}\n")
                                     f.write(f"average_makespan = {avg_makespan:.2f}\n")
                                     f.write("\n")
-                            except Exception:
-                                # best-effort: continue with other episodes
-                                pass
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     else:
                         # Single-block write for the provided episode_id or unknown
                         # episode – only write if there are records present.
@@ -811,10 +825,10 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                         df.write(dbg_line)
                                     try:
                                         print(dbg_line.strip())
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+                                except Exception as e:
+                                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
                                 # Only open in write mode if the authoritative
                                 # timeline file does not yet exist. If it exists,
@@ -840,22 +854,19 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                                     try:
                                         f.write("--- EPISODE METADATA ---\n")
                                         f.write(f"episode_reward = {episode_reward}\n")
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                                     f.write(f"total_jobs_generated = {total_jobs_generated}\n")
                                     f.write(f"total_operations_executed = {total_operations_executed}\n")
                                     f.write(f"average_wait_time = {avg_wait:.2f}\n")
                                     f.write(f"average_makespan = {avg_makespan:.2f}\n")
                                     f.write("\n")
-                            except Exception:
-                                # don't fail the outer writer when the authoritative write fails
-                                pass
-                except Exception:
-                    # don't fail the outer writer when the authoritative write fails
-                    pass
-        except Exception:
-            # do not fail on write errors; return report anyway
-            pass
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     return report
 
@@ -880,7 +891,7 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
 
     try:
         recs = list(records or [])
-    except Exception:
+    except Exception as e:
         recs = []
 
     # Respect central IO gate if requested
@@ -901,7 +912,8 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
             else:
                 s, e, op, wc, job = (r[0], r[1], r[2] if len(r) > 2 else None, r[3] if len(r) > 3 else None, r[4] if len(r) > 4 else None)
             normalized.append((float(s), float(e), op, wc, job))
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
             continue
 
     # Group keys and map to y positions
@@ -940,7 +952,7 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
         for s, e, op, wc, job in normalized:
             try:
                 key = int(job) if by == 'job' and job is not None else int(wc) if wc is not None else 0
-            except Exception:
+            except Exception as e:
                 key = 0
             y = y_map.get(key, 0)
             # make bar height adapt to number of rows so bars stay readable
@@ -957,18 +969,17 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
                 plotted_ops.add(op_label)
             try:
                 ax.broken_barh([(start, width)], (y - height/2.0, height), facecolors=color, edgecolor='black', linewidth=0.4, label=lab)
-            except Exception:
+            except Exception as e:
                 # Some backends/versions may not accept label on broken_barh; fall back
                 col = color
                 rect = ax.broken_barh([(start, width)], (y - height/2.0, height), facecolors=col, edgecolor='black', linewidth=0.4)
                 try:
                     if lab is not None:
                         rect.set_label(lab)
-                except Exception:
-                    pass
-    except Exception:
-        # best-effort: continue to rendering
-        pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # Y ticks and labels
     y_positions = [y_map[k] for k in keys]
@@ -995,18 +1006,18 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
         else:
             try:
                 print("⚠️ No legend handles found for this chart (creating fallback).")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             # create fallback patches
             try:
                 patches = [mpatches.Patch(color=color_map.get(op, 'tab:blue'), label=f"Op {op}") for op in unique_ops]
                 if patches:
                     ax.legend(handles=patches, loc='center left', bbox_to_anchor=(1.02, 0.5),
                               frameon=True, fontsize=10, title='Operation Types')
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # Expand x-axis slightly beyond the last operation so labels aren't clipped
     try:
@@ -1015,20 +1026,21 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
             try:
                 if float(e) > max_end_time:
                     max_end_time = float(e)
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
                 continue
         if max_end_time and max_end_time > 0:
             ax.set_xlim(0, max_end_time * 1.05)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     # Adjust figure proportions to a panoramic layout and reserve room for the
     # vertical legend on the right. This makes the plot fill the figure width
     # while keeping the legend visible and centered.
     try:
         fig.set_size_inches(40, 10)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     plt.subplots_adjust(left=0.05, right=0.80, top=0.93, bottom=0.12)
 
     # Ensure saved figure has tight bounding box and a small padding so the
@@ -1040,9 +1052,9 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
         plt.savefig(path, bbox_inches='tight', pad_inches=0.3, dpi=300)
         plt.close(fig)
         return True
-    except Exception:
+    except Exception as e:
         try:
             plt.close(fig)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return False

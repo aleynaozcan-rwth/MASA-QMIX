@@ -46,8 +46,8 @@ class Jobs:
                     temp_object = Job(i, codes[i], names[i])
                     self.jobs_object_list.append(temp_object)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         # If jobs_cfg is a list of dicts with explicit fields
         try:
@@ -61,8 +61,8 @@ class Jobs:
                     temp_object = Job(int(idx), codes, name)
                     self.jobs_object_list.append(temp_object)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         # Fallback: keep empty list (caller should handle)
         self.jobs_object_list = []

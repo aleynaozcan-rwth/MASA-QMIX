@@ -21,7 +21,7 @@ def append_run_summary(summary: dict, history_dir: str = "my_data_and_graph/hist
                 data = json.load(f)
         else:
             data = {}
-    except Exception:
+    except Exception as e:
         data = {}
 
     # normalize summary timestamp and index
@@ -37,29 +37,29 @@ def append_run_summary(summary: dict, history_dir: str = "my_data_and_graph/hist
             summary['avg_makespan'] = summary.get('average_makespan')
         if 'avg_makespan' in summary and 'average_makespan' not in summary:
             summary['average_makespan'] = summary.get('avg_makespan')
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     try:
         if 'average_wait_time' in summary and 'avg_wait_time' not in summary:
             summary['avg_wait_time'] = summary.get('average_wait_time')
         if 'avg_wait_time' in summary and 'average_wait_time' not in summary:
             summary['average_wait_time'] = summary.get('avg_wait_time')
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     try:
         if 'avg_machine_utilization' in summary and 'average_machine_utilization' not in summary:
             summary['average_machine_utilization'] = summary.get('avg_machine_utilization')
         if 'average_machine_utilization' in summary and 'avg_machine_utilization' not in summary:
             summary['avg_machine_utilization'] = summary.get('average_machine_utilization')
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     try:
         if 'avg_operator_utilization' in summary and 'average_operator_utilization' not in summary:
             summary['average_operator_utilization'] = summary.get('avg_operator_utilization')
         if 'average_operator_utilization' in summary and 'avg_operator_utilization' not in summary:
             summary['avg_operator_utilization'] = summary.get('average_operator_utilization')
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
     # If file already contains evolutions, append. Otherwise, preserve
     # existing top-level content under 'meta' and create 'evolutions'.
     if 'evolutions' in data and isinstance(data['evolutions'], list):
@@ -82,7 +82,8 @@ def append_run_summary(summary: dict, history_dir: str = "my_data_and_graph/hist
                 v = summary.get(k)
                 if v is not None:
                     data[k] = v
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
 
     try:
@@ -127,11 +128,11 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                 else:
                     try:
                         s = float(r[0])
-                    except Exception:
+                    except Exception as e:
                         s = 0.0
                     try:
                         e = float(r[1])
-                    except Exception:
+                    except Exception as e:
                         e = s
                     wc_idx = r[3] if len(r) > 3 else None
                     op_grp = r[5] if len(r) > 5 else None
@@ -140,18 +141,19 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                 if wc_idx is not None:
                     try:
                         midx = int(wc_idx)
-                    except Exception:
+                    except Exception as e:
                         midx = None
                     if midx is not None:
                         machine_busy[midx] = machine_busy.get(midx, 0.0) + dur
                 if op_grp is not None:
                     try:
                         opid = str(op_grp)
-                    except Exception:
+                    except Exception as e:
                         opid = None
                     if opid and opid != 'UNASSIGNED':
                         operator_busy[opid] = operator_busy.get(opid, 0.0) + dur
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
 
         if starts and ends:
@@ -202,7 +204,8 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                             if isinstance(j, dict):
                                 return bool(j.get('finished', False))
                             return bool(getattr(j, 'finished', False))
-                        except Exception:
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                             return False
 
                     completed_count = sum(1 for j in item.get('jobs') if _is_finished(j))
@@ -224,8 +227,8 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                     avg_rewards.append(float(item.get('avg_epoch_reward')))
                 elif isinstance(util, dict) and util.get('avg_epoch_reward') is not None:
                     avg_rewards.append(float(util.get('avg_epoch_reward')))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         else:
             mach_utils.append(0.0)
             oper_utils.append(0.0)
@@ -253,9 +256,10 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                     u = item._compute_utilization_summary()
                     if isinstance(u, dict) and 'per_machine_utilization' in u:
                         per_machine_dicts.append(u.get('per_machine_utilization'))
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
-    except Exception:
+    except Exception as e:
         per_machine_dicts = []
 
     try:
@@ -266,9 +270,10 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                     u = item._compute_utilization_summary()
                     if isinstance(u, dict) and 'per_operator_utilization' in u:
                         per_operator_dicts.append(u.get('per_operator_utilization'))
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
-    except Exception:
+    except Exception as e:
         per_operator_dicts = []
 
     # Average per-id dictionaries (mean across dicts); keys aligned by union
@@ -279,7 +284,8 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
         for d in dicts_list:
             try:
                 keys.update(d.keys())
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 continue
         out = {}
         for k in sorted(keys, key=lambda x: str(x)):
@@ -288,18 +294,19 @@ def collect_evolution_summary(envs: List[object], evol_index: int):
                 try:
                     if k in d:
                         vals.append(float(d.get(k, 0.0)))
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
             out[k] = float(np.mean(vals)) if vals else 0.0
         return out
 
     try:
         summary['per_machine_utilization'] = _avg_dicts(per_machine_dicts)
-    except Exception:
+    except Exception as e:
         summary['per_machine_utilization'] = {}
     try:
         summary['per_operator_utilization'] = _avg_dicts(per_operator_dicts)
-    except Exception:
+    except Exception as e:
         summary['per_operator_utilization'] = {}
 
     append_run_summary(summary, history_dir=os.path.join('my_data_and_graph', 'historydata'))

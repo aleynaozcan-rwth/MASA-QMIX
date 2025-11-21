@@ -36,7 +36,8 @@ with open(p) as f:
             arrival = float(row[7]) if len(row)>7 and row[7] else None
             duration = float(row[8]) if len(row)>8 and row[8] else None
             rows.append((start,end,op_idx,wc,job_id,op_grp,arrival,duration))
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             continue
 if not rows:
     print('No rows parsed'); sys.exit(2)
@@ -84,8 +85,8 @@ if arrival_by_job:
         handles.append(arrival_legend)
         labels.append('Arrival Times')
         ax.legend(handles, labels, title='Operation Types', bbox_to_anchor=(1.05,1), loc='upper left', fontsize=9)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 # y ticks
 if job_ids:
     min_j = min(job_ids); max_j = max(job_ids)

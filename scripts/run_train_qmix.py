@@ -60,18 +60,18 @@ def main():
                         tg = TaskGenerator(py_rng=getattr(env, '_py_rng', None), np_rng=getattr(env, '_np_rng', None))
                         try:
                             setattr(tg, '_owner_env', env)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[C1] Could not set _owner_env on TaskGenerator: {e}")
                         tg.start(env, lamf)
                         # keep reference so callers can inspect active generator
                         setattr(env, '_task_generator', tg)
-                    except Exception:
-                        logging.getLogger(__name__).warning("[run_train_qmix] Could not construct TaskGenerator; dynamic arrivals disabled")
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Could not construct TaskGenerator; dynamic arrivals disabled: {e}")
                 logging.getLogger(__name__).info("[run_train_qmix] Started dynamic arrivals with lambda=%s", lamf)
-            except Exception:
-                logging.getLogger(__name__).warning("[run_train_qmix] Could not start dynamic arrivals; TaskGenerator may be missing or failed to start")
-        except Exception:
-            pass
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Could not start dynamic arrivals: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Dynamic arrivals setup failed: {e}")
 
     runner = Runner(env, args)
     runner.run(0)

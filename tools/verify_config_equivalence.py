@@ -24,7 +24,8 @@ except Exception as e:
 def pretty(v):
     try:
         return json.dumps(v, indent=2, sort_keys=True)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] JSON serialization failed, using pformat: {e}")
         return pprint.pformat(v)
 
 

@@ -57,7 +57,8 @@ def plot_gantt_local(for_gantt_data, filename="gantt.png"):
             label_text = f"{m_label} | {op_grp_label}"
             ax.text((float(start) + float(end)) / 2, jid, label_text, va='center', ha='center', fontsize=7, color='black')
             max_end = max(max_end, float(end))
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             continue
 
     ax.set_yticks(job_ids)
@@ -87,8 +88,8 @@ if __name__ == '__main__':
     except Exception:
         try:
             env._generate_initial_jobs()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     try:
         steps = 0
@@ -108,11 +109,11 @@ if __name__ == '__main__':
                 except Exception:
                     try:
                         item.get('resume')(0)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
             steps += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
     gantt = list(getattr(env, 'gantt_records', []))
     print('Collected gantt records:', len(gantt))

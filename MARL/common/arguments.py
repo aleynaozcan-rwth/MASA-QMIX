@@ -78,6 +78,14 @@ def get_mutable_args():
                         help='Minimum number of operations per job (default 2)')
     parser.add_argument('--job_max_ops', type=int, default=4,
                         help='Maximum number of operations per job (default 4)')
+    parser.add_argument('--n_operation_types', type=int, default=10,
+                        help='Number of distinct operation types (default 10: Op0-Op9)')
+    parser.add_argument('--max_wait_time', type=float, default=100.0,
+                        help='Maximum wait time threshold for normalization (default 100.0)')
+    parser.add_argument('--avg_wait_scale', type=float, default=10.0,
+                        help='Scale factor for average wait time in reward calculation (default 10.0)')
+    parser.add_argument('--interarrival_time', type=float, default=5.0,
+                        help='Mean interarrival time for job arrivals (default 5.0)')
     # Reward shaping defaults (centralized single source-of-truth)
     # === Hybrid Reward Parameters ===
     parser.add_argument('--reward_w1_completed', type=float, default=1.0,
@@ -149,8 +157,16 @@ def get_mutable_args():
     # ============================================================
     parser.add_argument('--epsilon_start', type=float, default=1.0)
     parser.add_argument('--epsilon_end', type=float, default=0.05)
+    # [PHASE9-FIX] Task 9.5: Deprecated parameter with warning
     parser.add_argument('--epsilon_anneal_steps', type=int, default=30000,
-                        help='Number of steps to linearly anneal epsilon from start to end')
+                        help='[DEPRECATED] Use --epsilon_anneal_episodes instead. This parameter is ignored.')
+    # [PHASE1-FIX] Episode-based epsilon decay (replaces step-based)
+    parser.add_argument('--epsilon_anneal_episodes', type=int, default=None,
+                        help='Number of episodes to linearly anneal epsilon. If None, uses n_epoch * n_episodes')
+    
+    # [PHASE9-FIX] Task 9.1: Moving average window configuration
+    parser.add_argument('--mavg_window', type=int, default=50,
+                        help='Window size for moving average plots (learning stability)')
 
     # ============================================================
     # === Logging / visualization ================================
@@ -169,19 +185,21 @@ def get_mutable_args():
     # If user provided a CLI n_actions that differs from eventual machine_list,
     # the environment will align to the actual machine list length. Warn if
     # they used a commonly-mistaken default like 18 to avoid confusion.
+    # [C1] Warning message is best-effort (Rule 3)
     try:
         if getattr(args, 'n_actions', None) == 18:
-            try:
-                logging.getLogger(__name__).warning('[WARN] CLI --n_actions=18 detected. MASAEnv will override n_actions to match actual machine_list length if available.')
-            except Exception:
-                pass
-    except Exception:
-        pass
+            logging.getLogger(__name__).warning('[WARN] CLI --n_actions=18 detected. MASAEnv will override n_actions to match actual machine_list length if available.')
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[C1] Failed to check n_actions warning (diagnostics only): {e}")
     
     # Runtime-only defaults (not defined in parser)
     args.rnn_hidden_dim   = getattr(args, "rnn_hidden_dim", 64)
+    args.rnn_num_layers   = getattr(args, "rnn_num_layers", 1)  # [PHASE2-FIX] Multi-layer RNN support
     args.mix_embed_dim    = getattr(args, "mix_embed_dim", 32)
     args.two_hyper_layers = getattr(args, "two_hyper_layers", False)
+    args.last_action      = getattr(args, "last_action", True)  # Include last action in observation
+    args.reuse_network    = getattr(args, "reuse_network", True)  # Reuse network across agents
+    args.map              = getattr(args, "map", "masa_schedule")  # Map/scenario name
     args.history_dir      = getattr(args, "history_dir", "./my_data_and_graph/historydata")
     args.save_cycle       = getattr(args, "save_cycle", 500)
 
@@ -189,6 +207,26 @@ def get_mutable_args():
     # This is best-effort and must not raise; it helps debugging CLI/preset
     # interactions without changing runtime behavior. Dump at the end so it
     # always records the final active args.
+    # [C1] Debug dump is best-effort I/O (Rule 3)
+    
+    # [PHASE4-FIX] Validate critical parameters have sensible values
+    if args.n_epoch <= 0:
+        raise ValueError(f"[PHASE4] n_epoch must be positive, got {args.n_epoch}")
+    if args.n_episodes <= 0:
+        raise ValueError(f"[PHASE4] n_episodes must be positive, got {args.n_episodes}")
+    if getattr(args, 'batch_size', 32) <= 0:
+        raise ValueError(f"[PHASE4] batch_size must be positive, got {args.batch_size}")
+    if args.lr <= 0:
+        raise ValueError(f"[PHASE4] learning rate must be positive, got {args.lr}")
+    
+    # [PHASE9-FIX] Task 9.5: Warn if deprecated epsilon_anneal_steps is used
+    if hasattr(args, 'epsilon_anneal_steps') and args.epsilon_anneal_steps != 30000:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[PHASE9] --epsilon_anneal_steps is DEPRECATED and ignored. "
+            f"Use --epsilon_anneal_episodes instead. Current value: {args.epsilon_anneal_steps}"
+        )
+    
     try:
         import os
         history_dir = getattr(args, 'history_dir', './my_data_and_graph/historydata')
@@ -198,20 +236,13 @@ def get_mutable_args():
         with open(out_path, 'w', encoding='utf-8') as fh:
             fh.write('[DEBUG] Final active arguments before training:\n')
             for key in sorted(vars(args)):
-                try:
-                    val = getattr(args, key)
-                except Exception:
-                    val = '<unreadable>'
+                val = getattr(args, key, '<unreadable>')
                 fh.write(f"{key} = {val!r}\n")
-        try:
-            print(f"[INFO] Active arguments written to {out_path}")
-            print("[DEBUG_DUMP] args_dump.txt successfully written.")
-        except Exception:
-            # printing should never crash; ignore if stdout is unavailable
-            pass
-    except Exception:
-        # best-effort only; do not let debug I/O affect normal execution
-        pass
+        print(f"[INFO] Active arguments written to {out_path}")
+        print("[DEBUG_DUMP] args_dump.txt successfully written.")
+    except Exception as e:
+        # [C1] Best-effort debug I/O - log warning but don't crash (Rule 3)
+        logging.getLogger(__name__).warning(f"[C1] Failed to write args_dump.txt (debug only): {e}")
     return args
 
 
@@ -286,3 +317,14 @@ def get_smoke_args():
     args.use_machine_actions = False
     args.use_granular_actions = False
     return args
+
+
+# [PHASE9-FIX] Task 9.3: Utility to preserve args immutability with deepcopy
+def deepcopy_args(args):
+    """Create a deep copy of args namespace to preserve immutability.
+    
+    Use this when passing args to components that might mutate them.
+    Preserves all attributes including nested objects.
+    """
+    import copy
+    return copy.deepcopy(args)

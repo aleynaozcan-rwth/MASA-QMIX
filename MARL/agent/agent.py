@@ -115,34 +115,26 @@ class Agents:
         Return list of actions for obs_batch.
         Tries policy.select_actions first, falls back to per-observation policy.act.
         """
-        # try policy-level batch API
-        try:
-            if hasattr(self.policy, "select_actions"):
-                return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
-        except Exception:
-            pass
+        # [C1] Try policy-level batch API - fail-fast if select_actions fails
+        if hasattr(self.policy, "select_actions"):
+            return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
 
-        # fallback: call per-observation act() if available
+        # [C1] Fallback: call per-observation act() if available - fail-fast if fails
         actions = []
-        try:
-            if hasattr(self.policy, "act"):
-                for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
-                    a = self.policy.act(ob, avail, evaluate=evaluate)
-                    actions.append(int(a) if a is not None else None)
-                return actions
-        except Exception:
-            pass
+        if hasattr(self.policy, "act"):
+            for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
+                a = self.policy.act(ob, avail, evaluate=evaluate)
+                actions.append(int(a) if a is not None else None)
+            return actions
 
-        # last resort: deterministic/random pick from avail_batch / zeros
+        # [C1] Last resort: deterministic/random pick from avail_batch - fail-fast if fails
         for avail in (avail_batch or [None] * len(obs_batch)):
             if avail is None:
                 actions.append(0)
             else:
-                try:
-                    allowed = [i for i, v in enumerate(avail) if int(v)]
-                    actions.append(int(allowed[0]) if allowed else 0)
-                except Exception:
-                    actions.append(0)
+                # [C1] Action extraction from availability mask - fail-fast if fails
+                allowed = [i for i, v in enumerate(avail) if int(v)]
+                actions.append(int(allowed[0]) if allowed else 0)
         return actions
 
 
@@ -171,29 +163,24 @@ class CommAgents:
 
     def select_actions(self, obs_batch, avail_batch=None, evaluate=False):
         """Same batch helper for communication-based agents."""
-        try:
-            if hasattr(self.policy, "select_actions"):
-                return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
-        except Exception:
-            pass
+        # [C1] Try policy-level batch API - fail-fast if select_actions fails
+        if hasattr(self.policy, "select_actions"):
+            return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
 
+        # [C1] Fallback: call per-observation act() - fail-fast if fails
         actions = []
-        try:
-            if hasattr(self.policy, "act"):
-                for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
-                    a = self.policy.act(ob, avail, evaluate=evaluate)
-                    actions.append(int(a) if a is not None else None)
-                return actions
-        except Exception:
-            pass
+        if hasattr(self.policy, "act"):
+            for ob, avail in zip(obs_batch, (avail_batch or [None] * len(obs_batch))):
+                a = self.policy.act(ob, avail, evaluate=evaluate)
+                actions.append(int(a) if a is not None else None)
+            return actions
 
+        # [C1] Last resort: deterministic pick from avail_batch - fail-fast if fails
         for avail in (avail_batch or [None] * len(obs_batch)):
             if avail is None:
                 actions.append(0)
             else:
-                try:
-                    allowed = [i for i, v in enumerate(avail) if int(v)]
-                    actions.append(int(allowed[0]) if allowed else 0)
-                except Exception:
-                    actions.append(0)
+                # [C1] Action extraction from availability mask - fail-fast if fails
+                allowed = [i for i, v in enumerate(avail) if int(v)]
+                actions.append(int(allowed[0]) if allowed else 0)
         return actions

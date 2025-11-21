@@ -54,11 +54,7 @@ import simpy
 import os
 import json
 from utils.env_obs import build_agent_obs, build_state_vector  # type: ignore
-try:
-    from utils.io_control import allow_history_writes
-except Exception:
-    def allow_history_writes():
-        return False
+from utils.io_control import allow_history_writes
 from utils.operator import Operators  # type: ignore
 from utils.workcenter import WorkCenters  # type: ignore
 from utils.jobagent import JobAgent  # type: ignore
@@ -137,12 +133,16 @@ class MASAEnv:
         self.num_jobs = _resolve(('n_agents', 'num_jobs'), int, default=0)
         self.num_ops = _resolve(('num_operators', 'num_ops'), int, default=1)
         self.num_wcs = _resolve(('num_wcs',), int, default=1)
-        # n_actions will be set to machine count after workcenters_meta is built
-        # Observation/state shapes (required from args)
-        if not hasattr(args, 'obs_shape') or not hasattr(args, 'state_shape'):
-            raise ValueError("MASAEnv requires args.obs_shape and args.state_shape")
-        self.obs_dim_agent = int(getattr(args, 'obs_shape'))
-        self.state_dim = int(getattr(args, 'state_shape'))
+        
+        # Observation/state shapes defined by environment (not from args)
+        # These values are derived from canonical observation/state builders in utils/env_obs.py
+        self.obs_dim_agent = 7  # fixed by canonical obs builder (see utils/env_obs.py)
+        self.state_dim = 10  # canonical state builder produces 10-element vector
+        self.state_shape = self.state_dim  # alias for validation logic
+        
+        # Counters for global state tracking (raw counts)
+        self.total_jobs_arrived = 0
+        self.total_ops_arrived = 0
 
         if not hasattr(args, 'n_operation_types'):
             raise ValueError("MASAEnv requires args.n_operation_types")
@@ -162,10 +162,11 @@ class MASAEnv:
             raise ValueError("MASAEnv requires args.avg_wait_scale")
         self.avg_wait_scale = float(getattr(args, 'avg_wait_scale'))
 
-        if args is not None and hasattr(args, 'n_agents') and int(getattr(args, 'n_agents')) > 0:
-            self.max_jobs = int(getattr(args, 'n_agents'))
+        # max_jobs derived from num_jobs (already resolved above from n_agents/num_jobs)
+        if self.num_jobs > 0:
+            self.max_jobs = int(self.num_jobs)
         else:
-            raise ValueError("MASAEnv requires args.n_agents > 0 to derive max_jobs")
+            raise ValueError("MASAEnv requires num_jobs > 0 (from n_agents or num_jobs in args/kwargs)")
 
         if getattr(self, 'max_jobs', None) is None or int(self.max_jobs) <= 0:
             raise ValueError("Invalid environment configuration: max_jobs must be > 0")
@@ -220,11 +221,32 @@ class MASAEnv:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize WorkCenters: {e}")
 
-        if not isinstance(self.config.get('processing_time_means', None), dict):
+        # Get processing_time_means from args, config, or use DEFAULT_PROCESSING_TIMES from workcenter module
+        processing_time_means = getattr(args, 'processing_time_means', None)
+        if processing_time_means is None:
+            processing_time_means = self.config.get('processing_time_means', None)
+        if processing_time_means is None:
+            # Use DEFAULT_PROCESSING_TIMES directly (format: {machine_name: {OpN: duration}})
+            # This will be converted to {OpN: {machine_name: duration}} for validation
+            from utils.workcenter import DEFAULT_PROCESSING_TIMES
+            # Convert to validation format: {OpN: {machine: duration}}
+            processing_time_means = {}
+            for machine_name, ops_map in DEFAULT_PROCESSING_TIMES.items():
+                for op_name, duration in ops_map.items():
+                    if op_name not in processing_time_means:
+                        processing_time_means[op_name] = {}
+                    processing_time_means[op_name][machine_name] = duration
+            LOG.info("[Env] Using DEFAULT_PROCESSING_TIMES from workcenter.py")
+        
+        if not isinstance(processing_time_means, dict):
             raise ValueError(
-                "MASAEnv requires 'processing_time_means' to be explicitly provided in config as a dict. "
-                "Cannot synthesize processing times - they must be configured."
+                "processing_time_means must be a dict. "
+                "Provide via args.processing_time_means, config, or ensure DEFAULT_PROCESSING_TIMES exists."
             )
+        
+        # C17 FIX: Validate processing times are positive and finite
+        self._validate_processing_times(processing_time_means)
+        self.processing_time_means = processing_time_means
 
         if not hasattr(self.workcenters_meta, 'machine_list') or not self.workcenters_meta.machine_list:
             raise ValueError(
@@ -273,6 +295,8 @@ class MASAEnv:
         try:
             from utils.task_generator import TaskGenerator  # type: ignore
             self.job_generator = TaskGenerator(py_rng=self._py_rng, np_rng=self._np_rng)
+            # Pass processing_time_means to TaskGenerator
+            self.job_generator.proc_time_means = processing_time_means
             setattr(self.job_generator, '_owner_env', self)
         except Exception as e:
             raise ImportError(
@@ -281,16 +305,14 @@ class MASAEnv:
             )
 
         # Create initial jobs deterministically (t=0) before starting dynamic arrivals
-        if self.auto_build:
-            # create the configured number of initial jobs deterministically
-            try:
-                self._generate_initial_jobs()
-            except Exception:
-                logging.getLogger(__name__).exception("Failed to generate initial jobs", exc_info=True)
-
         if not hasattr(args, 'n_agents') or args.n_agents is None:
             raise ValueError("args.n_agents is required to set max_active_agents capacity")
         self.max_active_agents = int(args.n_agents)
+        
+        if self.auto_build:
+            # C1 FIX Rule 1: Removed exception swallowing - initial job generation must succeed
+            # create the configured number of initial jobs deterministically
+            self._generate_initial_jobs()
 
         self._job_generator_proc = None
 
@@ -305,6 +327,7 @@ class MASAEnv:
         }
         LOG.info("[Env Summary] seed=%s capacity=%s initial_created=%s", summary['seed'], summary['n_agents_capacity'], summary['initial_jobs_created'])
 
+        # C1 FIX Rule 3: Best-effort logging - log failure but continue training
         if allow_history_writes():
             try:
                 hist_dir = self.args.history_dir if hasattr(self.args, 'history_dir') else os.path.join('my_data_and_graph', 'historydata')
@@ -312,6 +335,11 @@ class MASAEnv:
                 path = os.path.join(hist_dir, 'env_summary.json')
                 with open(path, 'w') as fh:
                     json.dump(summary, fh, indent=2, sort_keys=True)
+            except Exception as e:
+                LOG.warning(
+                    "[C1] Failed to write env_summary.json (non-critical): %s. "
+                    "Training continues.", e
+                )
                 logging.getLogger(__name__).debug('Wrote env summary to %s', path)
             except (OSError, IOError) as e:
                 logging.getLogger(__name__).warning('Failed to write env_summary.json: %s', e)
@@ -337,6 +365,48 @@ class MASAEnv:
                 logging.getLogger(__name__).debug('Wrote env config dump to %s', dump_path)
             except (OSError, IOError) as e:
                 logging.getLogger(__name__).warning('Failed to write env_config_dump.json: %s', e)
+
+    def _validate_processing_times(self, pt_means: dict):
+        """Validate all processing times are positive and finite.
+        
+        C17 FIX: Prevents silent failures from zero, negative, or infinite
+        processing times that would corrupt scheduling logic.
+        
+        Args:
+            pt_means: dict of {op_type: {wc: duration}} processing time means
+            
+        Raises:
+            ValueError: if any processing time is non-positive or non-finite
+        """
+        import numpy as np
+        
+        if not isinstance(pt_means, dict):
+            raise ValueError(f"processing_time_means must be a dict, got {type(pt_means)}")
+        
+        errors = []
+        for op_type, durations in pt_means.items():
+            if not isinstance(durations, dict):
+                errors.append(f"op_type={op_type}: durations must be dict, got {type(durations)}")
+                continue
+            
+            for wc, dur in durations.items():
+                try:
+                    dur_f = float(dur)
+                    if dur_f <= 0:
+                        errors.append(f"op_type={op_type}, wc={wc}: processing_time must be positive, got {dur_f}")
+                    if not np.isfinite(dur_f):
+                        errors.append(f"op_type={op_type}, wc={wc}: processing_time must be finite, got {dur_f}")
+                except (ValueError, TypeError) as e:
+                    errors.append(f"op_type={op_type}, wc={wc}: cannot convert to float: {e}")
+        
+        if errors:
+            raise ValueError(
+                f"Processing time validation failed ({len(errors)} errors):\n" +
+                "\n".join(f"  - {err}" for err in errors[:10]) +
+                (f"\n  ... and {len(errors) - 10} more" if len(errors) > 10 else "")
+            )
+        
+        LOG.info("[C17 FIX] Processing time validation passed: %d op_types validated", len(pt_means))
 
     def finish_lifecycle_trace(self):
         """Force-close an open lifecycle block if one was opened by a previous reset without an episode id."""
@@ -465,6 +535,11 @@ class MASAEnv:
         self._completed_now_cache = 0
         # Note: internal recent_rewards removed - use metrics APIs for reward history
         self.done = False
+        
+        # Reset global state counters
+        self.total_jobs_arrived = 0
+        self.total_ops_arrived = 0
+        
         self.pending_decisions = []
         self.decisions_ready = simpy.Event(self.env)
         self.gantt_records = []
@@ -498,29 +573,29 @@ class MASAEnv:
                 tg.start(self.env, lam)
                 self._task_generator = tg
             except (ImportError, TypeError, AttributeError) as e:
-                logging.getLogger(__name__).warning("Failed to initialize TaskGenerator: %s", e)
+                # [C1] TaskGenerator is optional (Rule 3) - log warning if unavailable
+                logging.getLogger(__name__).warning("[C1] Failed to initialize TaskGenerator (optional): %s", e)
                 self._task_generator = None
 
-        try:
-            self._generate_initial_jobs()
-        except Exception:
-            logging.getLogger(__name__).exception("Failed to generate initial jobs on reset", exc_info=True)
+        # [C1] Initial job generation is CRITICAL - fail-fast if generation fails
+        self._generate_initial_jobs()
 
         LOG.info("[Env] Episode time limit set to %s seconds", self.episode_limit)
         
         try:
             self.env.process(self._periodic_summary())
         except (AttributeError, RuntimeError) as e:
-            logging.getLogger(__name__).debug("Failed to start periodic summary: %s", e)
+            # [C1] Periodic summary is best-effort monitoring (Rule 3)
+            logging.getLogger(__name__).debug("[C1] Failed to start periodic summary (monitoring only): %s", e)
         # DEBUG: print machine counts for tracing unexpected machine totals
         mr_len = len(getattr(self, 'machine_resources', []) or [])
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
         ml_len = len(mlist)
         n_actions = getattr(self, 'n_actions', None)
-        LOG.debug("[DEBUG] num_wcs=%s (workcenters), len(machine_list)=%s (machines), n_actions=%s (action space)", getattr(self,'num_wcs',None), ml_len, n_actions)
+        LOG.debug("num_wcs=%s (workcenters), len(machine_list)=%s (machines), n_actions=%s (action space)", getattr(self,'num_wcs',None), ml_len, n_actions)
         # Verify n_actions matches machine count
         if ml_len > 0 and int(getattr(self, 'n_actions', 0)) != ml_len:
-            LOG.warning("[WARN] Correcting n_actions (%s) -> %s to match machine_list", getattr(self,'n_actions',None), ml_len)
+            LOG.warning("Correcting n_actions (%s) -> %s to match machine_list", getattr(self,'n_actions',None), ml_len)
             self.n_actions = int(ml_len)
         # lifecycle END is intentionally not written here (caller-managed)
         return self._build_all_agent_obs(), {"state_vec": None, "avail_actions": None}
@@ -593,16 +668,34 @@ class MASAEnv:
         # K1: CompletedNorm
         completed_count = len([j for j in self.jobs if j.finished])
         CompletedNorm = float(completed_count) / float(max(1, self.max_jobs))
+        # [PHASE3-FIX] Validate bounds for reward components
+        if not (0.0 <= CompletedNorm <= 1.0):
+            raise ValueError(
+                f"[PHASE3] CompletedNorm out of bounds: {CompletedNorm}. "
+                f"completed_count={completed_count}, max_jobs={self.max_jobs}"
+            )
 
         # K2: AvgWaitNorm
         jobs_len = max(1, len(self.jobs))
         avg_wait_per_job = float(self.total_wait_time) / float(jobs_len)
         max_wait = float(self.max_wait_time)
         AvgWaitNorm = float(np.clip(avg_wait_per_job / (max_wait if max_wait > 0 else 1.0), 0.0, 1.0))
+        # [PHASE3-FIX] Validate AvgWaitNorm is finite
+        if not np.isfinite(AvgWaitNorm):
+            raise ValueError(
+                f"[PHASE3] AvgWaitNorm is not finite: {AvgWaitNorm}. "
+                f"avg_wait={avg_wait_per_job}, max_wait={max_wait}"
+            )
 
         # K3: WIPNorm
         wip_count = len([j for j in self.active_agents if not j.finished])
         WIPNorm = float(wip_count) / float(max(1, self.max_jobs))
+        # [PHASE3-FIX] Validate WIPNorm bounds
+        if not (0.0 <= WIPNorm <= 1.0):
+            raise ValueError(
+                f"[PHASE3] WIPNorm out of bounds: {WIPNorm}. "
+                f"wip_count={wip_count}, max_jobs={self.max_jobs}"
+            )
 
         # K4: ThroughputDelta (uses a small rolling history)
         if not hasattr(self, '_throughput_history') or self._throughput_history is None:
@@ -616,22 +709,51 @@ class MASAEnv:
 
         # K5: LoadVariance (weighted machine/operator variance)
         util = self._compute_utilization_summary()
-        per_machine = list(util.get('per_machine_utilization', {}).values()) if isinstance(util.get('per_machine_utilization', {}), dict) else list(util.get('per_machine_utilization', []))
-        per_operator = list(util.get('per_operator_utilization', {}).values()) if isinstance(util.get('per_operator_utilization', {}), dict) else list(util.get('per_operator_utilization', []))
-        var_machine = float(np.var(per_machine)) if per_machine else 0.0
-        var_operator = float(np.var(list(per_operator))) if per_operator else 0.0
-        lambda_m = float(getattr(self, 'lambda_m', self.reward_lambda_m))
-        lambda_o = float(getattr(self, 'lambda_o', self.reward_lambda_o))
+        # [PHASE6-FIX] Task 6.2: Handle None return from mid-episode utilization call
+        if util is None:
+            # Mid-episode: utilization not available, use zero variance
+            var_machine = 0.0
+            var_operator = 0.0
+        else:
+            # A5: Fail-fast validation - util must be dict with required keys
+            if not isinstance(util, dict):
+                raise RuntimeError(
+                    f"_compute_utilization_summary returned {type(util).__name__}, expected dict or None"
+                )
+            if 'per_machine_utilization' not in util or 'per_operator_utilization' not in util:
+                raise RuntimeError(
+                    f"_compute_utilization_summary missing required keys. "
+                    f"Got keys: {list(util.keys())}, expected: per_machine_utilization, per_operator_utilization"
+                )
+            per_machine = list(util.get('per_machine_utilization', {}).values()) if isinstance(util.get('per_machine_utilization', {}), dict) else list(util.get('per_machine_utilization', []))
+            per_operator = list(util.get('per_operator_utilization', {}).values()) if isinstance(util.get('per_operator_utilization', {}), dict) else list(util.get('per_operator_utilization', []))
+            var_machine = float(np.var(per_machine)) if per_machine else 0.0
+            var_operator = float(np.var(list(per_operator))) if per_operator else 0.0
+            # [PHASE3-FIX] Validate variance components are finite
+            if not np.isfinite(var_machine) or not np.isfinite(var_operator):
+                raise ValueError(
+                    f"[PHASE3] Non-finite variance: var_machine={var_machine}, var_operator={var_operator}. "
+                    f"per_machine={per_machine}, per_operator={per_operator}"
+                )
+        lambda_m = float(getattr(self, 'lambda_m', 0.8))
+        lambda_o = float(getattr(self, 'lambda_o', 0.2))
         load_variance = float((lambda_m * var_machine) + (lambda_o * var_operator))
 
         # Compute R_global per spec
         R_global = (
-            (float(getattr(self, 'reward_w1', self.reward_w1_completed)) * float(CompletedNorm))
-            - (float(getattr(self, 'reward_w2', self.reward_w2_avgwait)) * float(AvgWaitNorm))
-            - (float(getattr(self, 'reward_w3', self.reward_w3_wip)) * float(WIPNorm))
-            + (float(getattr(self, 'reward_w4', self.reward_w4_throughput_delta)) * float(throughput_delta))
-            - (float(getattr(self, 'reward_w5', self.reward_w5_load_variance)) * float(load_variance))
+            (float(getattr(self, 'reward_w1', 1.0)) * float(CompletedNorm))
+            - (float(getattr(self, 'reward_w2', 0.6)) * float(AvgWaitNorm))
+            - (float(getattr(self, 'reward_w3', 0.3)) * float(WIPNorm))
+            + (float(getattr(self, 'reward_w4', 0.8)) * float(throughput_delta))
+            - (float(getattr(self, 'reward_w5', 0.4)) * float(load_variance))
         )
+        # Quick Win C10: Validate R_global is finite
+        if not np.isfinite(R_global):
+            raise RuntimeError(
+                f"Invalid R_global computed: {R_global}. "
+                f"Components: CompletedNorm={CompletedNorm}, AvgWaitNorm={AvgWaitNorm}, "
+                f"WIPNorm={WIPNorm}, throughput_delta={throughput_delta}, load_variance={load_variance}"
+            )
 
         # ----- Local rewards (per-decision) -----
         R_local_mean = 0.0
@@ -640,14 +762,35 @@ class MASAEnv:
             for entry in self._last_decision_info:
                 completed = 1.0 if entry.get('job_completed', False) else 0.0
                 wait_penalty = float(entry.get('wait_time_norm', 0.0))
+                # [PHASE3-FIX] Validate wait_penalty is in [0, 1] range
+                if not (0.0 <= wait_penalty <= 1.0):
+                    raise ValueError(
+                        f"[PHASE3] wait_time_norm out of bounds: {wait_penalty}. "
+                        f"job_id={entry.get('job_id', 'unknown')}"
+                    )
                 infeasible = 0.0
                 avail = entry.get('avail_row')
                 chosen = int(entry.get('chosen_action', -1)) if entry.get('chosen_action', None) is not None else -1
+                
+                # Fail-fast infeasibility detection: if avail info exists, validation must succeed
                 if avail is not None:
-                    arr = np.array(avail)
-                    valid_indices = np.where(arr == 1)[0]
-                    if chosen not in list(valid_indices):
-                        infeasible = 1.0
+                    try:
+                        arr = np.array(avail)
+                        valid_indices = np.where(arr == 1)[0]
+                        if chosen not in list(valid_indices):
+                            infeasible = 1.0
+                    except (ValueError, TypeError, IndexError) as e:
+                        raise RuntimeError(
+                            f"Infeasibility check failed in reward computation: "
+                            f"avail={avail}, chosen={chosen}, error={e}"
+                        ) from e
+                elif chosen != -1:
+                    # If avail is None but an action was chosen, this is a contract violation
+                    raise RuntimeError(
+                        f"Reward computation: action was chosen (chosen={chosen}) but avail_row is None. "
+                        "Cannot validate feasibility without availability information."
+                    )
+                
                 r_local_i = (
                     (float(getattr(self, 'reward_a1', self.reward_a1_completion)) * completed)
                     - (float(getattr(self, 'reward_a2', self.reward_a2_wait)) * wait_penalty)
@@ -656,10 +799,23 @@ class MASAEnv:
                 local_rewards.append(float(r_local_i))
             if local_rewards:
                 R_local_mean = float(np.mean(local_rewards))
+                # Validate R_local_mean is finite
+                if not np.isfinite(R_local_mean):
+                    raise RuntimeError(
+                        f"Invalid R_local_mean computed: {R_local_mean}. "
+                        f"Local rewards: {local_rewards}"
+                    )
 
         # Combine
         alpha_mix = float(getattr(self, 'reward_alpha_mix', self.reward_alpha_mix))
         R_total = (alpha_mix * float(R_global)) + ((1.0 - alpha_mix) * float(R_local_mean))
+        
+        # Validate final R_total is finite
+        if not np.isfinite(R_total):
+            raise RuntimeError(
+                f"Invalid R_total computed: {R_total}. "
+                f"Components: alpha_mix={alpha_mix}, R_global={R_global}, R_local_mean={R_local_mean}"
+            )
 
         # Diagnostics
         self.last_reward_components = {
@@ -748,21 +904,17 @@ class MASAEnv:
                     allowed_machine_indices = op[1]
                     per_wc = op[2]
 
+            # C1 FIX Rule 2: Removed exception swallowing - invalid op_idx must fail explicitly
             # Resolve operation index (machine-level op index) for use in
             # operator qualification and duration lookups. Prefer explicit
             # op_type when provided, else fall back to job.current_op_idx.
-            try:
-                op_idx_local = int(op_type) if op_type is not None else int(getattr(job, 'current_op_idx', 0))
-            except Exception:
-                op_idx_local = int(getattr(job, 'current_op_idx', 0))
+            op_idx_local = int(op_type) if op_type is not None else int(getattr(job, 'current_op_idx', 0))
+            # C1 FIX Rule 2: Removed exception swallowing - decision_item creation must succeed
             # create decision item — prefer workcenters_meta helper if present
-            try:
-                if hasattr(self.workcenters_meta, 'create_decision_item'):
-                    decision_item = self.workcenters_meta.create_decision_item(self, job, op)
-                else:
-                    raise AttributeError
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
+            if hasattr(self.workcenters_meta, 'create_decision_item'):
+                decision_item = self.workcenters_meta.create_decision_item(self, job, op)
+            else:
+                # Fallback to manual creation (this is expected behavior, not an error)
                 decision_item = {
                     'job_id': job.id,
                     'obs': self._build_agent_obs(job),
@@ -790,8 +942,22 @@ class MASAEnv:
             if chosen_idx is None:
                 yield self.env.timeout(1e-9)
                 continue
+            
+            # C13 FIX: Strict machine index validation
+            # Validate against actual machine count (len(machine_resources)),
+            # not n_actions (which is an abstract action space concept).
+            # In MASAEnv, agent selects a machine index directly.
+            chosen_idx_int = int(chosen_idx)
+            n_machines = len(self.machine_resources) if self.machine_resources else len(self.workcenters_meta.machine_list)
+            if not (0 <= chosen_idx_int < n_machines):
+                raise ValueError(
+                    f"[C13 FIX] Invalid machine index: {chosen_idx_int} out of bounds "
+                    f"[0, {n_machines}). Job={job.id}, op_idx={job.current_op_idx}, "
+                    f"t={float(self.env.now):.2f}"
+                )
 
-            # compute duration
+            # C1 FIX Rule 2 + C17: Duration computation must not use fake default 0.0
+            # compute duration - fail if no valid duration found
             if int(chosen_idx) in decision_item.get('per_machine_durations', {}):
                 dur = float(decision_item['per_machine_durations'][int(chosen_idx)])
             elif per_wc is not None:
@@ -801,7 +967,19 @@ class MASAEnv:
             elif base_dur is not None:
                 dur = float(base_dur)
             else:
-                dur = 0.0
+                # C1 FIX: DO NOT use dur=0.0 as fake default - this causes simpy crashes
+                raise ValueError(
+                    f"[C1] No valid duration found for job={job.id}, machine={chosen_idx}. "
+                    f"Check decision_item['per_machine_durations'], per_wc, and base_dur. "
+                    f"Available durations: {decision_item.get('per_machine_durations', {})}"
+                )
+            
+            # C17 validation: Duration must be positive and finite
+            if dur <= 0 or not np.isfinite(dur):
+                raise ValueError(
+                    f"[C1+C17] Invalid duration {dur} for job={job.id}, machine={chosen_idx}. "
+                    f"Duration must be positive and finite."
+                )
 
             # Before acquiring resources, build a decision-time trace that
             # records machine/operator availability for every eligible machine.
@@ -873,7 +1051,8 @@ class MASAEnv:
                             if mname in registry:
                                 wc_idx_for_m = int(registry[mname].get('workcenter', -1))
 
-                        # qualification check
+                        # [PHASE9-FIX] Task 9.2: Qualification check with TOCTOU awareness
+                        # Check qualification at selection time (before wait), will re-check after wait
                         is_qualified = False
                         if wc_idx_for_m is not None:
                             is_qualified = bool(op_obj.can_do_job(op_idx_local, wc_idx_for_m))
@@ -976,16 +1155,37 @@ class MASAEnv:
                 'wait_time_norm': wait_time_norm
             })
 
-            # acquire resources and execute
-            try:
-                # Use chosen_mid (resolved machine index) when selecting machine resource
-                mr = self.machine_resources[int(chosen_mid)] if getattr(self, 'machine_resources', None) else self.wc_resources[int(0)]
-            except Exception as e:
-                logging.getLogger(__name__).exception("Exception caught", exc_info=True)
-                mr = None
+            # [C1] Acquire machine resource - fail-fast if indexing fails
+            # [PHASE5-FIX] Task 5.1: Validate machine_resources exists and is not empty
+            if not hasattr(self, 'machine_resources') or not self.machine_resources:
+                raise RuntimeError(
+                    f"[PHASE5] No machines available. machine_resources is empty or None. "
+                    f"job={job.id}, chosen_mid={chosen_mid}, t={float(self.env.now):.2f}"
+                )
+            
+            # [PHASE5-FIX] Validate chosen_mid is within valid bounds
+            if not (0 <= int(chosen_mid) < len(self.machine_resources)):
+                raise ValueError(
+                    f"[PHASE5] Machine index out of bounds: chosen_mid={chosen_mid}, "
+                    f"valid range=[0, {len(self.machine_resources)}). "
+                    f"job={job.id}, op_idx={job.current_op_idx}, t={float(self.env.now):.2f}"
+                )
+            
+            # Use chosen_mid (resolved machine index) when selecting machine resource
+            mr = self.machine_resources[int(chosen_mid)]
             if mr is None:
-                yield self.env.timeout(1e-9)
-                continue
+                raise RuntimeError(
+                    f"[PHASE5] Machine resource at index {chosen_mid} is None. "
+                    f"job={job.id}, t={float(self.env.now):.2f}"
+                )
+            
+            # [PHASE1-FIX] Validate duration is positive and finite before SimPy timeout
+            if dur <= 0 or not np.isfinite(dur):
+                raise ValueError(
+                    f"[PHASE1] Invalid duration {dur} for job={job.id}, machine={chosen_mid} at t={float(self.env.now):.2f}. "
+                    f"Duration must be positive and finite. Check decision_item['per_machine_durations'], "
+                    f"per_wc={per_wc}, base_dur={base_dur}"
+                )
 
             # pick operator group index based on eligible operator groups for the
             # chosen machine's workcenter. If multiple eligible groups exist,
@@ -1008,22 +1208,47 @@ class MASAEnv:
             else:
                 selected_grp = None
 
-            # Select a concrete operator and wait for availability
+            # C7 FIX: Deterministic operator selection using seeded random
+            # This replaces the nondeterministic retry loop which was timing-dependent
             available_operator = None
             if self.operators is not None:
-                max_retries = int(getattr(self, 'operator_selection_retries', 5))
-                retry_wait = float(getattr(self, 'operator_selection_wait', 1.0))
-                attempt = 0
-                while attempt < max_retries and available_operator is None:
-                    available_operator = self.operators.find_free_operator_for_machine(op_idx_local, machine_name)
-                    # Fallback: try workcenter-level lookup if machine-level fails
-                    if available_operator is None:
-                        available_operator = self.operators.find_free_operator(op_idx_local, wc_idx)
-                    # If not found, wait and retry
-                    if available_operator is None:
-                        attempt += 1
-                        if attempt < max_retries:
-                            yield self.env.timeout(retry_wait)
+                # Try machine-specific operator first (seeded random)
+                available_operator = self.operators.find_free_operator_for_machine_seeded_random(
+                    op_idx_local, machine_name, self._np_rng
+                )
+                
+                # Fallback: try workcenter-level lookup if machine-level returns None
+                if available_operator is None:
+                    available_operator = self.operators.find_free_operator_seeded_random(
+                        op_idx_local, wc_idx, self._np_rng
+                    )
+                
+                # C7 FIX: If all operators busy, wait once and retry deterministically
+                if available_operator is None:
+                    # Check if ANY operators are qualified (even if busy)
+                    qualified_any = any(
+                        op.can_do_job(op_idx_local, wc_idx) 
+                        for op in self.operators.operators_object_list
+                    )
+                    
+                    if qualified_any:
+                        # Operators exist but all busy - wait and retry
+                        LOG.debug(
+                            "[C7] All qualified operators busy for job=%s op=%s at t=%.2f. "
+                            "Waiting for operator availability.",
+                            job.id, op_idx_local, float(self.env.now)
+                        )
+                        # Wait for operator to free up (fixed interval)
+                        yield self.env.timeout(1.0)
+                        
+                        # Retry selection after wait (deterministic)
+                        available_operator = self.operators.find_free_operator_for_machine_seeded_random(
+                            op_idx_local, machine_name, self._np_rng
+                        )
+                        if available_operator is None:
+                            available_operator = self.operators.find_free_operator_seeded_random(
+                                op_idx_local, wc_idx, self._np_rng
+                            )
                 
                 # Determine policy reason based on eligibilities
                 chosen_entry = None
@@ -1039,6 +1264,13 @@ class MASAEnv:
                         policy_reason = chosen_entry.reason if chosen_entry.reason is not None else 'no qualified'
                 else:
                     policy_reason = 'selected'
+                    # C7 FIX: Log operator selection for reproducibility verification
+                    LOG.debug(
+                        "[C7] Operator selected (seeded random): job=%s, op=%s, "
+                        "operator_id=%s, machine=%s, wc=%s, t=%.2f",
+                        job.id, op_idx_local, available_operator.operator_id,
+                        machine_name, wc_idx, float(self.env.now)
+                    )
                     # reflect selected operator in the chosen_entry
                     if chosen_entry is not None:
                         chosen_entry.operator_id = str(available_operator.operator_id)
@@ -1138,7 +1370,13 @@ class MASAEnv:
     def _build_agent_obs(self, job: JobAgent):
         # Strict delegation to canonical helper. Let exceptions propagate for
         # clearer debugging when the helper is missing or fails.
-        return build_agent_obs(self, job)
+        # Find job_index for free_machine_count calculation
+        job_index = None
+        for idx, j in enumerate(self.jobs):
+            if j is job:
+                job_index = idx
+                break
+        return build_agent_obs(self, job, job_index=job_index)
 
     def _build_avail_actions(self):
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
@@ -1270,17 +1508,50 @@ class MASAEnv:
     # `self.machine_resources`, `self.operator_groups`, or `self.jobs`, or
     # use canonical metrics APIs instead.
 
+    def _is_episode_done(self):
+        """Check if episode has completed.
+        
+        C16 FIX: Used to determine when utilization can be computed accurately.
+        Episode is done when:
+        - All jobs are finished, OR
+        - Episode time limit is reached, OR
+        - Environment marked as done
+        
+        Returns:
+            bool: True if episode has completed
+        """
+        # Check if all jobs are finished
+        all_finished = all(getattr(j, 'finished', False) for j in self.jobs)
+        
+        # Check if time limit reached
+        time_limit_reached = float(self.env.now) >= float(self.episode_limit)
+        
+        # Check if environment marked as done
+        env_done = getattr(self, 'done', False)
+        
+        return all_finished or time_limit_reached or env_done
+
     def _build_state_vector(self):
         """Return the global state vector; used by tests and env_obs helper."""
         from utils.env_obs import build_state_vector  # type: ignore
-        return np.asarray(build_state_vector(self))
+        state = np.asarray(build_state_vector(self), dtype=np.float32)
+        # Phase A(A): Validate state matches expected state_shape
+        expected_state_shape = getattr(self, 'state_shape', None)
+        if expected_state_shape is not None:
+            expected_len = int(expected_state_shape)
+            if state.shape[0] != expected_len:
+                raise ValueError(
+                    f"State vector shape mismatch: got {state.shape[0]}, expected {expected_len}. "
+                    f"Ensure build_state_vector() returns exactly state_shape dimensions."
+                )
+        return state
 
     def _periodic_summary(self):
         """Periodically log job statistics during simulation."""
         while True:
             yield self.env.timeout(self.summary_interval)
             total = len(self.jobs)
-            completed = sum(1 for j in self.jobs if j.is_finished)
+            completed = sum(1 for j in self.jobs if j.finished)
             active = sum(1 for j in self.jobs if j.is_active)
             LOG.info("[Summary] t=%.2f → total=%d | completed=%d | active=%d",
                      float(self.env.now), int(total), int(completed), int(active))
@@ -1309,7 +1580,7 @@ class MASAEnv:
         self.job_counter = jid + 1
 
         # Console-friendly lifecycle debug print
-        jname = job.name if job.name is not None else f"Job_{job.id}"
+        jname = getattr(job, 'name', None) if hasattr(job, 'name') else f"Job_{job.id}"
         print(f"[Lifecycle] New job added: {jname} | total_jobs={len(self.jobs)}")
 
         # Capacity enforcement
@@ -1367,15 +1638,17 @@ class MASAEnv:
         return job
 
     def get_env_info(self):
-        num_m = len(getattr(self.workcenters_meta, 'machine_list', []) or [])
-        # n_actions is canonicalized to machine count when machine_list exists
-        n_actions = int(getattr(self, 'n_actions', (num_m if num_m > 0 else int(getattr(self, 'num_wcs', 1)))))
+        """Return canonical environment dimensions for agents/mixer/buffer.
+        
+        This is the authoritative source for observation/state/action shapes.
+        Runner must call this after environment construction and inject values
+        into args before initializing agents/mixer/buffer.
+        """
         return {
-            "n_actions": n_actions,
-            "n_agents": int(self.num_jobs),
-            "state_shape": int(self.state_dim),
-            "obs_shape": int(self.obs_dim_agent),
-            "episode_limit": int(self.episode_limit),
+            "obs_shape": self.obs_dim_agent,
+            "state_shape": self.state_dim,
+            "n_actions": self.n_actions,
+            "n_agents": self.max_jobs
         }
 
     # ------------------ Job generation ------------------
@@ -1392,6 +1665,15 @@ class MASAEnv:
         self.job_counter = 0
 
         n_init = int(getattr(self, 'initial_jobs', 4))
+        # [PHASE4-FIX] Validate job generation parameters
+        if n_init < 0:
+            raise ValueError(f"[PHASE4] initial_jobs must be non-negative, got {n_init}")
+        if n_init > 1000:
+            raise ValueError(
+                f"[PHASE4] initial_jobs={n_init} exceeds safety limit (1000). "
+                "Check configuration."
+            )
+        
         if getattr(self, 'job_generator', None) is None:
             logging.getLogger(__name__).warning("TaskGenerator not attached: skipping initial job creation (initial_jobs=%s)", n_init)
             return
@@ -1400,6 +1682,17 @@ class MASAEnv:
             # pick a deterministic number of ops using the injected RNG
             min_init_ops = max(3, int(getattr(self, 'job_min_ops', 2)))
             max_init_ops = int(getattr(self, 'job_max_ops', max(min_init_ops, 5)))
+            # [PHASE4-FIX] Validate operation count bounds
+            if min_init_ops > max_init_ops:
+                raise ValueError(
+                    f"[PHASE4] job_min_ops ({min_init_ops}) > job_max_ops ({max_init_ops}). "
+                    "Check configuration."
+                )
+            if max_init_ops > 100:
+                raise ValueError(
+                    f"[PHASE4] job_max_ops={max_init_ops} exceeds safety limit (100). "
+                    "Check configuration."
+                )
             num_ops = int(self._py_rng.randint(min_init_ops, max(min_init_ops, max_init_ops) + 1))
 
             ops = self.job_generator.create_job(num_ops=num_ops)
@@ -1409,6 +1702,9 @@ class MASAEnv:
                 ops = [(0, [0], {0: 1.0})]
             # Start initial jobs immediately at t=0
             self.add_job(ops, start_immediately=True, set_arrival_zero=True)
+            # Track arrived jobs and operations for global state
+            self.total_jobs_arrived += 1
+            self.total_ops_arrived += len(ops)
 
     # NOTE: dynamic arrivals and internal job generator loops removed.
     # Dynamic job arrival behavior should be provided by an external
@@ -1437,6 +1733,9 @@ class MASAEnv:
 
     def _compute_utilization_summary(self):
         """Compute utilization summary from gantt_records.
+        
+        C16 FIX: Should only be called at episode end for accurate results.
+        During episode, utilization is meaningless (jobs still running).
 
         Returns a dict with keys:
           - avg_machine_utilization: fraction [0,1] averaged across machines and time
@@ -1444,6 +1743,16 @@ class MASAEnv:
           - average_makespan: makespan observed in this episode (seconds)
           - average_wait_time: total_wait_time / completed_jobs (seconds)
         """
+        # [PHASE6-FIX] Task 6.2: Return None instead of warning if called mid-episode
+        if not self._is_episode_done():
+            LOG.warning(
+                "[PHASE6] _compute_utilization_summary called mid-episode (t=%.2f/%.2f). "
+                "Returning None. Utilization can only be computed accurately at episode end.",
+                float(self.env.now), float(self.episode_limit)
+            )
+            # Return None to force callers to handle episode-end-only computation
+            return None
+        
         try:
             records = getattr(self, 'gantt_records', []) or []
             starts = []
@@ -1453,7 +1762,8 @@ class MASAEnv:
             # debug flag: allow env- or args-driven enable
             try:
                 log_util_debug = bool(getattr(self, 'log_util_debug', False)) or bool(getattr(self.args, 'log_util_debug', False))
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[C1] Failed to read log_util_debug flag: {e}")
                 log_util_debug = False
 
             # NOTE: One machine can only be active with one operator at a time.
@@ -1497,12 +1807,21 @@ class MASAEnv:
                     if opid and opid != 'UNASSIGNED':
                         total_operator_busy[opid] = total_operator_busy.get(opid, 0.0) + dur
 
-            # episode length
+            # C16 FIX: Episode length from gantt records (actual makespan)
+            # Fallback to env.now only if no records exist (edge case)
             if starts and ends:
+                # Actual makespan: time from first job start to last job end
                 episode_length = float(max(ends)) - float(min(starts))
             else:
-                # fallback to env.now if no gantt records
+                # No gantt records: use current time as fallback
+                # This should only happen if no jobs were processed
                 episode_length = float(getattr(self.env, 'now', 0.0))
+                if episode_length > 0:
+                    LOG.warning(
+                        "[C16] Computing utilization with no gantt records. "
+                        "Using env.now=%.2f as fallback (may be inaccurate).",
+                        episode_length
+                    )
 
             # avoid zero-length
             if episode_length <= 0:
@@ -1604,12 +1923,9 @@ class MASAEnv:
                 'per_machine_utilization': per_machine_util,
                 'per_operator_utilization': per_operator_util,
             }
-        except Exception:
-            return {
-                'avg_machine_utilization': 0.0,
-                'avg_operator_utilization': 0.0,
-                'average_makespan': 0.0,
-                'average_wait_time': 0.0,
-                'per_machine_utilization': {},
-                'per_operator_utilization': {},
-            }
+        except Exception as e:
+            # C1 Rule 2: DO NOT return fake zeros - fail-fast on invalid utilization
+            raise RuntimeError(
+                f"[C1] Failed to compute utilization summary: {e}. "
+                f"Check gantt_records, machine_list, and operator availability."
+            ) from e

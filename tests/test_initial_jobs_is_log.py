@@ -26,11 +26,12 @@ def test_runner_does_not_read_initial_jobs_file_for_logging():
                 try:
                     if os.path.abspath(path) == os.path.abspath(__file__):
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                 try:
                     txt = io.open(path, 'r', encoding='utf-8', errors='ignore').read()
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
                 for i, line in enumerate(txt.splitlines(), 1):
                     if (('initial_jobs' in line or 'env_config_dump' in line) and 'open' in line and ("'r'" in line or '"r"' in line or "'r+" in line or '"r+' in line)):

@@ -43,8 +43,8 @@ def test_metrics_writer_tempdir(tmp_path):
     else:
         try:
             os.remove(met)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
 
 if __name__ == '__main__':
