@@ -388,10 +388,28 @@ class Operators:
             return None
         
         # C7 FIX: Sort by operator ID for deterministic ordering (critical for RNG consistency)
-        qualified_free.sort(key=lambda op: int(op.operator_id))
+        # Handle both numeric and string operator IDs (e.g., 'O1', '1', 1)
+        def _extract_numeric_id(op):
+            try:
+                opid = str(op.operator_id)
+                # If ID is like 'O1', 'O2', extract the number part
+                if opid.startswith('O') or opid.startswith('o'):
+                    return int(opid[1:])
+                # Otherwise try direct conversion
+                return int(opid)
+            except (ValueError, IndexError):
+                # Fallback: use hash for consistent ordering
+                return hash(str(op.operator_id))
+        
+        qualified_free.sort(key=_extract_numeric_id)
         
         # C7 FIX: Select randomly using seeded RNG
-        selected_idx = rng.integers(0, len(qualified_free))
+        # Handle single operator case (len=1) separately
+        if len(qualified_free) == 1:
+            return qualified_free[0]
+        # Note: randint(low, high) is inclusive of both endpoints,
+        # so we use high=len-1 to avoid IndexError
+        selected_idx = rng.randint(0, len(qualified_free) - 1)
         return qualified_free[selected_idx]
 
     def find_free_operator_for_machine_seeded_random(self, op_idx, machine_name, rng):
@@ -431,10 +449,28 @@ class Operators:
             return None
         
         # C7 FIX: Sort by operator ID for deterministic ordering
-        qualified_free.sort(key=lambda op: int(op.operator_id))
+        # Handle both numeric and string operator IDs (e.g., 'O1', '1', 1)
+        def _extract_numeric_id(op):
+            try:
+                opid = str(op.operator_id)
+                # If ID is like 'O1', 'O2', extract the number part
+                if opid.startswith('O') or opid.startswith('o'):
+                    return int(opid[1:])
+                # Otherwise try direct conversion
+                return int(opid)
+            except (ValueError, IndexError):
+                # Fallback: use hash for consistent ordering
+                return hash(str(op.operator_id))
+        
+        qualified_free.sort(key=_extract_numeric_id)
         
         # C7 FIX: Select randomly using seeded RNG
-        selected_idx = rng.integers(0, len(qualified_free))
+        # Handle single operator case (len=1) separately
+        if len(qualified_free) == 1:
+            return qualified_free[0]
+        # Note: randint(low, high) is inclusive of both endpoints,
+        # so we use high=len-1 to avoid IndexError
+        selected_idx = rng.randint(0, len(qualified_free) - 1)
         return qualified_free[selected_idx]
 
     def release_all(self):

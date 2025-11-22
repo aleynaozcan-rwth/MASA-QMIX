@@ -110,14 +110,14 @@ class Agents:
     # -----------------------------------------------------------------
     # Batch-action helper for Runner / RolloutWorker compatibility
     # -----------------------------------------------------------------
-    def select_actions(self, obs_batch, avail_batch=None, evaluate=False):
+    def select_actions(self, obs_batch, avail_batch=None, evaluate=False, epsilon=None):
         """
         Return list of actions for obs_batch.
         Tries policy.select_actions first, falls back to per-observation policy.act.
         """
         # [C1] Try policy-level batch API - fail-fast if select_actions fails
         if hasattr(self.policy, "select_actions"):
-            return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate)
+            return self.policy.select_actions(obs_batch, avail_batch, evaluate=evaluate, epsilon=epsilon)
 
         # [C1] Fallback: call per-observation act() if available - fail-fast if fails
         actions = []

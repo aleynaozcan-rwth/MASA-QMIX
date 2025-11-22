@@ -37,7 +37,6 @@ class RolloutWorker:
         episode_limit: Optional[int] = None,
         epsilon_start: Optional[float] = None,
         epsilon_end: Optional[float] = None,
-        epsilon_anneal_steps: Optional[int] = None,
         device: Optional[str] = None,
         log_prefix: str = "8A.7.3",
     ):
@@ -51,8 +50,13 @@ class RolloutWorker:
         elif episode_limit is not None:
             self.episode_limit = int(episode_limit)
         else:
-            # extend default rollout episode_limit to match environment default (300)
-            self.episode_limit = int(getattr(self.args, 'episode_limit', 300))
+            # Co-Pilot Rule compliance: episode_limit must be explicit
+            if not hasattr(self.args, 'episode_limit'):
+                raise ValueError(
+                    "[FIXED_AGENT_BATCH] args.episode_limit is required but missing. "
+                    "This must be set explicitly in configuration."
+                )
+            self.episode_limit = int(self.args.episode_limit)
 
         # [C1] Device configuration must be valid (fail-fast if invalid)
         if hasattr(self.args, "device") and getattr(self.args, "device") is not None:
@@ -64,29 +68,17 @@ class RolloutWorker:
         self.log_prefix = log_prefix
 
         # [C1] Epsilon schedule configuration must be valid (fail-fast if invalid)
-        if hasattr(self.args, 'epsilon_start') and getattr(self.args, 'epsilon_start') is not None:
-            self.epsilon_start = float(getattr(self.args, 'epsilon_start'))
-        elif epsilon_start is not None:
+        if epsilon_start is not None:
             self.epsilon_start = float(epsilon_start)
         else:
-            self.epsilon_start = float(getattr(self.args, 'epsilon_start', 1.0))
+            self.epsilon_start = float(self.args.epsilon_start)
 
-        if hasattr(self.args, 'epsilon_end') and getattr(self.args, 'epsilon_end') is not None:
-            self.epsilon_end = float(getattr(self.args, 'epsilon_end'))
-        elif epsilon_end is not None:
+        if epsilon_end is not None:
             self.epsilon_end = float(epsilon_end)
         else:
-            self.epsilon_end = float(getattr(self.args, 'epsilon_end', 0.05))
-
-        if hasattr(self.args, 'epsilon_anneal_steps') and getattr(self.args, 'epsilon_anneal_steps') is not None:
-            self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps'))
-        elif epsilon_anneal_steps is not None:
-            self.epsilon_anneal_steps = int(epsilon_anneal_steps)
-        else:
-            self.epsilon_anneal_steps = int(getattr(self.args, 'epsilon_anneal_steps', 50000))
+            self.epsilon_end = float(self.args.epsilon_end)
 
         self.epsilon = float(self.epsilon_start)
-        self._eps_decay = (self.epsilon_start - self.epsilon_end) / max(1, self.epsilon_anneal_steps)
 
         # runtime placeholders
         self.eval_hidden = None
@@ -115,14 +107,34 @@ class RolloutWorker:
     # ------------------------------------------------
     # Action selection helpers used by Runner fallback
     # ------------------------------------------------
-    def _select_actions(self, obs_batch: List[Any], avail_batch: Optional[List[Any]], evaluate: bool = False) -> Tuple[List[Any], Any]:
+    def _select_actions(self, obs_batch: List[Any], avail_batch: Optional[List[Any]], evaluate: bool = False, epsilon: float = None, agent_masks: Optional[List[int]] = None) -> Tuple[List[Any], Any]:
         """
         Return (actions_list, hidden_state) where actions_list is a list of int actions
         This wrapper tries common agent APIs then falls back to deterministic/random picks.
+        
+        Args:
+            obs_batch: List of observations
+            avail_batch: List of available actions
+            evaluate: Whether in evaluation mode
+            epsilon: Epsilon for exploration (required)
+            agent_masks: Binary mask (1=real agent, 0=padded)
         """
+        # Epsilon must be provided explicitly
+        if epsilon is None:
+            raise ValueError("epsilon must be provided explicitly to _select_actions")
+        
         # [C1] Try batch API on agents - fail-fast if select_actions/choose_actions fail
         if hasattr(self.agents, "select_actions"):
-            return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
+            # Try to pass epsilon and agent_masks if the method accepts them
+            try:
+                return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate, epsilon=epsilon, agent_masks=agent_masks), None
+            except TypeError:
+                # Fallback if method doesn't accept agent_masks - try without it
+                try:
+                    return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate, epsilon=epsilon), None
+                except TypeError:
+                    # Final fallback if method doesn't accept epsilon
+                    return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
         if hasattr(self.agents, "choose_actions"):
             return self.agents.choose_actions(obs_batch, avail_batch, evaluate=evaluate), None
 
@@ -526,8 +538,13 @@ class RolloutWorker:
             u_list = [int(a) if a is not None else 0 for a in (processed_actions or [])]
             u_machine_list = [-1] * len(u_list)
 
-        # pad/truncate to args.n_agents
-        n_agents = getattr(args, 'n_agents', len(u_list) if u_list else 1)
+        # pad/truncate to args.n_agents - must be explicitly defined, no fallback
+        if not hasattr(args, 'n_agents'):
+            raise ValueError(
+                "[FIXED_AGENT_BATCH] args.n_agents is required but missing. "
+                "This must be set explicitly in configuration."
+            )
+        n_agents = int(args.n_agents)
         if len(u_list) < n_agents:
             u_list = u_list + [0] * (n_agents - len(u_list))
             u_machine_list = u_machine_list + [-1] * (n_agents - len(u_machine_list))
@@ -691,10 +708,14 @@ class RolloutWorker:
         # [PHASE5-FIX] Task 5.5: Shape validation always enabled (not just in debug mode)
         # Critical shape mismatches should always raise errors, not just warnings
         try:
-            n_agents_expected = getattr(args, 'n_agents', None)
+            # Co-Pilot Rule compliance: No fallback defaults for n_agents
+            if not hasattr(args, 'n_agents'):
+                raise ValueError(
+                    "[FIXED_AGENT_BATCH] args.n_agents is required but missing. "
+                    "This must be set explicitly in configuration."
+                )
+            n_agents_expected = int(args.n_agents)
             obs_dim_expected = getattr(args, 'obs_shape', None) or getattr(args, 'obs_dim_agent', None) or None
-            if n_agents_expected is not None:
-                n_agents_expected = int(n_agents_expected)
             if obs_dim_expected is not None:
                 obs_dim_expected = int(obs_dim_expected)
 
@@ -847,17 +868,46 @@ class RolloutWorker:
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 avail = None
+            
+            # Extract agent masks from batch items
+            agent_masks = [item.get('agent_mask', 1) for item in batch]
+            
+            # Validate batch size matches n_agents (after padding)
+            if not hasattr(self.args, 'n_agents'):
+                raise ValueError(
+                    "[FIXED_AGENT_BATCH] args.n_agents is required but missing. "
+                    "This must be set explicitly in configuration."
+                )
+            n_agents = int(self.args.n_agents)
+            if len(obs_list) != n_agents:
+                raise ValueError(
+                    f"[FIXED_AGENT_BATCH] Batch size mismatch: got {len(obs_list)}, "
+                    f"expected {n_agents}. Environment padding may have failed."
+                )
+            
             try:
                 # _select_actions returns (actions_list, hidden_state).
                 # Unpack the pair so callers receive the actions list.
-                actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate)
+                # Pass current epsilon and agent masks for exploration
+                actions, _ = self._select_actions(obs_list, avail, evaluate=evaluate, epsilon=self.epsilon, agent_masks=agent_masks)
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 actions = []
 
+            # [TIME-BASED EPSILON DECAY] Update epsilon based on simulation time
+            if not evaluate:
+                current_t = float(self.env.env.now)
+                limit_t = float(self.episode_limit)
+                fraction = min(1.0, current_t / limit_t)
+                self.epsilon = self.epsilon_start - fraction * (self.epsilon_start - self.epsilon_end)
+
+            # Filter actions for real agents only - apply only to non-padded agents
+            real_batch = [item for item in batch if item.get('agent_mask', 1) == 1]
+            real_actions = [actions[i] for i in range(len(batch)) if batch[i].get('agent_mask', 1) == 1]
+            
             # Process and apply actions via RolloutWorker helper (centralized logic)
             try:
-                processed_actions, processed_machine_names = self.process_and_apply_actions(batch, actions, sim_time, runner_args=args)
+                processed_actions, processed_machine_names = self.process_and_apply_actions(real_batch, real_actions, sim_time, runner_args=args)
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 processed_actions = actions or []
@@ -951,9 +1001,6 @@ class RolloutWorker:
 
             # stop if env signals done
             if getattr(self.env, "done", False):
-                break
-            # safety: break if time limit reached
-            if getattr(self.env, "t", 0.0) >= getattr(self.env, "episode_limit", getattr(args, 'n_steps', 1e9)):
                 break
 
         ep_reward = float(np.sum(episode.get("r", [])))

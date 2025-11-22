@@ -271,31 +271,38 @@ class QMIX:
         self.target_hidden = torch.zeros(h_shape, device=self.device)
 
     # --------------------------------------------------
-    def select_actions(self, obs_batch, avail_batch=None, evaluate: bool = False, epsilon: float = None):
+    def select_actions(self, obs_batch, avail_batch=None, evaluate=False, epsilon=None, agent_masks=None):
         """Select actions for a batch of per-agent observations using the eval_rnn Q-values.
 
         obs_batch: list or array of shape (n_agents, obs_dim) or list-of-arrays
         avail_batch: optional list of per-agent availability vectors (list or np.array)
         epsilon: exploration rate (required for training, optional for evaluation)
+        agent_masks: optional binary mask (1=real agent, 0=padded), shape (n_agents,)
         Returns: list of integer actions (one per agent)
         """
         import numpy as _np
         to_t = lambda x: torch.tensor(x, dtype=torch.float32, device=self.device)
 
-        # [PHASE8-FIX] Task 8.4 & 8.5: Epsilon fallback with warning (required for training)
+        # [TIME-BASED EPSILON] Epsilon must be provided explicitly
         if epsilon is None:
-            epsilon = float(getattr(self.args, 'epsilon', 0.0))
-            if not evaluate:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "[PHASE8] select_actions called without epsilon during training. "
-                    f"Falling back to args.epsilon={epsilon}. Please provide epsilon explicitly."
-                )
+            raise ValueError("epsilon must be provided explicitly to select_actions")
 
         # Normalize obs_batch to tensor shape (1, n_agents, obs_dim)
         obs_arr = _np.asarray(obs_batch, dtype=_np.float32)
+        
+        # Validate batch size matches n_agents (after padding)
+        if obs_arr.shape[0] != self.n_agents:
+            raise ValueError(
+                f"[FIXED_AGENT_BATCH] Observation batch size mismatch: "
+                f"got {obs_arr.shape[0]}, expected {self.n_agents}. "
+                f"Shape: {obs_arr.shape}"
+            )
+        
         if obs_arr.ndim == 1:
-            obs_arr = obs_arr.reshape(1, -1)
+            raise ValueError(
+                f"[FIXED_AGENT_BATCH] Received 1D observation batch. "
+                f"Expected 2D (n_agents, obs_dim) after padding. Shape: {obs_arr.shape}"
+            )
         if obs_arr.ndim == 2:
             # assume (n_agents, obs_dim)
             obs_t = to_t(obs_arr).unsqueeze(0)
@@ -315,6 +322,18 @@ class QMIX:
         q_vals, _ = self.eval_rnn(inputs, self.eval_hidden)
         # q_vals shape: (episode_num * n_agents, n_actions)
         q_vals = q_vals.view(1, self.n_agents, -1).squeeze(0).detach().cpu().numpy()
+        
+        # Mask Q-values for padded agents (set to large negative)
+        if agent_masks is not None:
+            agent_masks_arr = _np.array(agent_masks, dtype=_np.float32)
+            if agent_masks_arr.shape[0] != self.n_agents:
+                raise ValueError(
+                    f"[FIXED_AGENT_BATCH] Agent mask size mismatch: "
+                    f"got {agent_masks_arr.shape[0]}, expected {self.n_agents}"
+                )
+            # Broadcast mask to Q-values shape and apply
+            mask = agent_masks_arr[:, _np.newaxis]  # (n_agents, 1)
+            q_vals = q_vals * mask + (1 - mask) * (-1e10)  # Mask out padded agents
 
         actions = []
         # A1: Fail-fast validation - avail_batch must match n_agents if provided

@@ -1,0 +1,30 @@
+{
+  "evolutions": [
+    {
+      "avg_machine_utilization": 0.2903219054712949,
+      "avg_operator_utilization": 0.3629023818391186,
+      "average_makespan": 498.1,
+      "average_wait_time": 64.19487594946702,
+      "per_machine_utilization": {
+        "0": 0.3499297329853444,
+        "1": 0.17367086635168572,
+        "2": 0.22527543695228133,
+        "3": 0.34343457004871375,
+        "4": 0.35929892101844924
+      },
+      "per_operator_utilization": {
+        "O1": 0.7297987265916366,
+        "O2": 0.7218108007648378
+      },
+      "avg_epoch_reward": 4.820755952255257,
+      "timestamp": "2025-11-22T16:45:58.699560",
+      "avg_makespan": 498.1,
+      "avg_wait_time": 64.19487594946702,
+      "average_machine_utilization": 0.2903219054712949,
+      "average_operator_utilization": 0.3629023818391186
+    }
+  ],
+  "avg_machine_utilization": 0.2903219054712949,
+  "avg_operator_utilization": 0.3629023818391186,
+  "avg_epoch_reward": 4.820755952255257
+}

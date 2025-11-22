@@ -132,8 +132,10 @@ def get_mutable_args():
                         help='Evaluate every N epochs')
     parser.add_argument('--n_actions', type=int, default=5,
                         help='(fallback) number of actions/workcenters when machine_list is not provided')
-    parser.add_argument('--state_shape', type=int, default=64)
-    parser.add_argument('--obs_shape', type=int, default=6)
+    parser.add_argument('--state_shape', type=int, default=10,
+                        help='Global state dimension (will be overridden by env.get_env_info())')
+    parser.add_argument('--obs_shape', type=int, default=7,
+                        help='Agent observation dimension (will be overridden by env.get_env_info())')
     
 
     # ============================================================
@@ -155,14 +157,10 @@ def get_mutable_args():
     # ============================================================
     # === Exploration (epsilon schedule) =========================
     # ============================================================
-    parser.add_argument('--epsilon_start', type=float, default=1.0)
-    parser.add_argument('--epsilon_end', type=float, default=0.05)
-    # [PHASE9-FIX] Task 9.5: Deprecated parameter with warning
-    parser.add_argument('--epsilon_anneal_steps', type=int, default=30000,
-                        help='[DEPRECATED] Use --epsilon_anneal_episodes instead. This parameter is ignored.')
-    # [PHASE1-FIX] Episode-based epsilon decay (replaces step-based)
-    parser.add_argument('--epsilon_anneal_episodes', type=int, default=None,
-                        help='Number of episodes to linearly anneal epsilon. If None, uses n_epoch * n_episodes')
+    parser.add_argument('--epsilon_start', type=float, default=1.0,
+                        help='Initial epsilon value. Epsilon decays linearly with simulation time based on: epsilon(t) = epsilon_start - (t / episode_limit) * (epsilon_start - epsilon_end)')
+    parser.add_argument('--epsilon_end', type=float, default=0.05,
+                        help='Final epsilon value. Epsilon decays linearly with simulation time based on: epsilon(t) = epsilon_start - (t / episode_limit) * (epsilon_start - epsilon_end)')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,
@@ -218,14 +216,6 @@ def get_mutable_args():
         raise ValueError(f"[PHASE4] batch_size must be positive, got {args.batch_size}")
     if args.lr <= 0:
         raise ValueError(f"[PHASE4] learning rate must be positive, got {args.lr}")
-    
-    # [PHASE9-FIX] Task 9.5: Warn if deprecated epsilon_anneal_steps is used
-    if hasattr(args, 'epsilon_anneal_steps') and args.epsilon_anneal_steps != 30000:
-        import logging
-        logging.getLogger(__name__).warning(
-            f"[PHASE9] --epsilon_anneal_steps is DEPRECATED and ignored. "
-            f"Use --epsilon_anneal_episodes instead. Current value: {args.epsilon_anneal_steps}"
-        )
     
     try:
         import os

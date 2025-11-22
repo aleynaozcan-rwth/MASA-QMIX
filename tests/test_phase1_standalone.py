@@ -64,7 +64,6 @@ def test_a6_missing_avail_raises():
     args.rnn_hidden_dim = 64
     args.epsilon_start = 1.0
     args.epsilon_end = 0.05
-    args.epsilon_anneal_steps = 50000
     args.seed = 42
     args.device = 'cpu'
     args.episode_limit = 100
@@ -103,7 +102,6 @@ def test_a6_valid_avail_succeeds():
     args.rnn_hidden_dim = 64
     args.epsilon_start = 1.0
     args.epsilon_end = 0.05
-    args.epsilon_anneal_steps = 50000
     args.seed = 42
     args.device = 'cpu'
     args.episode_limit = 100

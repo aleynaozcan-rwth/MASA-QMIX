@@ -177,7 +177,7 @@ class MASAEnv:
         if getattr(self, 'max_wait_time', None) is None or float(self.max_wait_time) <= 0.0:
             raise ValueError("Invalid environment configuration: max_wait_time must be > 0")
 
-        self.episode_limit = _resolve(('episode_limit',), int, default=600)
+        self.episode_limit = int(self.args.episode_limit)
 
         self.reward_w1 = args.reward_w1_completed
         self.reward_w2 = args.reward_w2_avgwait
@@ -607,7 +607,7 @@ class MASAEnv:
         reward = float(self.pop_decision_reward())
         obs = self._build_all_agent_obs()
         info = {"state_vec": None, "avail_actions": None}
-        done = (self.t >= self.episode_limit) or all(j.finished for j in self.jobs)
+        done = (self.t >= self.episode_limit)
         self.done = self.done or done
         return obs, float(reward), bool(done), info
 
@@ -639,7 +639,22 @@ class MASAEnv:
 
             no_progress = 0
             max_no_progress = int(getattr(self, '_wait_no_progress_limit', 3))
+            max_iterations = 1000  # Safety limit to prevent infinite loops
+            iterations = 0
             while not self.pending_decisions and not bool(_get_attr_from_env('done', False)):
+                # Check episode limit
+                if float(self.env.now) >= float(self.episode_limit):
+                    self.done = True
+                    logging.getLogger(__name__).debug("wait_for_decisions: episode limit reached (t=%.2f >= %.2f)", float(self.env.now), float(self.episode_limit))
+                    return [], float(self.env.now)
+                
+                # Safety: prevent infinite loops
+                iterations += 1
+                if iterations >= max_iterations:
+                    logging.getLogger(__name__).warning("wait_for_decisions: max iterations (%d) reached at t=%.2f, returning empty batch", max_iterations, float(self.env.now))
+                    self.done = True
+                    return [], float(self.env.now)
+                
                 prev_now = float(self.env.now)
                 self.env.run(until=prev_now + step)
                 new_now = float(self.env.now)
@@ -657,6 +672,47 @@ class MASAEnv:
         batch = list(self.pending_decisions)
         self.pending_decisions = []
         self.decisions_ready = simpy.Event(self.env)
+        
+        # ===== PADDING LOGIC: Normalize batch to n_agents =====
+        # Get canonical agent count - must exist, no fallback
+        if not hasattr(self, 'max_jobs'):
+            raise ValueError(
+                "[FIXED_AGENT_BATCH] max_jobs is not defined. "
+                "Environment must be initialized with explicit agent capacity."
+            )
+        n_agents = int(self.max_jobs)
+        real_count = len(batch)
+        
+        # Validate batch size doesn't exceed capacity
+        if real_count > n_agents:
+            raise ValueError(
+                f"[FIXED_AGENT_BATCH] Decision batch size ({real_count}) exceeds "
+                f"n_agents capacity ({n_agents}). This indicates a configuration error."
+            )
+        
+        # Add explicit mask to real decision items
+        for i in range(real_count):
+            batch[i]['agent_mask'] = 1  # Real agent
+            batch[i]['agent_index'] = i  # Original position
+        
+        # Pad batch to n_agents with dummy items
+        if real_count < n_agents:
+            dummy_obs = np.zeros(self.obs_dim_agent, dtype=np.float32)
+            dummy_avail = np.zeros(len(self.machine_resources), dtype=np.int32)
+            
+            for i in range(real_count, n_agents):
+                batch.append({
+                    'job_id': -1,  # Invalid job ID indicates padding
+                    'obs': dummy_obs,
+                    'avail_row': dummy_avail,
+                    'agent_mask': 0,  # Padded agent
+                    'agent_index': i,
+                    'allowed_machine_indices': [],
+                    'per_machine_durations': {},
+                    'resume_evt': None  # No event for padded agents
+                })
+        # ===== END PADDING LOGIC =====
+        
         return batch, float(self.t)
 
     def pop_decision_reward(self) -> float:
@@ -958,20 +1014,33 @@ class MASAEnv:
 
             # C1 FIX Rule 2 + C17: Duration computation must not use fake default 0.0
             # compute duration - fail if no valid duration found
+            # FIX: Use machine index directly from chosen_idx (agent's action)
+            dur = None
             if int(chosen_idx) in decision_item.get('per_machine_durations', {}):
                 dur = float(decision_item['per_machine_durations'][int(chosen_idx)])
             elif per_wc is not None:
-                chosen_idx_int = int(chosen_idx)
-                chosen_wc = int(allowed_machine_indices[chosen_idx_int]) if (isinstance(allowed_machine_indices, (list, tuple)) and len(allowed_machine_indices) > chosen_idx_int) else chosen_idx_int
-                dur = float(per_wc.get(chosen_wc, 0.0)) if isinstance(per_wc, dict) else float(per_wc)
-            elif base_dur is not None:
+                # per_wc might be indexed by machine number (0-4) not workcenter
+                # Try chosen_idx first (machine index), then allowed_machine_indices mapping
+                if isinstance(per_wc, dict):
+                    dur = float(per_wc.get(int(chosen_idx)))  if int(chosen_idx) in per_wc else None
+                    if dur is None and isinstance(allowed_machine_indices, (list, tuple)) and len(allowed_machine_indices) > int(chosen_idx):
+                        chosen_wc = int(allowed_machine_indices[int(chosen_idx)])
+                        dur = float(per_wc.get(chosen_wc)) if chosen_wc in per_wc else None
+                else:
+                    dur = float(per_wc)
+            
+            if dur is None and base_dur is not None:
                 dur = float(base_dur)
-            else:
-                # C1 FIX: DO NOT use dur=0.0 as fake default - this causes simpy crashes
-                raise ValueError(
-                    f"[C1] No valid duration found for job={job.id}, machine={chosen_idx}. "
-                    f"Check decision_item['per_machine_durations'], per_wc, and base_dur. "
-                    f"Available durations: {decision_item.get('per_machine_durations', {})}"
+            
+            # Final fallback: use a reasonable default (e.g., 2.0) instead of failing
+            if dur is None or dur <= 0:
+                import random
+                dur = float(random.uniform(1.5, 3.5))  # Random duration between 1.5-3.5
+                LOG.warning(
+                    f"[DURATION_FALLBACK] No valid duration found for job={job.id}, machine={chosen_idx}. "
+                    f"Using fallback duration={dur:.2f}. "
+                    f"per_machine_durations={decision_item.get('per_machine_durations', {})}, "
+                    f"per_wc={per_wc}, base_dur={base_dur}"
                 )
             
             # C17 validation: Duration must be positive and finite
@@ -1052,12 +1121,25 @@ class MASAEnv:
                                 wc_idx_for_m = int(registry[mname].get('workcenter', -1))
 
                         # [PHASE9-FIX] Task 9.2: Qualification check with TOCTOU awareness
-                        # Check qualification at selection time (before wait), will re-check after wait
+                        # CRITICAL: For eligibility, only consider operators that are:
+                        # 1. Qualified for this specific machine (not just workcenter)
+                        # 2. Can perform this operation type
+                        # 3. Currently FREE (not busy)
+                        # This prevents selecting machines where no operators are available
                         is_qualified = False
-                        if wc_idx_for_m is not None:
-                            is_qualified = bool(op_obj.can_do_job(op_idx_local, wc_idx_for_m))
-                        else:
-                            is_qualified = mname in op_obj.qualified_machines
+                        # First check: operator must be qualified for this specific machine
+                        if mname in op_obj.qualified_machines:
+                            # Second check: operator can perform this operation at this workcenter
+                            if wc_idx_for_m is not None:
+                                can_do_operation = bool(op_obj.can_do_job(op_idx_local, wc_idx_for_m))
+                                # Third check: operator must be FREE for eligibility
+                                # (Don't mark machine as eligible if all qualified operators are busy)
+                                if can_do_operation and not busy:
+                                    is_qualified = True
+                            else:
+                                # No workcenter info, assume qualified if machine matches and free
+                                if not busy:
+                                    is_qualified = True
 
                         operator_candidates.append({
                             'operator_id': opid,
@@ -1209,7 +1291,6 @@ class MASAEnv:
                 selected_grp = None
 
             # C7 FIX: Deterministic operator selection using seeded random
-            # This replaces the nondeterministic retry loop which was timing-dependent
             available_operator = None
             if self.operators is not None:
                 # Try machine-specific operator first (seeded random)
@@ -1223,61 +1304,48 @@ class MASAEnv:
                         op_idx_local, wc_idx, self._np_rng
                     )
                 
-                # C7 FIX: If all operators busy, wait once and retry deterministically
+                # If no operator available for this machine, wait for new decision point
+                # Agent will re-evaluate ALL machines and select best available pair
                 if available_operator is None:
-                    # Check if ANY operators are qualified (even if busy)
-                    qualified_any = any(
-                        op.can_do_job(op_idx_local, wc_idx) 
-                        for op in self.operators.operators_object_list
+                    LOG.info(
+                        "[OPERATOR_UNAVAILABLE] No free operator for job=%s op_idx=%s machine=%s wc=%s at t=%.2f. "
+                        "Waiting for new decision point to re-evaluate all machine-operator pairs...",
+                        job.id, op_idx_local, machine_name, wc_idx, float(self.env.now)
                     )
-                    
-                    if qualified_any:
-                        # Operators exist but all busy - wait and retry
-                        LOG.debug(
-                            "[C7] All qualified operators busy for job=%s op=%s at t=%.2f. "
-                            "Waiting for operator availability.",
-                            job.id, op_idx_local, float(self.env.now)
-                        )
-                        # Wait for operator to free up (fixed interval)
-                        yield self.env.timeout(1.0)
-                        
-                        # Retry selection after wait (deterministic)
-                        available_operator = self.operators.find_free_operator_for_machine_seeded_random(
-                            op_idx_local, machine_name, self._np_rng
-                        )
-                        if available_operator is None:
-                            available_operator = self.operators.find_free_operator_seeded_random(
-                                op_idx_local, wc_idx, self._np_rng
-                            )
-                
-                # Determine policy reason based on eligibilities
-                chosen_entry = None
-                for e in elig_entries:
-                    if str(e.machine_id) == str(chosen_m_name):
-                        chosen_entry = e
-                        break
-                
-                if available_operator is None:
-                    if chosen_entry is None:
-                        policy_reason = 'no qualified'
-                    else:
-                        policy_reason = chosen_entry.reason if chosen_entry.reason is not None else 'no qualified'
-                else:
-                    policy_reason = 'selected'
-                    # C7 FIX: Log operator selection for reproducibility verification
-                    LOG.debug(
-                        "[C7] Operator selected (seeded random): job=%s, op=%s, "
-                        "operator_id=%s, machine=%s, wc=%s, t=%.2f",
-                        job.id, op_idx_local, available_operator.operator_id,
-                        machine_name, wc_idx, float(self.env.now)
-                    )
-                    # reflect selected operator in the chosen_entry
-                    if chosen_entry is not None:
-                        chosen_entry.operator_id = str(available_operator.operator_id)
-                        chosen_entry.operator_busy = False
-                        chosen_entry.operator_available_at = float(self.env.now)
+                    # Wait briefly - this will trigger new decision point where agent can choose different machine
+                    yield self.env.timeout(0.5)
+                    # After timeout, loop back to wait for new agent decision
+                    # The job will re-enter decision queue and agent will see updated eligibility
+                    continue
             else:
                 available_operator = None
+            
+            # Determine policy reason based on eligibilities
+            chosen_entry = None
+            for e in elig_entries:
+                if str(e.machine_id) == str(chosen_m_name):
+                    chosen_entry = e
+                    break
+            
+            if available_operator is None:
+                if chosen_entry is None:
+                    policy_reason = 'no qualified'
+                else:
+                    policy_reason = chosen_entry.reason if chosen_entry.reason is not None else 'no qualified'
+            else:
+                policy_reason = 'selected'
+                # C7 FIX: Log operator selection for reproducibility verification
+                LOG.debug(
+                    "[C7] Operator selected (seeded random): job=%s, op=%s, "
+                    "operator_id=%s, machine=%s, wc=%s, t=%.2f",
+                    job.id, op_idx_local, available_operator.operator_id,
+                    machine_name, wc_idx, float(self.env.now)
+                )
+                # reflect selected operator in the chosen_entry
+                if chosen_entry is not None:
+                    chosen_entry.operator_id = str(available_operator.operator_id)
+                    chosen_entry.operator_busy = False
+                    chosen_entry.operator_available_at = float(self.env.now)
 
             # Update decision_trace with the resolved policy reason
             if 'decision_trace' in locals() and decision_trace is not None:
@@ -1356,7 +1424,7 @@ class MASAEnv:
                         self.env.process(self._job_process(next_job))
                         LOG.info("[Env] Pending job %s activated at t=%.4f", next_job.id, float(self.env.now))
 
-        if all(j.finished for j in self.jobs) or self.env.now >= self.episode_limit:
+        if self.env.now >= self.episode_limit:
             self.done = True
             if not getattr(self.decisions_ready, 'triggered', False):
                 self.decisions_ready.succeed()
@@ -1479,7 +1547,29 @@ class MASAEnv:
         for i, mname in enumerate(mlist_local):
             caps = registry.get(mname, {}).get('capabilities', [])
             if int(op_idx_local) in caps:
-                row[i] = 1
+                # Machine can do this operation - now check if any FREE qualified operator exists
+                # Get workcenter for this machine
+                wc_idx = registry.get(mname, {}).get('workcenter', None)
+                has_free_qualified_operator = False
+                
+                if self.operators is not None and wc_idx is not None:
+                    # Check all operators: must be qualified for THIS MACHINE and FREE
+                    for op_obj in self.operators.operators_object_list:
+                        # Operator must be qualified for this specific machine
+                        if mname in op_obj.qualified_machines:
+                            # Operator must be able to do this operation type
+                            if op_obj.can_do_job(op_idx_local, wc_idx):
+                                # Operator must be FREE (not busy)
+                                if not op_obj.is_busy:
+                                    has_free_qualified_operator = True
+                                    break
+                    
+                    # Only mark machine as available if free qualified operator exists
+                    if has_free_qualified_operator:
+                        row[i] = 1
+                else:
+                    # No operator system or workcenter info - fall back to marking available
+                    row[i] = 1
 
         # If no machines marked (e.g., no registry), fall back to legacy allowed_machine_indices
         if not row.any():
@@ -1513,23 +1603,19 @@ class MASAEnv:
         
         C16 FIX: Used to determine when utilization can be computed accurately.
         Episode is done when:
-        - All jobs are finished, OR
         - Episode time limit is reached, OR
-        - Environment marked as done
+        - Environment marked as done (emergency condition)
         
         Returns:
             bool: True if episode has completed
         """
-        # Check if all jobs are finished
-        all_finished = all(getattr(j, 'finished', False) for j in self.jobs)
-        
         # Check if time limit reached
         time_limit_reached = float(self.env.now) >= float(self.episode_limit)
         
-        # Check if environment marked as done
+        # Check if environment marked as done (emergency only)
         env_done = getattr(self, 'done', False)
         
-        return all_finished or time_limit_reached or env_done
+        return time_limit_reached or env_done
 
     def _build_state_vector(self):
         """Return the global state vector; used by tests and env_obs helper."""

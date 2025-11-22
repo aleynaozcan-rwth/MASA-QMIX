@@ -33,7 +33,6 @@ class TestA6_RolloutWorkerFailFast:
         args.rnn_hidden_dim = 64
         args.epsilon_start = 1.0
         args.epsilon_end = 0.05
-        args.epsilon_anneal_steps = 50000
         args.seed = 42
         args.device = 'cpu'
         args.episode_limit = 100
@@ -63,7 +62,6 @@ class TestA6_RolloutWorkerFailFast:
         args.rnn_hidden_dim = 64
         args.epsilon_start = 1.0
         args.epsilon_end = 0.05
-        args.epsilon_anneal_steps = 50000
         args.seed = 42
         args.device = 'cpu'
         args.episode_limit = 100
@@ -309,7 +307,6 @@ class TestIntegration_Phase1:
         common_args.device = 'cpu'
         common_args.epsilon_start = 1.0
         common_args.epsilon_end = 0.05
-        common_args.epsilon_anneal_steps = 50000
         common_args.episode_limit = 100
         
         mixer_args = get_mixer_args()

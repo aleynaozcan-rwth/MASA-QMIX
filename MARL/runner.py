@@ -1364,7 +1364,6 @@ class Runner:
                 "[ACTIVE_ARGS] gamma=%g" % float(getattr(a, "gamma", -1)),
                 "[ACTIVE_ARGS] epsilon_start=%g" % float(getattr(a, "epsilon_start", -1)),
                 "[ACTIVE_ARGS] epsilon_end=%g" % float(getattr(a, "epsilon_end", -1)),
-                "[ACTIVE_ARGS] epsilon_anneal_steps=%d" % int(getattr(a, "epsilon_anneal_steps", -1)),
             ]
             print("\n".join(lines), flush=True)
         except Exception as e:
@@ -1433,9 +1432,11 @@ class Runner:
             # Compute finished job count on-demand (canonical)
             before_completed = len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)])
 
+            # Training episodes use evaluate=False for epsilon-greedy exploration
+            evaluate = False
             for _ in range(self.args.n_episodes):
                 # [C1] Use the SimPy event-driven episode execution - fail-fast if episode fails
-                episode, ep_r, win_tag, gantt_data = self._run_event_driven_episode(global_ep_idx)
+                episode, ep_r, win_tag, gantt_data = self._run_event_driven_episode(global_ep_idx, evaluate=evaluate)
 
                 all_gantt_data.extend(gantt_data)
                 # record gantt for this epoch specifically
@@ -1448,25 +1449,14 @@ class Runner:
                 episodes.append(episode)
                 global_ep_idx += 1
 
-                # [PHASE1-FIX] Epsilon decay per episode (not per decision step)
-                # Decay epsilon after each episode completes for consistent exploration schedule
-                if not evaluate:
-                    rollout_worker_epsilon_start = float(getattr(self.rolloutWorker, 'epsilon_start', 1.0))
-                    rollout_worker_epsilon_end = float(getattr(self.rolloutWorker, 'epsilon_end', 0.05))
-                    rollout_worker_epsilon_anneal_episodes = int(getattr(self.args, 'epsilon_anneal_episodes', 
-                                                                         self.args.n_epoch * self.args.n_episodes))
-                    eps_decay_per_episode = (rollout_worker_epsilon_start - rollout_worker_epsilon_end) / max(1, rollout_worker_epsilon_anneal_episodes)
-                    self.rolloutWorker.epsilon = max(rollout_worker_epsilon_end, 
-                                                      float(self.rolloutWorker.epsilon) - eps_decay_per_episode)
-                    
-                    # [PHASE7] Task 7.3: Log epsilon to per-worker file to prevent concurrent write issues
-                    if global_ep_idx % 20 == 0:
-                        try:
-                            with open(self._epsilon_log_path, 'a') as ef:
-                                ef.write(f"{time.time()},{global_ep_idx},{self.rolloutWorker.epsilon:.6f}\n")
-                            print(f"[PHASE1-EPSILON] Episode {global_ep_idx}: epsilon={self.rolloutWorker.epsilon:.4f}")
-                        except Exception as e:
-                            logging.getLogger(__name__).warning(f"[C1] Epsilon logging failed (best-effort): {e}")
+                # [TIME-BASED EPSILON] Log epsilon (decay happens in rollout.py based on simulation time)
+                if not evaluate and global_ep_idx % 20 == 0:
+                    try:
+                        with open(self._epsilon_log_path, 'a') as ef:
+                            ef.write(f"{time.time()},{global_ep_idx},{self.rolloutWorker.epsilon:.6f}\n")
+                        print(f"[TIME-EPSILON] Episode {global_ep_idx}: epsilon={self.rolloutWorker.epsilon:.4f}")
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[C1] Epsilon logging failed (best-effort): {e}")
 
                 # Record per-training-episode reward for visibility and post-run summaries.
                 # Runner previously only appended rewards from evaluation runs; include
