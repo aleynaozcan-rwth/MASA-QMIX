@@ -20,3 +20,4 @@ my_data_and_graph/historydata/scheduleresults.txt
 my_data_and_graph/historydata/*
 !my_data_and_graph/historydata/scheduling_timeline.txt
 !my_data_and_graph/historydata/**
+my_data_and_graph/historydata/debug_output.txt

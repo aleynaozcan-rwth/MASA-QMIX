@@ -723,12 +723,12 @@ class MASAEnv:
         # ----- Global metrics (K1..K5) -----
         # K1: CompletedNorm
         completed_count = len([j for j in self.jobs if j.finished])
-        CompletedNorm = float(completed_count) / float(max(1, self.max_jobs))
-        # [PHASE3-FIX] Validate bounds for reward components
-        if not (0.0 <= CompletedNorm <= 1.0):
-            raise ValueError(
-                f"[PHASE3] CompletedNorm out of bounds: {CompletedNorm}. "
-                f"completed_count={completed_count}, max_jobs={self.max_jobs}"
+        # Clip to [0,1] since completed_count can exceed max_jobs with dynamic arrivals
+        CompletedNorm = float(np.clip(completed_count / float(max(1, self.max_jobs)), 0.0, 1.0))
+        # Log if out of expected range but don't crash
+        if completed_count > self.max_jobs:
+            logging.getLogger(__name__).debug(
+                f"[PHASE3] CompletedNorm clipped: completed={completed_count} > max_jobs={self.max_jobs}"
             )
 
         # K2: AvgWaitNorm

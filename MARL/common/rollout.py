@@ -940,11 +940,12 @@ class RolloutWorker:
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"[C1] Failed to print epsilon decay message: {e}")
                     try:
+                        import os as os_module
                         history_dir = getattr(self, 'history_dir', None) or getattr(self.env, 'history_dir', None) or './my_data_and_graph/historydata/'
-                        os.makedirs(history_dir, exist_ok=True)
-                        diag_path = os.path.join(history_dir, 'diagnostics_log.txt')
+                        os_module.makedirs(history_dir, exist_ok=True)
+                        diag_path = os_module.path.join(history_dir, 'diagnostics_log.txt')
                         with open(diag_path, 'a', encoding='utf-8') as df:
-                            df.write(msg + '\\n')
+                            df.write(msg + '\n')
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"[C1] Failed to write epsilon decay to diagnostics log: {e}")
             except Exception as e:
