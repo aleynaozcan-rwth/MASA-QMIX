@@ -1213,10 +1213,20 @@ class Runner:
                                         # if third is dict, print per-machine durations and both coarse/eligible operator info
                                         if isinstance(third, dict):
                                             per_machine = third
+                                            # B: Replace WorkCenter-based eligible_operator_groups_by_wc with machine-level operator details
                                             groups_by_machine = []
                                             for m in allowed_machine_indices:
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
+                                                    # Get machine name from index
+                                                    mlist = getattr(self.env.workcenters_meta, 'machine_list', [])
+                                                    mname = mlist[int(m)] if int(m) < len(mlist) else f"M{m}"
+                                                    # Get operators qualified for this machine
+                                                    qualified_ops = []
+                                                    if hasattr(self.env, 'operators') and self.env.operators:
+                                                        for op_obj in self.env.operators.operators_object_list:
+                                                            if mname in op_obj.qualified_machines:
+                                                                qualified_ops.append(str(op_obj.operator_id))
+                                                    eligible = qualified_ops
                                                 except Exception as e:
                                                     eligible = []
                                                 groups_by_machine.append({'machine': int(m), 'eligible_ops': eligible})
@@ -1227,17 +1237,33 @@ class Runner:
                                                 except Exception as e:
                                                     dur_m = 0.0
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
+                                                    # Get machine name and qualified operators
+                                                    mlist = getattr(self.env.workcenters_meta, 'machine_list', [])
+                                                    mname = mlist[int(m)] if int(m) < len(mlist) else f"M{m}"
+                                                    qualified_ops = []
+                                                    if hasattr(self.env, 'operators') and self.env.operators:
+                                                        for op_obj in self.env.operators.operators_object_list:
+                                                            if mname in op_obj.qualified_machines:
+                                                                qualified_ops.append(str(op_obj.operator_id))
+                                                    eligible = qualified_ops
                                                 except Exception as e:
                                                     eligible = []
                                                 hf.write(f"    M{m} -> dur={dur_m:.3f} | eligible_ops={eligible}\n")
                                         else:
                                             # legacy-ish third numeric
                                             base_dur = float(third)
+                                            # B: Replace WorkCenter-based with machine-level operator details
                                             groups_info = []
                                             for m in allowed_machine_indices:
                                                 try:
-                                                    eligible = self.env.workcenters_meta.eligible_operator_groups_by_wc.get(int(m), [])
+                                                    mlist = getattr(self.env.workcenters_meta, 'machine_list', [])
+                                                    mname = mlist[int(m)] if int(m) < len(mlist) else f"M{m}"
+                                                    qualified_ops = []
+                                                    if hasattr(self.env, 'operators') and self.env.operators:
+                                                        for op_obj in self.env.operators.operators_object_list:
+                                                            if mname in op_obj.qualified_machines:
+                                                                qualified_ops.append(str(op_obj.operator_id))
+                                                    eligible = qualified_ops
                                                 except Exception as e:
                                                     eligible = []
                                                 groups_info.append({'machine': int(m), 'eligible_ops': eligible})
@@ -1295,29 +1321,26 @@ class Runner:
             os.makedirs(self.history_dir, exist_ok=True)
             metrics_path = os.path.join(self.history_dir, 'learning_metrics.csv')
 
-            # read last loss / td from loss files if present
+            # Get loss/td from memory (training history) for this episode
+            # This avoids race conditions where files may not be written yet
             last_loss = ''
             last_td = ''
-            try:
-                lpath = os.path.join(self.history_dir, 'loss.txt')
-                if os.path.exists(lpath):
-                    with open(lpath, 'r') as lf:
-                        lines = [ln.strip() for ln in lf.readlines() if ln.strip()]
-                        if lines:
-                            last_loss = lines[-1]
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
-                last_loss = ''
-            try:
-                tpath = os.path.join(self.history_dir, 'td_error.txt')
-                if os.path.exists(tpath):
-                    with open(tpath, 'r') as tf:
-                        lines = [ln.strip() for ln in tf.readlines() if ln.strip()]
-                        if lines:
-                            last_td = lines[-1]
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
-                last_td = ''
+            
+            # Search for the most recent loss/td value for this episode from training history
+            if hasattr(self, '_train_loss_history') and self._train_loss_history:
+                # Find the last entry for this episode (there may be multiple training steps)
+                for stored_ep_idx, loss_val in reversed(self._train_loss_history):
+                    if stored_ep_idx == ep_idx:
+                        if loss_val == loss_val and abs(loss_val) != float('inf'):  # Filter NaN/inf
+                            last_loss = str(loss_val)
+                        break
+            
+            if hasattr(self, '_train_td_history') and self._train_td_history:
+                for stored_ep_idx, td_val in reversed(self._train_td_history):
+                    if stored_ep_idx == ep_idx:
+                        if td_val == td_val and abs(td_val) != float('inf'):  # Filter NaN/inf
+                            last_td = str(td_val)
+                        break
 
             # Build the line we'd like to append.
             new_line = f"{ep_idx},{epoch},{float(ep_r):.4f},{last_loss},{last_td}"
@@ -1380,12 +1403,51 @@ class Runner:
         for epoch in range(self.args.n_epoch):
             sys.stdout.write(f"\rRun {num}, epoch {epoch}, avg rewards {np.mean(avg_rewards):.2f}")
             sys.stdout.flush()
+            
+            # [C1] Print reward components from PREVIOUS epoch if collected
+            try:
+                if 'epoch_reward_components_prev' in locals() and epoch_reward_components_prev and epoch > 0:
+                    component_keys = set()
+                    for comp in epoch_reward_components_prev:
+                        component_keys.update(comp.keys())
+                    if component_keys:
+                        print(f"\n[Reward Components - Epoch {epoch-1}]")
+                        for key in sorted(component_keys):
+                            values = [comp.get(key, 0.0) for comp in epoch_reward_components_prev if key in comp]
+                            if values:
+                                print(f"  {key:20s}: {np.mean(values):8.4f}")
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"[C1] Could not print reward components: {e}")
 
             # --- Epoch-level lightweight diagnostics (epsilon, buffer size) ---
             try:
                 eps = float(getattr(self.rolloutWorker, 'epsilon', getattr(self.args, 'epsilon', None)))
                 buf_len = len(self.buffer) if getattr(self, 'buffer', None) is not None else None
-                print(f"[Diagnostics] Epoch {epoch} start | epsilon={eps} | buffer_len={buf_len}")
+                print(f"[Diagnostics] Epoch {epoch} start | epsilon={eps:.4f} | buffer_len={buf_len}")
+                
+                # [C1] Buffer content statistics (reward distribution)
+                if buf_len and buf_len > 0 and epoch % 10 == 0:  # Every 10 epochs
+                    try:
+                        # Sample rewards from buffer
+                        sample_size = min(100, buf_len)
+                        rewards_sample = []
+                        for _ in range(sample_size):
+                            try:
+                                mb = self.buffer.sample(1, n_actions=self.run_args.n_actions)
+                                if mb and 'r' in mb:
+                                    r_batch = mb['r']
+                                    if isinstance(r_batch, np.ndarray):
+                                        rewards_sample.extend(r_batch.flatten().tolist())
+                            except Exception:
+                                continue
+                        
+                        if rewards_sample:
+                            print(f"  [BUFFER_STATS] reward: min={np.min(rewards_sample):.4f}, "
+                                  f"max={np.max(rewards_sample):.4f}, mean={np.mean(rewards_sample):.4f}, "
+                                  f"std={np.std(rewards_sample):.4f}")
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"[C1] Buffer stats failed: {e}")
+                
                 try:
                     os.makedirs(self.history_dir, exist_ok=True)
                     with open(os.path.join(self.history_dir, 'diagnostics_log.txt'), 'a') as df:
@@ -1404,29 +1466,16 @@ class Runner:
                 with self._episode_rewards_lock:
                     self.episode_rewards.append(ep_reward)
                 print(f"\n[Eval] Epoch {epoch} | Reward={ep_reward:.2f}")
-                # Per-epoch Gantt PNG/CSV generation disabled.
-                # We produce a single, authoritative gantt_last_evolution.png at
-                # the per-evolution summary step to keep artifacts minimal and
-                # readable. This avoids producing intermediate gantt_epoch*.png files.
-                try:
-                    # still keep the combined gantt in memory for downstream use
-                    combined = list(all_gantt_data)
-                    try:
-                        # [PHASE3-FIX] Gantt records ownership: Environment owns gantt_records,
-                        # Runner reads them after episode completion. No modification by Runner.
-                        if hasattr(self.env, 'gantt_records'):
-                            combined.extend(list(self.env.gantt_records))
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"[C1] Exception in runner visualization: {e}")
-
+                
+            # === Training episodes (event-driven SimPy execution) ===
             # collect per-epoch gantt records so we can compute per-evolution metrics
             episodes, avg_rewards = [], []
             epoch_gantt = []
             # Keep the last episode's gantt records (overwrite each episode)
             # so we can plot a clean Gantt for the most recent episode only.
             last_episode_gantt = []
+            # [C1] Collect reward components per episode for epoch-level summary (reset per epoch)
+            epoch_reward_components = []
             # [C1] Before episode metrics - fail-fast if computation fails
             before_wait = float(getattr(self.env, 'total_wait_time', 0.0))
             # Compute finished job count on-demand (canonical)
@@ -1448,6 +1497,14 @@ class Runner:
                 avg_rewards.append(ep_r)
                 episodes.append(episode)
                 global_ep_idx += 1
+                
+                # [C1] Collect reward components from environment after episode
+                try:
+                    if hasattr(self.env, 'last_reward_components'):
+                        components = dict(self.env.last_reward_components)
+                        epoch_reward_components.append(components)
+                except Exception as e:
+                    logging.getLogger(__name__).debug(f"[C1] Could not collect reward components: {e}")
 
                 # [TIME-BASED EPSILON] Log epsilon (decay happens in rollout.py based on simulation time)
                 if not evaluate and global_ep_idx % 20 == 0:
@@ -1564,6 +1621,37 @@ class Runner:
                     logging.getLogger(__name__).warning(f"[C1] Exception while appending scheduling_timeline: {e}")
                     pass
 
+                # === Per-Episode Plot Generation (immediate feedback) ===
+                # Generate plots after each episode so we see learning progress immediately
+                # This complements the epoch-based plots generated during evaluate()
+                try:
+                    if getattr(self, 'allow_history_writes', False):
+                        # Generate reward/loss/TD plots from learning_metrics.csv
+                        import pandas as pd
+                        metrics_csv = os.path.join(self.history_dir, 'learning_metrics.csv')
+                        if os.path.exists(metrics_csv) and os.path.getsize(metrics_csv) > 0:
+                            try:
+                                df = pd.read_csv(metrics_csv)
+                                # Write episode_rewards.txt (always has values)
+                                with open(os.path.join(self.history_dir, 'episode_rewards.txt'), 'w') as f:
+                                    f.write("episode episode_reward\n")
+                                    for _, row in df.iterrows():
+                                        f.write(f"{int(row['episode'])} {row['episode_reward']}\n")
+                                
+                                # DON'T overwrite loss.txt/td_error.txt here - they are written by training loop
+                                # Just generate plots from existing files
+                                
+                                # Generate plots
+                                from my_data_and_graph.plot_metrics import plot_reward_trend, plot_loss_trend, plot_td_error_trend
+                                plot_reward_trend(history_dir=self.history_dir)
+                                plot_loss_trend(history_dir=self.history_dir)
+                                plot_td_error_trend(history_dir=self.history_dir)
+                                print(f"[Runner] Episode {global_ep_idx-1} plots updated: reward, loss, td_error")
+                            except Exception as e:
+                                logging.getLogger(__name__).debug(f"[Runner] Could not generate per-episode plots: {e}")
+                except Exception as e:
+                    logging.getLogger(__name__).debug(f"[Runner] Per-episode plot generation failed: {e}")
+
             # === Training updates (Replay-based) ===
             if self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
                 # configurable warm-up threshold (use args.min_warmup_size if present,
@@ -1583,6 +1671,17 @@ class Runner:
                         train_steps += 1
                         if isinstance(result, dict):
                             loss, td = result.get("loss"), result.get("td_error")
+                            
+                            # Store loss/td for later writing (don't write immediately to avoid conflicts)
+                            if not hasattr(self, '_train_loss_history'):
+                                self._train_loss_history = []
+                                self._train_td_history = []
+                            
+                            if loss is not None:
+                                self._train_loss_history.append((global_ep_idx-1, loss))
+                            if td is not None:
+                                self._train_td_history.append((global_ep_idx-1, td))
+                            
                             if (train_steps % 20 == 0) and (loss is not None):
                                 msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
                                 if td is not None:
@@ -1878,8 +1977,33 @@ class Runner:
                         util_m = 0.0
                         util_o = 0.0
                         makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
-                    with open(os.path.join(self.history_dir, "kpi_log.txt"), "a") as f:
+                    
+                    # Write epoch KPI with header on first write
+                    kpi_path = os.path.join(self.history_dir, "kpi_log.txt")
+                    write_header = not os.path.exists(kpi_path)
+                    with open(kpi_path, "a") as f:
+                        if write_header:
+                            f.write("# epoch,avg_wait_time,machine_util,operator_util,makespan\n")
                         f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+                    
+                    # Write accumulated loss/td history from training
+                    if hasattr(self, '_train_loss_history') and self._train_loss_history:
+                        lpath = os.path.join(self.history_dir, 'loss.txt')
+                        with open(lpath, 'w') as lf:
+                            lf.write("episode last_loss\n")
+                            for ep_idx, loss_val in self._train_loss_history:
+                                # Filter out NaN/inf
+                                if loss_val == loss_val and abs(loss_val) != float('inf'):
+                                    lf.write(f"{ep_idx} {loss_val}\n")
+                    
+                    if hasattr(self, '_train_td_history') and self._train_td_history:
+                        tpath = os.path.join(self.history_dir, 'td_error.txt')
+                        with open(tpath, 'w') as tf:
+                            tf.write("episode last_td\n")
+                            for ep_idx, td_val in self._train_td_history:
+                                # Filter out NaN/inf
+                                if td_val == td_val and abs(td_val) != float('inf'):
+                                    tf.write(f"{ep_idx} {td_val}\n")
             except Exception as e:
                 print(f"[WARN] KPI logging failed: {e}")
 
@@ -1942,6 +2066,28 @@ class Runner:
                         # Ensure avg_epoch_reward is always present (fallback to 0.0)
                         'avg_epoch_reward': float(np.mean(avg_rewards)) if avg_rewards else 0.0,
                     }
+                    
+                    # [C1] Add reward components summary if available
+                    try:
+                        if epoch_reward_components:
+                            # Average each component across episodes
+                            component_keys = set()
+                            for comp in epoch_reward_components:
+                                component_keys.update(comp.keys())
+                            
+                            avg_components = {}
+                            for key in component_keys:
+                                values = [comp.get(key, 0.0) for comp in epoch_reward_components if key in comp]
+                                if values:
+                                    avg_components[key] = float(np.mean(values))
+                            
+                            if avg_components:
+                                epoch_item['reward_components'] = avg_components
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"[C1] Could not average reward components: {e}")
+                    
+                    # [C1] Save current epoch's components for next epoch's print
+                    epoch_reward_components_prev = list(epoch_reward_components) if epoch_reward_components else []
 
                     try:
                         from my_data_and_graph.metrics import append_run_summary
@@ -1999,25 +2145,20 @@ class Runner:
                         utilization_summary_grid(history_dir=self.history_dir, combine_plots=True)
                         # Generate reward/loss/TD-error plots from learning_metrics.csv
                         try:
-                            # First, convert learning_metrics.csv to individual txt files for plotting
+                            # Convert learning_metrics.csv to episode_rewards.txt for plotting
+                            # NOTE: loss.txt and td_error.txt are written at epoch-end from training memory,
+                            # so we DON'T overwrite them here
                             import pandas as pd
                             metrics_csv = os.path.join(self.history_dir, 'learning_metrics.csv')
                             if os.path.exists(metrics_csv):
-                                df = pd.read_csv(metrics_csv, header=None)
-                                df.columns = ['episode', 'epoch', 'reward', 'loss', 'td_error']
-                                # Write episode_rewards.txt
-                                with open(os.path.join(self.history_dir, 'episode_rewards.txt'), 'w') as f:
-                                    for _, row in df.iterrows():
-                                        f.write(f"{row['episode']} {row['reward']}\n")
-                                # Write loss.txt
-                                with open(os.path.join(self.history_dir, 'loss.txt'), 'w') as f:
-                                    for _, row in df.iterrows():
-                                        f.write(f"{row['episode']} {row['loss']}\n")
-                                # Write td_error.txt
-                                with open(os.path.join(self.history_dir, 'td_error.txt'), 'w') as f:
-                                    for _, row in df.iterrows():
-                                        f.write(f"{row['episode']} {row['td_error']}\n")
-                            # Now generate plots
+                                df = pd.read_csv(metrics_csv)
+                                # Write episode_rewards.txt only (loss/td are managed elsewhere)
+                                if 'episode' in df.columns and 'episode_reward' in df.columns:
+                                    with open(os.path.join(self.history_dir, 'episode_rewards.txt'), 'w') as f:
+                                        f.write("episode episode_reward\n")
+                                        for _, row in df.iterrows():
+                                            f.write(f"{int(row['episode'])} {row['episode_reward']}\n")
+                            # Now generate plots (loss/td plots will use epoch-end written files)
                             from my_data_and_graph.plot_metrics import plot_reward_trend, plot_loss_trend, plot_td_error_trend
                             plot_reward_trend(history_dir=self.history_dir)
                             plot_loss_trend(history_dir=self.history_dir)

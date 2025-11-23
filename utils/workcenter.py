@@ -39,8 +39,10 @@ DEFAULT_WORKCENTERS = {
     "work_centers": {"WC1": {"id": 0}, "WC2": {"id": 1}, "WC3": {"id": 2}},
     # Operators are defined separately in utils.operator; keep a mirror here
     "operators": [
-        {"id": "O1", "qualified_machines": ["M1", "M4", "M5"]},
-        {"id": "O2", "qualified_machines": ["M2", "M3", "M5"]},
+        {"id": "O1", "qualified_machines": ["M0", "M3", "M4"]},
+        {"id": "O2", "qualified_machines": ["M1", "M2", "M4"]},
+        {"id": "O3", "qualified_machines": ["M0", "M3", "M4"]},  # Added for reduced bottleneck
+        {"id": "O4", "qualified_machines": ["M1", "M2", "M4"]},  # Added for reduced bottleneck
     ],
 }
 # Optional internal fallback for processing times (machine -> {OpN: mean})
@@ -54,9 +56,7 @@ DEFAULT_PROCESSING_TIMES = {
         "Op1": 1.225,
         "Op2": 1.05,
         "Op3": 1.575,
-        "Op4": 1.575,
         "Op5": 2.275,
-        "Op8": 1.575,
         "Op9": 2.975,
     },
     "M1": {
@@ -67,11 +67,8 @@ DEFAULT_PROCESSING_TIMES = {
     "M2": {
         "Op1": 1.575,
         "Op2": 1.75,
-        "Op3": 1.575,
         "Op4": 1.68,
         "Op6": 2.1,
-        "Op7": 2.10,
-        "Op8": 2.625,
         "Op9": 3.15,
     },
     "M3": {
@@ -166,13 +163,9 @@ class WorkCenters:
         self.machine_order = ["M0", "M1", "M2", "M3", "M4"]
 
         # operator-group eligibility mapping (by WorkCenter index)
-        # default: each WorkCenter has its own operator-group membership list; this
-        # can be overridden by environment.config if provided.
-        self.eligible_operator_groups_by_wc: Dict[int, List[int]] = {
-            0: [0],
-            1: [1],
-            2: [2],
-        }
+        # B: WorkCenter-based eligibility removed - use machine-level operator checks
+        # Legacy attribute kept for backward compatibility (empty dict)
+        self.eligible_operator_groups_by_wc: Dict[int, List[int]] = {}
 
         # Build operation -> machines reverse map for quick lookups. Each
         # operation index maps to the list of machine registry keys that
@@ -227,8 +220,16 @@ class WorkCenters:
             num_ops = 1
         return inst, int(num_wcs), int(num_ops)
     # ------------------------------------------------------------------
-    def create_decision_item(self, env: Any, job: Any, op: Any) -> Dict:
+    def create_decision_item(self, env: Any, job: Any, op: Any, machine_free_status=None) -> Dict:
         """Create a canonical decision_item describing an operation.
+
+        D: Extended with 3-step reasoning logging.
+
+        Args:
+            env: MASAEnv instance
+            job: JobAgent instance
+            op: operation tuple
+            machine_free_status: Optional[List[bool]] - per-machine free status for 3-step reasoning
 
         Returns a dict containing at minimum the keys:
             - job_id
@@ -237,6 +238,9 @@ class WorkCenters:
             - allowed_machine_indices (list of machine indices)
             - per_machine_durations (dict machine_index -> duration)
             - base_duration
+            - machines_can_do (D: Step 1 - capable machines)
+            - machines_free (D: Step 2 - capable + free machines)
+            - operator_details_per_machine (D: Step 3 - per-machine operator status)
 
         Note: this function does NOT create or return a resume Event. The
         environment is responsible for creating a `simpy.Event` and attaching
@@ -279,14 +283,20 @@ class WorkCenters:
         try:
             op_idx_local = int(op_type) if (op_type is not None) else int(getattr(job, 'current_op_idx', 0))
             mlist = list(getattr(self, 'machine_list', []))
-            mindex = getattr(self, 'machine_index', {})
+            
+            # Build machine name -> index mapping (use machine_index if exists, else position in list)
+            mindex = getattr(self, 'machine_index', None)
+            if not mindex:
+                mindex = {mname: i for i, mname in enumerate(mlist)}
+            
             for mname in mlist:
                 try:
                     mreg = self.machine_registry.get(mname, {})
                     caps = mreg.get('capabilities', [])
                     if op_idx_local in caps:
                         allowed_machines.append(mname)
-                        allowed_machine_indices.append(int(mindex.get(mname, len(allowed_machine_indices))))
+                        mi = int(mindex.get(mname, len(allowed_machine_indices)))
+                        allowed_machine_indices.append(mi)
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
@@ -321,27 +331,71 @@ class WorkCenters:
 
         # Build eligible operator-groups mapping keyed by workcenter index for
         # workcenters that own at least one allowed machine.
-        eligible_ops_by_wc = {}
-        try:
-            for m in allowed_machines:
-                try:
-                    wc_idx = int(self.machine_registry.get(m, {}).get('workcenter', 0))
-                    eligible_ops_by_wc[wc_idx] = getattr(self, 'eligible_operator_groups_by_wc', {}).get(int(wc_idx), [])
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
-                    continue
-        except Exception:
-            eligible_ops_by_wc = {}
+        # D: Compute 3-step reasoning data for decision logging
+        
+        # Step 1: MachinesCanDo (machines with capability)
+        machines_can_do = list(allowed_machines)
+        
+        # Step 2: MachinesFree (capable machines that are free)
+        machines_free = []
+        if machine_free_status is not None:
+            mindex = getattr(self, 'machine_index', None)
+            mlist = getattr(self, 'machine_list', [])
+            for mname in machines_can_do:
+                # Get machine index - prefer machine_index dict, fallback to list position
+                if mindex:
+                    mi = int(mindex.get(mname, -1))
+                else:
+                    mi = mlist.index(mname) if mname in mlist else -1
+                if 0 <= mi < len(machine_free_status) and machine_free_status[mi]:
+                    machines_free.append(mname)
+        else:
+            # Fallback: assume all capable machines are free
+            machines_free = list(machines_can_do)
+        
+        # Step 3: Operator details per machine (only for free machines)
+        operator_details_per_machine = {}
+        if hasattr(env, 'operators') and env.operators is not None:
+            for mname in machines_free:
+                wc_idx = int(self.machine_registry.get(mname, {}).get('workcenter', 0))
+                qualified_ops = []
+                free_ops = []
+                busy_ops = []
+                
+                for op_obj in env.operators.operators_object_list:
+                    # Check if operator is qualified for this machine
+                    if mname in op_obj.qualified_machines:
+                        # Check if operator can do this operation type
+                        if op_obj.can_do_job(op_idx_local, wc_idx):
+                            qualified_ops.append(str(op_obj.operator_id))
+                            if not op_obj.is_busy:
+                                free_ops.append(str(op_obj.operator_id))
+                            else:
+                                busy_ops.append(str(op_obj.operator_id))
+                
+                operator_details_per_machine[mname] = {
+                    'qualified': qualified_ops,
+                    'free': free_ops,
+                    'busy': busy_ops
+                }
+
+        # B: eligible_ops_by_wc removed - WorkCenter-based operator groups not used
+        # Decision item now only contains machine-level data
+        eligible_ops_by_wc = {}  # Empty for backward compatibility
 
         decision_item = {
             "job_id": getattr(job, 'id', getattr(job, 'agent_id', None)),
             "obs": env._build_agent_obs(job),
-            "avail_row": env._avail_row_for_job(job),
+            "avail_row": env._avail_row_for_job(job, machine_free=machine_free_status),
             "allowed_machines": list(allowed_machines),
             "allowed_machine_indices": list(dict.fromkeys(allowed_machine_indices)),
             "per_machine_durations": dict(per_machine_durations),
             "base_duration": float(base_duration_val),
             "eligible_ops_by_wc": eligible_ops_by_wc,
+            # D: 3-step reasoning data
+            "machines_can_do": machines_can_do,
+            "machines_free": machines_free,
+            "operator_details_per_machine": operator_details_per_machine,
         }
 
         return decision_item

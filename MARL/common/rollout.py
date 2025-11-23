@@ -335,6 +335,15 @@ class RolloutWorker:
                 # [C1] chosen_idx conversion is CRITICAL - fail-fast if invalid
                 chosen_idx = int(chosen) if chosen is not None else None
                 chosen_name = chosen_machine_name
+                
+                # If chosen_name is None, derive from chosen_idx using machine_list
+                if chosen_name is None and chosen_idx is not None:
+                    try:
+                        mlist = getattr(self.env.workcenters_meta, 'machine_list', []) or []
+                        if 0 <= chosen_idx < len(mlist):
+                            chosen_name = mlist[chosen_idx]
+                    except Exception:
+                        pass
 
                 # [C1] Availability check for reason logging - best-effort (Rule 3)
                 reason = ''
@@ -1082,6 +1091,19 @@ class RolloutWorker:
         # store episode into replay buffer if available
         try:
             if self.buffer is not None and len(ep_transitions) > 0:
+                # [C1] Log observation/state shapes for first episode (diagnostic)
+                if getattr(self, '_shape_logged', False) is False:
+                    try:
+                        first_tr = ep_transitions[0]
+                        obs_shape = first_tr.get('o', np.array([])).shape if 'o' in first_tr else None
+                        state_shape = first_tr.get('s', np.array([])).shape if 's' in first_tr else None
+                        action_shape = first_tr.get('a', np.array([])).shape if 'a' in first_tr else None
+                        avail_shape = first_tr.get('avail_a', np.array([])).shape if 'avail_a' in first_tr else None
+                        print(f"[BUFFER_SHAPES] obs={obs_shape}, state={state_shape}, action={action_shape}, avail={avail_shape}")
+                        self._shape_logged = True
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"[C1] Shape logging failed: {e}")
+                
                 try:
                     self.buffer.store_episode(ep_transitions)
                 except Exception as e:

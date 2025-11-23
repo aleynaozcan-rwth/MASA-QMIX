@@ -17,6 +17,8 @@ Operators now:
 DEFAULT_OPERATORS = [
     {"id": "O1", "qualified_machines": ["M0", "M3", "M4"]},
     {"id": "O2", "qualified_machines": ["M1", "M2", "M4"]},
+    {"id": "O3", "qualified_machines": ["M0", "M3", "M4"]},
+    {"id": "O4", "qualified_machines": ["M1", "M2", "M4"]},
 ]
 import logging
 LOG = logging.getLogger(__name__)
@@ -55,10 +57,27 @@ class Operator:
                 self.resource = simpy.Resource(env, capacity=1)
             except Exception as e:
                 self.resource = None
-        self.is_busy = False
+        self._manual_busy = False  # Fallback when resource unavailable
         self.current_job = None
         self.current_workcenter = None
         self.history = []  # (job_id, workcenter_id, start_t, end_t)
+    
+    @property
+    def is_busy(self):
+        """Check if operator is busy based on SimPy resource state.
+        
+        If resource is available, check if it has active users (busy).
+        Otherwise fall back to manual flag for compatibility.
+        """
+        if self.resource is not None:
+            # SimPy resource is busy if it has users (someone holds a request)
+            return len(self.resource.users) > 0
+        return self._manual_busy
+    
+    @is_busy.setter
+    def is_busy(self, value):
+        """Set manual busy flag (used when resource unavailable)."""
+        self._manual_busy = bool(value)
 
     # ============================================================
     # === Capability check =======================================

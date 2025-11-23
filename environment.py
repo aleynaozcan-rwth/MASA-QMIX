@@ -401,6 +401,7 @@ class MASAEnv:
 
         self.t = 0.0
         self.total_wait_time = 0.0
+        self.wait_time_dict = {}  # job_id -> cumulative wait time
         self._completed_now_cache = 0
         self.done = False
 
@@ -587,6 +588,7 @@ class MASAEnv:
         # legacy `completed_jobs` removed; compute finished counts from jobs when needed
         # TODO: requires test adaptation
         self.total_wait_time = 0.0
+        self.wait_time_dict = {}  # job_id -> cumulative wait time
         self._completed_now_cache = 0
         # Note: internal recent_rewards removed - use metrics APIs for reward history
         self.done = False
@@ -1016,15 +1018,20 @@ class MASAEnv:
             # op_type when provided, else fall back to job.current_op_idx.
             op_idx_local = int(op_type) if op_type is not None else int(getattr(job, 'current_op_idx', 0))
             # C1 FIX Rule 2: Removed exception swallowing - decision_item creation must succeed
+            # D: Compute machine_free status for 3-step reasoning
+            machine_free_status = self._compute_machine_free_status()
+            
             # create decision item — prefer workcenters_meta helper if present
             if hasattr(self.workcenters_meta, 'create_decision_item'):
-                decision_item = self.workcenters_meta.create_decision_item(self, job, op)
+                decision_item = self.workcenters_meta.create_decision_item(
+                    self, job, op, machine_free_status=machine_free_status
+                )
             else:
                 # Fallback to manual creation (this is expected behavior, not an error)
                 decision_item = {
                     'job_id': job.id,
                     'obs': self._build_agent_obs(job),
-                    'avail_row': self._avail_row_for_job(job),
+                    'avail_row': self._avail_row_for_job(job, machine_free=machine_free_status),
                     'allowed_machine_indices': allowed_machine_indices,
                     'per_machine_durations': {},
                 }
@@ -1352,14 +1359,8 @@ class MASAEnv:
                 # fallback: treat chosen_idx as workcenter id
                 wc_idx = int(chosen_idx)
 
-            eligible_groups = self.workcenters_meta.eligible_operator_groups_by_wc.get(int(wc_idx), []) or []
-            if eligible_groups:
-                # Deterministic pick (no env auto-choice)
-                selected_grp = int(list(eligible_groups)[0])
-            else:
-                selected_grp = None
-
-            # C7 FIX: Deterministic operator selection using seeded random
+            # B: WorkCenter-based eligibility removed - use machine-level operator selection only
+            # Machine-based operator selection (seeded random)
             available_operator = None
             if self.operators is not None:
                 # Try machine-specific operator first (seeded random)
@@ -1430,6 +1431,10 @@ class MASAEnv:
                     if wait_dur > 0:
                         job.wait_time += wait_dur
                         self.total_wait_time += wait_dur
+                        # Track per-job wait time
+                        job_id = int(getattr(job, 'id', getattr(job, 'job_id', -1)))
+                        if job_id >= 0:
+                            self.wait_time_dict[job_id] = self.wait_time_dict.get(job_id, 0.0) + wait_dur
                     op_start = float(self.env.now)
                     job.remaining_time = dur
                     # assign and mark busy via Operator.assign_job()
@@ -1516,6 +1521,15 @@ class MASAEnv:
         return build_agent_obs(self, job, job_index=job_index)
 
     def _build_avail_actions(self):
+        """Build availability matrix for all jobs and machines.
+        
+        STEP E FIX: Pass machine_free to _avail_row_for_job to enable correct
+        check ordering (capable → machine_free → operator) and remove redundant
+        operator checks in this function.
+        
+        Returns:
+            np.array of shape (n_jobs, n_machines) with 1 for eligible, 0 otherwise
+        """
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
         n_m = len(mlist) if mlist else int(self.num_wcs)
         avail = np.zeros((len(self.jobs), n_m), dtype=np.int32)
@@ -1537,65 +1551,47 @@ class MASAEnv:
             if len(tmp) == n_m:
                 machine_free = tmp
             else:
-                machine_free = [True] * n_m
+                LOG.warning(
+                    "[NO_MACHINE_RESOURCES] Cannot determine machine_free status (got %d, expected %d). "
+                    "Marking all as BUSY for safety.", len(tmp), n_m
+                )
+                machine_free = [False] * n_m  # Conservative: all busy if can't validate
 
-        # Compute operator free flags if operator_groups are present
-        operator_free = None
-        if getattr(self, 'operator_groups', None) is not None and int(getattr(self, 'num_ops', 0)) > 0:
-            operator_free = [self._resource_free(self.operator_groups[p]) for p in range(int(self.num_ops))]
-
-        # For each job, only mark a machine as available if:
-        #  - the machine supports the job's current op (row==1), AND
-        #  - the machine resource is free, AND
-        #  - there exists at least one operator group qualified for the
-        #    machine whose resource is free.
-        registry = self.workcenters_meta.machine_registry or {}
-        eligible_map = self.workcenters_meta.eligible_operator_groups_by_wc or {}
-
+        # STEP E FIX: Pass machine_free to _avail_row_for_job so it can skip
+        # expensive operator checks for busy machines. The row returned already
+        # incorporates all three checks (capable, machine_free, operator_free),
+        # so we just trust it directly without redundant checks.
         for idx, j in enumerate(self.jobs):
             if j.finished:
                 continue
-            row = self._avail_row_for_job(j)
+            row = self._avail_row_for_job(j, machine_free=machine_free)
             if row is None:
                 continue
             
-            # Start all zeros; set to 1 only when all checks pass
+            # Trust row from _avail_row_for_job (already checked: capable, machine_free, operator)
+            # Double-check machine_free defensively (should already be incorporated in row)
             for m in range(n_m):
-                if int(row[m]) != 1:
-                    continue
-
-                # Check machine-level free
-                if not machine_free[m]:
-                    continue
-
-                # Find eligible operator groups for this machine via its workcenter
-                mname = mlist[m] if m < len(mlist) else None
-                wc_i = int(registry.get(mname, {}).get('workcenter')) if mname is not None else None
-                eligible_groups = eligible_map.get(int(wc_i), []) if wc_i is not None else []
-
-                # If operator info missing, assume operator available (back-compat)
-                if operator_free is None:
+                if int(row[m]) == 1 and machine_free[m]:
                     avail[idx, m] = 1
-                    continue
-
-                # If eligible_groups is empty, be permissive (back-compat)
-                if not eligible_groups:
-                    avail[idx, m] = 1
-                    continue
-
-                # Otherwise, require at least one eligible operator group to be free
-                found_free_op = False
-                for g in eligible_groups:
-                    gi = int(g)
-                    if 0 <= gi < len(operator_free) and operator_free[gi]:
-                        found_free_op = True
-                        break
-
-                if found_free_op:
-                    avail[idx, m] = 1
+        
         return avail
 
-    def _avail_row_for_job(self, job: JobAgent):
+    def _avail_row_for_job(self, job: JobAgent, machine_free=None):
+        """Check which machines can execute this job's current operation.
+        
+        STEP E FIX: Correct check order for performance:
+        1. capable (machine can do this operation type)
+        2. machine_free (machine resource is available)
+        3. operator_free (exists free qualified operator for this machine)
+        
+        Args:
+            job: JobAgent to check eligibility for
+            machine_free: Optional list[bool] of machine free status. If provided,
+                         skips expensive operator checks for busy machines.
+        
+        Returns:
+            np.array of shape (n_machines,) with 1 for eligible, 0 otherwise
+        """
         mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
         n_m = len(mlist) if mlist else int(self.num_wcs)
         row = np.zeros((int(n_m),), dtype=np.int32)
@@ -1614,43 +1610,73 @@ class MASAEnv:
         registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
         mlist_local = list(getattr(self.workcenters_meta, 'machine_list', []) or [])
         for i, mname in enumerate(mlist_local):
+            # STEP 1: Check capability (machine can do this operation type)
             caps = registry.get(mname, {}).get('capabilities', [])
-            if int(op_idx_local) in caps:
-                # Machine can do this operation - now check if any FREE qualified operator exists
-                # Get workcenter for this machine
-                wc_idx = registry.get(mname, {}).get('workcenter', None)
-                has_free_qualified_operator = False
+            if int(op_idx_local) not in caps:
+                continue  # Not capable, skip to next machine
+            
+            # STEP 2: Check machine free (CHEAP CHECK - do before expensive operator loop)
+            if machine_free is not None and not machine_free[i]:
+                continue  # Machine busy, skip expensive operator check
+            
+            # STEP 3: Check operator (EXPENSIVE CHECK - only for free machines)
+            wc_idx = registry.get(mname, {}).get('workcenter', None)
+            has_free_qualified_operator = False
+            
+            if self.operators is not None and wc_idx is not None:
+                # Check all operators: must be qualified for THIS MACHINE and FREE
+                for op_obj in self.operators.operators_object_list:
+                    # Operator must be qualified for this specific machine
+                    if mname in op_obj.qualified_machines:
+                        # Operator must be able to do this operation type
+                        if op_obj.can_do_job(op_idx_local, wc_idx):
+                            # Operator must be FREE (not busy)
+                            if not op_obj.is_busy:
+                                has_free_qualified_operator = True
+                                break
                 
-                if self.operators is not None and wc_idx is not None:
-                    # Check all operators: must be qualified for THIS MACHINE and FREE
-                    for op_obj in self.operators.operators_object_list:
-                        # Operator must be qualified for this specific machine
-                        if mname in op_obj.qualified_machines:
-                            # Operator must be able to do this operation type
-                            if op_obj.can_do_job(op_idx_local, wc_idx):
-                                # Operator must be FREE (not busy)
-                                if not op_obj.is_busy:
-                                    has_free_qualified_operator = True
-                                    break
-                    
-                    # Only mark machine as available if free qualified operator exists
-                    if has_free_qualified_operator:
-                        row[i] = 1
-                else:
-                    # No operator system or workcenter info - fall back to marking available
+                # Only mark machine as available if free qualified operator exists
+                if has_free_qualified_operator:
                     row[i] = 1
-
-        # If no machines marked (e.g., no registry), fall back to legacy allowed_machine_indices
-        if not row.any():
-            if isinstance(op, (list, tuple)) and len(op) == 2:
-                allowed_machine_indices, _ = op
             else:
-                _, allowed_machine_indices, _ = op
-            for idx in allowed_machine_indices:
-                if 0 <= int(idx) < row.shape[0]:
-                    row[int(idx)] = 1
+                # No operator system or workcenter info - cannot validate operator eligibility
+                LOG.warning(
+                    "[NO_OPERATOR_SYSTEM] Cannot validate operator eligibility for machine=%s op_idx=%s. "
+                    "Marking machine as UNAVAILABLE for safety.",
+                    mname, op_idx_local
+                )
+                row[i] = 0  # Conservative: unavailable if can't validate
+
+        # All-zero mask is expected when all qualified operators/machines are busy
+        # This is a normal system state (resource contention), not an error
+        if not row.any():
+            LOG.debug(
+                "[RESOURCE_CONTENTION] No available machine-operator pairs for job=%s op_idx=%s at t=%.2f. "
+                "All qualified resources currently busy. Job will wait and agent receives wait penalty.",
+                getattr(job, 'id', '?'), op_idx_local, float(getattr(self, 'env', self).now)
+            )
 
         return row
+
+    def _compute_machine_free_status(self):
+        """Return boolean list of machine free status (True = free, False = busy).
+        
+        D: Helper for 3-step reasoning - computes machine availability at decision time.
+        """
+        mlist = getattr(self.workcenters_meta, 'machine_list', []) or []
+        n_m = len(mlist)
+        machine_free = [True] * n_m
+        
+        if getattr(self, 'machine_resources', None):
+            machine_free = [self._resource_free(self.machine_resources[m]) for m in range(n_m)]
+        else:
+            # Fallback: use machine_registry -> workcenter -> wc_resources
+            registry = getattr(self.workcenters_meta, 'machine_registry', {}) or {}
+            for i, mname in enumerate(mlist):
+                wc_i = int(registry.get(mname, {}).get('workcenter', 0))
+                machine_free[i] = self._resource_free(self.wc_resources[wc_i])
+        
+        return machine_free
 
     # ---------------- Helpers -----------------
     def _resource_free(self, res):

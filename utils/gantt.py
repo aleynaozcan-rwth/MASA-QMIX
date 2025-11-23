@@ -284,22 +284,23 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
                 jid = int(getattr(job, 'id', getattr(job, 'job_id', -1)))
                 ops = getattr(job, 'operations', []) or []
                 op_names = []
-                eligible = {}
                 for i, op in enumerate(ops):
                     try:
                         if isinstance(op, (list, tuple)) and len(op) >= 2:
                             op_type = int(op[0]) if isinstance(op[0], (int, float)) else None
-                            allowed_machine_indices = list(op[1])
                         else:
                             op_type = None
-                            allowed_machine_indices = []
                     except Exception as e:
                         op_type = None
-                        allowed_machine_indices = []
-                    opname = f"Op{(op_type + 1) if op_type is not None else i+1}"
+                    
+                    if op_type is None:
+                        op_type = i
+                    
+                    opname = f"Op{op_type + 1}"
                     op_names.append(opname)
-                    eligible[opname] = list(allowed_machine_indices)
-                lines.append(f"Job_{jid} → {len(ops)} ops: [{', '.join(op_names)}] | Eligible: {{{', '.join([f'{k}:{v}' for k,v in eligible.items()])}}}")
+                
+                # Just show job ops without capability details (shown when operation actually starts)
+                lines.append(f"Job_{jid} → {len(ops)} ops: [{', '.join(op_names)}]")
             except Exception as e:
                 lines.append(str(job))
 
@@ -321,8 +322,10 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
 
     # Map machine indices to names when possible
     mlist = getattr(getattr(env, 'workcenters_meta', None), 'machine_list', []) or []
+    machine_registry = getattr(getattr(env, 'workcenters_meta', None), 'machine_registry', {}) or {}
 
-    # Build a mapping of job -> op_name -> eligible machine indices (from job definitions)
+    # Build a mapping of job -> op_name -> capable machine NAMES (not WC IDs)
+    # This uses machine_registry capabilities to get actual capable machines
     jobs_allowed = {}
     for j in jobs:
         try:
@@ -332,13 +335,22 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
             for idx, op in enumerate(ops):
                 try:
                     if isinstance(op, (list, tuple)) and len(op) >= 2:
-                        allowed_machine_indices = list(op[1])
+                        op_type = int(op[0]) if isinstance(op[0], (int, float)) else idx
                     else:
-                        allowed_machine_indices = []
+                        op_type = idx
                 except Exception as e:
-                    allowed_machine_indices = []
-                opname = f"Op{(int(op[0]) + 1) if isinstance(op, (list, tuple)) and isinstance(op[0], (int, float)) else idx+1}"
-                amap[opname] = list(allowed_machine_indices)
+                    op_type = idx
+                
+                opname = f"Op{op_type + 1}"
+                
+                # Find machines that can do this operation type (from capabilities)
+                capable_machines = []
+                for mname, mdata in machine_registry.items():
+                    caps = mdata.get('capabilities', [])
+                    if op_type in caps:
+                        capable_machines.append(mname)
+                
+                amap[opname] = list(capable_machines)
             jobs_allowed[jid] = amap
         except Exception as e:
             logging.getLogger(__name__).warning(f"[C1] Exception in gantt: {e}")
@@ -385,12 +397,11 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
         except Exception as e:
             machine_name = str(wc_idx)
 
-        # Prepare eligible machine names if available
+        # Prepare capable machine names from jobs_allowed (now contains machine names, not indices)
         try:
-            eligible_idxs = jobs_allowed.get(int(job_id), {}).get(op_name, [])
-            eligible_names = [mlist[i] if mlist and 0 <= int(i) < len(mlist) else f"M{int(i)}" for i in eligible_idxs]
+            capable_machines = jobs_allowed.get(int(job_id), {}).get(op_name, [])
+            eligible_names = list(capable_machines)  # Already machine names like ['M0', 'M2', 'M3', 'M4']
         except Exception as e:
-            eligible_idxs = []
             eligible_names = []
 
         # start event (priority 1) — include operator id (op_grp), eligible machines
@@ -403,7 +414,7 @@ def generate_scheduling_timeline(env, episode_id=None, episode_reward=None, writ
         except Exception as e:
             op_label = 'UNASSIGNED'
 
-        start_text = f"[t={start:.2f}] Job_{int(job_id)}.{op_name} started on {machine_name} by {op_label} (duration={float(dur) if dur is not None else (end - start):.2f}) | eligible={eligible_names}"
+        start_text = f"[t={start:.2f}] Job_{int(job_id)}.{op_name} started on {machine_name} by {op_label} (duration={float(dur) if dur is not None else (end - start):.2f}) | capable_machines={eligible_names}"
 
 
         # If the record contains a decision_trace created at decision time,

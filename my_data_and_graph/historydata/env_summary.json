@@ -1,5 +1,5 @@
 {
-  "episode_limit": 500,
+  "episode_limit": 400,
   "initial_jobs_created": 4,
   "initial_jobs_requested": 4,
   "job_max_ops": 4,

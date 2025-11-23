@@ -119,10 +119,24 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=500)
+    parser.add_argument('--episode_limit', type=int, default=400,
+                        help='Max SimPy time steps per episode (default 400 for longer scheduling episodes)')
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
                         help='Number of jobs created at the start of the simulation (default 4)')
+    
+    # [STOCHASTIC_ARRIVAL] Lottery-based job arrival system (DEFAULT)
+    parser.add_argument('--use_lottery_arrival', action='store_true', default=True,
+                        help='Use lottery-based arrival (check intervals + discrete choices). This is the default system')
+    parser.add_argument('--use_exponential_arrival', action='store_true', default=False,
+                        help='Use legacy exponential arrival instead of lottery (not recommended for realistic scenarios)')
+    parser.add_argument('--arrival_check_interval', type=float, default=20.0,
+                        help='Time steps between lottery draws for next job arrival')
+    parser.add_argument('--arrival_lottery_choices', type=str, default='0,4,8,12,16',
+                        help='Comma-separated delays (in steps) for next job arrival lottery')
+    parser.add_argument('--arrival_lottery_probs', type=str, default='0.1,0.3,0.3,0.2,0.1',
+                        help='Comma-separated probabilities for lottery choices (must sum to 1.0)')
+    
     # Training loop sizes (production defaults, CLI overrideable)
     parser.add_argument('--n_epoch', type=int, default=400,
                         help='Number of training epochs (default 400 for stable QMIX learning)')
@@ -144,7 +158,7 @@ def get_mutable_args():
     # Reduced defaults so warm-up completes faster but training stays stable
     parser.add_argument('--buffer_size', type=int, default=2500)   # was 3000
     parser.add_argument('--batch_size', type=int, default=32)      # was 32
-    parser.add_argument('--train_steps', type=int, default=30)     # was 10
+    parser.add_argument('--train_steps', type=int, default=50)     # increased for better convergence
     parser.add_argument('--min_warmup_size', type=int, default=800)  # new: minimum samples before strict warm-up
     parser.add_argument('--target_update_cycle', type=int, default=20)  # ✅ frequent sync
     parser.add_argument('--grad_norm_clip', type=float, default=10.0)
@@ -161,8 +175,8 @@ def get_mutable_args():
                         help='Initial epsilon value for exploration (SimPy-time-based decay)')
     parser.add_argument('--epsilon_end', type=float, default=0.05,
                         help='Final epsilon value for exploration (SimPy-time-based decay)')
-    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.15,
-                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.15 = first 15%). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
+    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.3,
+                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.3 = first 30% - BALANCED decay). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,

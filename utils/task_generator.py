@@ -174,10 +174,22 @@ class TaskGenerator:
         if arrival_lambda is None or float(arrival_lambda) <= 0.0:
             return
         lam = float(arrival_lambda)
+        
+        # [STOCHASTIC_ARRIVAL] Lottery-based arrival is DEFAULT
+        use_exponential = bool(getattr(self, 'use_exponential_arrival', False))
+        use_lottery = not use_exponential  # Lottery unless explicitly disabled
+        check_interval = float(getattr(self, 'arrival_check_interval', 20.0))
+        lottery_choices = list(getattr(self, 'arrival_lottery_choices', [0, 4, 8, 12, 16]))
+        lottery_probs = list(getattr(self, 'arrival_lottery_probs', [0.1, 0.3, 0.3, 0.2, 0.1]))
+        
         # Diagnostic: report proc_time_means size so we know whether
         # TaskGenerator has a durations mapping available at runtime.
         try:
             logging.getLogger(__name__).info("[Diag] proc_time_means length: %d", len(getattr(self, 'proc_time_means', {}) or {}))
+            if use_lottery:
+                logging.getLogger(__name__).info("[Diag] Lottery arrival (DEFAULT): check_interval=%.1f, choices=%s", check_interval, lottery_choices)
+            else:
+                logging.getLogger(__name__).info("[Diag] Legacy exponential arrival enabled (use --use_exponential_arrival)")
         except Exception as e:
             logging.getLogger(__name__).info("[Diag] proc_time_means length: (failed to compute)")
         # Allow env to be either a bare simpy.Environment or a MASAEnv wrapper.
@@ -210,13 +222,31 @@ class TaskGenerator:
             return default
 
         while float(_get_attr('now', 0.0)) < float(_get_attr('episode_limit', float('inf'))) and not bool(_get_attr('done', False)):
-            try:
-                # Use the internal Python RNG for exponential inter-arrival
-                ia = float(self._py_rng.expovariate(lam))
-            except Exception as e:
-                ia = float(1.0 / max(1e-12, lam))
-            # yield on the simulation environment (simpy.Environment)
-            yield sim_env.timeout(ia)
+            if not use_exponential:
+                # [LOTTERY_ARRIVAL - DEFAULT] Check at fixed intervals, draw from discrete distribution
+                yield sim_env.timeout(check_interval)
+                # Check if episode ended during check interval
+                if bool(_get_attr('done', False)):
+                    break
+                # Draw next job delay from lottery
+                try:
+                    delay = float(self._py_rng.choices(lottery_choices, weights=lottery_probs, k=1)[0])
+                except Exception as e:
+                    delay = float(lottery_choices[0]) if lottery_choices else 0.0
+                
+                if delay > 0:
+                    yield sim_env.timeout(delay)
+                    # Check again after delay
+                    if bool(_get_attr('done', False)):
+                        break
+                # If delay=0, job arrives immediately (no additional timeout)
+            else:
+                # Classic exponential inter-arrival
+                try:
+                    ia = float(self._py_rng.expovariate(lam))
+                except Exception as e:
+                    ia = float(1.0 / max(1e-12, lam))
+                yield sim_env.timeout(ia)
 
             try:
                 ops_objs = self.generate_constrained_task(jobagent_id=len(getattr(env, 'jobs', [])))
@@ -231,79 +261,60 @@ class TaskGenerator:
 
             converted_ops = []
             capability_map = {op: [] for op in range(0, 32)}
+            machine_to_wc = {}  # Track machine -> workcenter mapping
             try:
                 for mid, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
                     wc = int(mdata.get('workcenter', 0))
+                    machine_to_wc[mid] = wc
                     caps = list(mdata.get('capabilities', []))
+                    # Map operation -> MACHINE NAMES (not WorkCenter IDs)
                     for c in caps:
-                        capability_map.setdefault(int(c), []).append(int(wc))
+                        capability_map.setdefault(int(c), []).append(mid)
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
             for jobobj in ops_objs:
                 op_type = int(getattr(jobobj, 'index_id', 0))
                 op_name = f"Op{op_type+1}"
-                # Resolve allowed machines (machine indices) from capability_map
-                allowed_machine_indices = list(sorted(set(capability_map.get(op_type, []))))
-                if not allowed_machine_indices:
-                    raise ValueError(f"No allowed workcenters for operation {op_name}; check machine capabilities")
-                # Convert allowed workcenters -> allowed_machine_indices and build per-machine durations
+                # capability_map now stores MACHINE NAMES that can do this operation
+                allowed_machines = list(sorted(set(capability_map.get(op_type, []))))
+                if not allowed_machines:
+                    raise ValueError(f"No capable machines for operation {op_name}; check machine capabilities")
+
+                # Build per_machine_indices and per_wc for each capable machine
                 per_machine_indices = []
                 per_wc = {}
-                # For each allowed WC, resolve a machine name and lookup the
-                # processing_time_means entry for that machine. Missing entries
-                # are errors in strict mode.
-                for wc in allowed_machine_indices:
-                    # try to find a machine name that belongs to this workcenter
-                    machine_name = None
+                
+                # Get machine_index mapping
+                wc_meta = getattr(env, 'workcenters_meta', None)
+                machine_list = []
+                if wc_meta is not None:
                     try:
-                        # find first machine in registry with matching workcenter
-                        for mname, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
-                            if int(mdata.get('workcenter', -1)) == int(wc):
-                                machine_name = mname
-                                break
-                    except Exception as e:
-                        machine_name = None
+                        machine_list = list(getattr(wc_meta, 'machine_list', []))
+                    except Exception:
+                        machine_list = []
+                
+                # Build machine name -> index mapping
+                machine_index_map = {}
+                if machine_list:
+                    machine_index_map = {mname: i for i, mname in enumerate(machine_list)}
 
-                    if not machine_name:
-                        raise ValueError(f"No machine found for workcenter {wc} when resolving durations for {op_name}")
+                # Get processing times
+                op_map = self.proc_time_means.get(op_name, {})
 
-                    # Prefer processing_time_means provided by the runtime env when
-                    # available (MASAEnv will inject its merged config into
-                    # env.config). Only fall back to the TaskGenerator's own
-                    # proc_time_means (module-level DEFAULT_PROCESSING_TIMES
-                    # transposed) when the env does not supply the mapping.
-                    try:
-                        env_proc = getattr(env, 'config', None) or {}
-                        if isinstance(env_proc, dict):
-                            op_map = env_proc.get(op_name, {}) or {}
-                        else:
-                            op_map = {}
-                    except Exception as e:
-                        op_map = {}
-                    if not op_map:
-                        op_map = self.proc_time_means.get(op_name, {})
-                    # Strict mode: processing_time_means must contain an entry
-                    # for the exact canonical machine name. We do not accept
-                    # legacy or derived fallback keys here.
-                    if machine_name in op_map:
-                        # map machine name -> machine index when emitting per-machine durations
-                        try:
-                            mi = int(getattr(getattr(self, '_owner_env', None), 'workcenters_meta', None).machine_index.get(machine_name)) if getattr(self, '_owner_env', None) is not None else None
-                        except Exception as e:
-                            try:
-                                # fallback: derive index from machines_cfg ordering
-                                mi = int(self.machine_name_by_wc.get(int(wc), 0))
-                            except Exception as e:
-                                mi = None
-                        if mi is None:
-                            # best-effort: do not fail here, attempt to use 0
-                            mi = 0
-                        per_machine_indices.append(int(mi))
-                        per_wc[int(mi)] = float(op_map.get(machine_name))
-                    else:
-                        # Strict behaviour: only YAML-provided mappings allowed.
-                        raise ValueError(f"Missing duration for {op_name} on {machine_name} (workcenter {wc})")
+                for machine_name in allowed_machines:
+                    # Check if duration exists for this machine
+                    if machine_name not in op_map:
+                        raise ValueError(
+                            f"Missing duration for {op_name} on {machine_name}. "
+                            f"Machine {machine_name} is capable (in capabilities list) but no processing time defined. "
+                            f"Check DEFAULT_PROCESSING_TIMES consistency."
+                        )
+
+                    # Get machine index
+                    mi = machine_index_map.get(machine_name, 0)
+                    per_machine_indices.append(int(mi))
+                    per_wc[int(mi)] = float(op_map.get(machine_name))
 
                 converted_ops.append((op_type, per_machine_indices, per_wc))
 
@@ -356,33 +367,31 @@ class TaskGenerator:
 
         # Convert ops_objs into (op_type, allowed_machine_indices, per_machine) tuples
         converted_ops = []
-        # Build capability_map: operation index -> list of WORKCENTER ids that support it
-        # (mirror arrival_loop behavior). This yields per-op eligible workcenters
-        # which we will later resolve to concrete machine names/indices for
-        # duration lookup.
+        # Build capability_map: operation index -> list of MACHINE NAMES that support it
+        # MACHINE-BASED (not WorkCenter-based) - WorkCenter is metadata only
         capability_map = {op: [] for op in range(0, 32)}
+        machine_to_wc = {}  # Track machine -> workcenter mapping for metadata
         try:
             machine_registry = getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {})
             for mname, mdata in machine_registry.items():
                 wc = int(mdata.get('workcenter', 0))
+                machine_to_wc[mname] = wc
                 caps = list(mdata.get('capabilities', []))
+                # Map operation -> machines that CAN DO this operation
                 for c in caps:
-                    capability_map.setdefault(int(c), []).append(int(wc))
+                    capability_map.setdefault(int(c), []).append(mname)
         except Exception as e:
             logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         for jobobj in ops_objs:
             op_type = int(getattr(jobobj, 'index_id', 0))
             op_name = f"Op{op_type+1}"
-            # capability_map stores workcenter ids -> these are the allowed
-            # workcenters for this operation as seen from the registry.
-            allowed_wcs = list(sorted(set(capability_map.get(op_type, []))))
-            if not allowed_wcs:
-                raise ValueError(f"No allowed workcenters for operation {op_name}; check machine capabilities")
+            # capability_map now stores MACHINE NAMES that can do this operation
+            allowed_machines = list(sorted(set(capability_map.get(op_type, []))))
+            if not allowed_machines:
+                raise ValueError(f"No capable machines for operation {op_name}; check machine capabilities")
 
-            # For each allowed workcenter, determine a concrete machine name
-            # (first match in registry), then map that machine name to its
-            # machine index and lookup duration from proc_time_means.
+            # For each capable machine, lookup duration from proc_time_means
             per_machine_indices = []
             per_wc = {}
             op_map = self.proc_time_means.get(op_name, {})
@@ -395,26 +404,24 @@ class TaskGenerator:
             except Exception as e:
                 machine_index_map = {}
 
-            for wc in allowed_wcs:
-                # find a machine name that belongs to this workcenter
-                machine_name = None
-                try:
-                    for mname, mdata in getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {}).items():
-                        if int(mdata.get('workcenter', -1)) == int(wc):
-                            machine_name = mname
-                            break
-                except Exception as e:
-                    machine_name = None
+            # Extract WorkCenter IDs from capable machines (for backward compat)
+            allowed_wcs = list(sorted(set(machine_to_wc.get(m, 0) for m in allowed_machines)))
 
-                if not machine_name:
-                    raise ValueError(f"No machine found for workcenter {wc} when resolving durations for {op_name}")
-
+            for machine_name in allowed_machines:
+                # Check if duration exists for this machine
                 if machine_name not in op_map:
-                    raise ValueError(f"Missing duration for {op_name} on {machine_name}")
+                    raise ValueError(
+                        f"Missing duration for {op_name} on {machine_name}. "
+                        f"Machine {machine_name} is capable (in capabilities list) but no processing time defined. "
+                        f"Check DEFAULT_PROCESSING_TIMES consistency."
+                    )
+
 
                 try:
                     mi = int(machine_index_map.get(machine_name))
                 except Exception as e:
+                    # Fallback: try to get machine index from WorkCenter
+                    wc = machine_to_wc.get(machine_name, 0)
                     try:
                         mi = int(self.machine_name_by_wc.get(int(wc), 0))
                     except Exception as e:
