@@ -1997,6 +1997,33 @@ class Runner:
                         plot_per_operator_utilization(history_dir=self.history_dir)
                         # combined grid (includes makespan & reward)
                         utilization_summary_grid(history_dir=self.history_dir, combine_plots=True)
+                        # Generate reward/loss/TD-error plots from learning_metrics.csv
+                        try:
+                            # First, convert learning_metrics.csv to individual txt files for plotting
+                            import pandas as pd
+                            metrics_csv = os.path.join(self.history_dir, 'learning_metrics.csv')
+                            if os.path.exists(metrics_csv):
+                                df = pd.read_csv(metrics_csv, header=None)
+                                df.columns = ['episode', 'epoch', 'reward', 'loss', 'td_error']
+                                # Write episode_rewards.txt
+                                with open(os.path.join(self.history_dir, 'episode_rewards.txt'), 'w') as f:
+                                    for _, row in df.iterrows():
+                                        f.write(f"{row['episode']} {row['reward']}\n")
+                                # Write loss.txt
+                                with open(os.path.join(self.history_dir, 'loss.txt'), 'w') as f:
+                                    for _, row in df.iterrows():
+                                        f.write(f"{row['episode']} {row['loss']}\n")
+                                # Write td_error.txt
+                                with open(os.path.join(self.history_dir, 'td_error.txt'), 'w') as f:
+                                    for _, row in df.iterrows():
+                                        f.write(f"{row['episode']} {row['td_error']}\n")
+                            # Now generate plots
+                            from my_data_and_graph.plot_metrics import plot_reward_trend, plot_loss_trend, plot_td_error_trend
+                            plot_reward_trend(history_dir=self.history_dir)
+                            plot_loss_trend(history_dir=self.history_dir)
+                            plot_td_error_trend(history_dir=self.history_dir)
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"[Runner] Could not generate reward/loss plots: {e}")
                         # Generate a clean machine/job-level Gantt for the last
                         # episode of this evolution. This is a compact, readable
                         # job-focused Gantt that avoids accumulation across

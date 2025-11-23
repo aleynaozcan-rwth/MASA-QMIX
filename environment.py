@@ -21,9 +21,10 @@ authoritative surface for the rest of the code while we iteratively move
 full runtime behavior into this module.
 """
 import logging
+import math
 import random
 import time
-from collections import deque
+from collections import deque, Counter
 from typing import Optional, Any, Dict, List
 from dataclasses import dataclass, asdict, field
 
@@ -48,6 +49,51 @@ class DecisionTrace:
     policy_reason: str
     at_time: float
     eligibilities: List[EligibilityEntry]
+
+
+class RunningMeanStd:
+    """
+    Welford's online algorithm for incremental mean/variance computation.
+    
+    Numerically stable, O(1) memory, O(1) per-update time complexity.
+    Adaptive to any reward scale changes without hyperparameter tuning.
+    
+    References:
+    - Welford (1962) "Note on a method for calculating corrected sums of squares"
+    - Knuth TAOCP Vol 2, 3rd Ed., Sec 4.2.2
+    """
+    def __init__(self, epsilon=1e-4):
+        """
+        Args:
+            epsilon: Small value to initialize count (prevents division by zero)
+        """
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = epsilon
+    
+    def update(self, x):
+        """Update running statistics with new value x."""
+        self.count += 1
+        delta = x - self.mean
+        self.mean += delta / self.count
+        delta2 = x - self.mean
+        self.var += (delta * delta2 - self.var) / self.count
+    
+    def normalize(self, x, clip_range=10.0):
+        """
+        Normalize value x using current mean/std, clipped to [-clip_range, +clip_range].
+        
+        Args:
+            x: Value to normalize
+            clip_range: Clipping range (default: 10.0 for [-10, +10])
+            
+        Returns:
+            Normalized and clipped value
+        """
+        std = (self.var ** 0.5) if self.var > 0 else 1.0
+        normalized = (x - self.mean) / (std + 1e-8)
+        return max(-clip_range, min(clip_range, normalized))
+
 
 import numpy as np
 import simpy
@@ -194,6 +240,15 @@ class MASAEnv:
         self.lambda_o = args.reward_lambda_o
 
         self.log_reward_components = getattr(args, "reward_log_components", False)
+        
+        # [ADAPTIVE-FIX-2] GLOBAL reward normalizer (never reset per episode)
+        # CRITICAL: QMIX requires globally consistent reward scaling because:
+        # - Replay buffer samples mixed episodes
+        # - TD learning requires stable Q_total gradients
+        # - Mixer network assumes consistent reward scale
+        # Episodic normalizers break this assumption and cause training instability.
+        # References: PyMARL, PyMARL2, SMAC official implementations
+        self.reward_normalizer = RunningMeanStd()
 
         self.job_min_ops = int(_resolve(('job_min_ops',), int, default=1))
         self.job_max_ops = int(_resolve(('job_max_ops',), int, default=5))
@@ -536,6 +591,14 @@ class MASAEnv:
         # Note: internal recent_rewards removed - use metrics APIs for reward history
         self.done = False
         
+        # [ADAPTIVE-FIX-3] Entropy tracking for load balance (sliding window)
+        # NOTE: These ARE reset per episode (local history for entropy calculation)
+        self.recent_machine_choices = deque(maxlen=30)
+        self.recent_operator_choices = deque(maxlen=30)
+        
+        # NOTE: self.reward_normalizer is NOT reset here - it's global!
+        # See __init__ for one-time initialization.
+        
         # Reset global state counters
         self.total_jobs_arrived = 0
         self.total_ops_arrived = 0
@@ -763,52 +826,49 @@ class MASAEnv:
         else:
             throughput_delta = 0.0
 
-        # K5: LoadVariance (weighted machine/operator variance)
-        util = self._compute_utilization_summary()
-        # [PHASE6-FIX] Task 6.2: Handle None return from mid-episode utilization call
-        if util is None:
-            # Mid-episode: utilization not available, use zero variance
-            var_machine = 0.0
-            var_operator = 0.0
-        else:
-            # A5: Fail-fast validation - util must be dict with required keys
-            if not isinstance(util, dict):
-                raise RuntimeError(
-                    f"_compute_utilization_summary returned {type(util).__name__}, expected dict or None"
-                )
-            if 'per_machine_utilization' not in util or 'per_operator_utilization' not in util:
-                raise RuntimeError(
-                    f"_compute_utilization_summary missing required keys. "
-                    f"Got keys: {list(util.keys())}, expected: per_machine_utilization, per_operator_utilization"
-                )
-            per_machine = list(util.get('per_machine_utilization', {}).values()) if isinstance(util.get('per_machine_utilization', {}), dict) else list(util.get('per_machine_utilization', []))
-            per_operator = list(util.get('per_operator_utilization', {}).values()) if isinstance(util.get('per_operator_utilization', {}), dict) else list(util.get('per_operator_utilization', []))
-            var_machine = float(np.var(per_machine)) if per_machine else 0.0
-            var_operator = float(np.var(list(per_operator))) if per_operator else 0.0
-            # [PHASE3-FIX] Validate variance components are finite
-            if not np.isfinite(var_machine) or not np.isfinite(var_operator):
-                raise ValueError(
-                    f"[PHASE3] Non-finite variance: var_machine={var_machine}, var_operator={var_operator}. "
-                    f"per_machine={per_machine}, per_operator={per_operator}"
-                )
+        # [ADAPTIVE-FIX-3] K5: LoadBalance (entropy-based, works mid-episode)
+        # Use sliding window of recent choices (30 decisions ≈ 3 episodes)
+        # Entropy measures uniformity: higher entropy = more balanced load distribution
+        
+        # Calculate entropy for machines
+        balance_m = 0.0
+        if hasattr(self, 'recent_machine_choices') and len(self.recent_machine_choices) > 0:
+            machine_counts = Counter(self.recent_machine_choices)
+            total_m = len(self.recent_machine_choices)
+            entropy_m = -sum((count/total_m) * math.log(count/total_m + 1e-10) for count in machine_counts.values())
+            max_entropy_m = math.log(len(machine_counts)) if len(machine_counts) > 1 else 1.0
+            balance_m = entropy_m / max_entropy_m if max_entropy_m > 0 else 0.0
+        
+        # Calculate entropy for operators
+        balance_o = 0.0
+        if hasattr(self, 'recent_operator_choices') and len(self.recent_operator_choices) > 0:
+            operator_counts = Counter(self.recent_operator_choices)
+            total_o = len(self.recent_operator_choices)
+            entropy_o = -sum((count/total_o) * math.log(count/total_o + 1e-10) for count in operator_counts.values())
+            max_entropy_o = math.log(len(operator_counts)) if len(operator_counts) > 1 else 1.0
+            balance_o = entropy_o / max_entropy_o if max_entropy_o > 0 else 0.0
+        
+        # Combine: average normalized entropy [0, 1]
+        # Higher value = better load distribution
         lambda_m = float(getattr(self, 'lambda_m', 0.8))
         lambda_o = float(getattr(self, 'lambda_o', 0.2))
-        load_variance = float((lambda_m * var_machine) + (lambda_o * var_operator))
+        load_balance_score = float((lambda_m * balance_m) + (lambda_o * balance_o))
 
         # Compute R_global per spec
+        # [ADAPTIVE-FIX-3] LoadBalance is now a positive reward (higher entropy = better)
         R_global = (
             (float(getattr(self, 'reward_w1', 1.0)) * float(CompletedNorm))
             - (float(getattr(self, 'reward_w2', 0.6)) * float(AvgWaitNorm))
             - (float(getattr(self, 'reward_w3', 0.3)) * float(WIPNorm))
             + (float(getattr(self, 'reward_w4', 0.8)) * float(throughput_delta))
-            - (float(getattr(self, 'reward_w5', 0.4)) * float(load_variance))
+            + (float(getattr(self, 'reward_w5', 0.4)) * float(load_balance_score))
         )
         # Quick Win C10: Validate R_global is finite
         if not np.isfinite(R_global):
             raise RuntimeError(
                 f"Invalid R_global computed: {R_global}. "
                 f"Components: CompletedNorm={CompletedNorm}, AvgWaitNorm={AvgWaitNorm}, "
-                f"WIPNorm={WIPNorm}, throughput_delta={throughput_delta}, load_variance={load_variance}"
+                f"WIPNorm={WIPNorm}, throughput_delta={throughput_delta}, load_balance_score={load_balance_score}"
             )
 
         # ----- Local rewards (per-decision) -----
@@ -879,7 +939,7 @@ class MASAEnv:
             'AvgWaitNorm': float(AvgWaitNorm),
             'WIPNorm': float(WIPNorm),
             'ThroughputDelta': float(throughput_delta),
-            'LoadVariance': float(load_variance),
+            'LoadBalanceScore': float(load_balance_score),  # CHANGED: variance → balance
             'R_global': float(R_global),
             'R_local_mean': float(R_local_mean),
             'R_total': float(R_total),
@@ -889,29 +949,19 @@ class MASAEnv:
         if bool(getattr(self, 'log_reward_components', False)):
             LOG.debug('[REWARD COMPONENTS] %s', self.last_reward_components)
 
-        # Append components to CSV when logging is enabled
-        enable_logs = False
-        if hasattr(self, 'args') and self.args is not None:
-            enable_logs = bool(getattr(self.args, 'enable_logs', False))
-        else:
-            enable_logs = bool(getattr(self, 'enable_logs', False))
-
-        if enable_logs:
-            import os
-            hist_dir = None
-            if hasattr(self, 'args') and self.args is not None:
-                hist_dir = getattr(self.args, 'history_dir', None)
-            if not hist_dir:
-                hist_dir = getattr(self, 'history_dir', None)
-            if not hist_dir:
-                hist_dir = os.path.join('my_data_and_graph', 'historydata')
-            os.makedirs(hist_dir, exist_ok=True)
-            out_path = os.path.join(hist_dir, 'reward_components_log.txt')
-            with open(out_path, 'a', encoding='utf-8') as fh:
-                env_time = float(self.env.now)
-                fh.write(f"{env_time},{CompletedNorm},{AvgWaitNorm},{WIPNorm},{throughput_delta},{load_variance},{R_global}\n")
-
-        return float(R_total)
+        # [ADAPTIVE-FIX-2] Apply reward normalization if enabled
+        # CRITICAL: Normalize AFTER mixing R_local and R_global
+        # Why this order?
+        # 1. R_local and R_global have compatible scales (both use normalized components)
+        # 2. α*R_global + (1-α)*R_local preserves semantic meaning
+        # 3. Final normalization ensures Q-learning stability
+        # Wrong order (normalize before mixing): would destroy relative magnitudes
+        # IMPORTANT: Normalize BEFORE updating statistics (use current mean/std)
+        # This ensures we normalize with the statistics computed from PREVIOUS observations
+        normalized_reward = self.reward_normalizer.normalize(R_total, clip_range=10.0)
+        # Then update statistics for NEXT normalization
+        self.reward_normalizer.update(R_total)
+        return float(normalized_reward)
 
     # ---------------- SimPy job process (simple, robust) ----------------
     def _job_process(self, job: JobAgent):
@@ -1236,6 +1286,25 @@ class MASAEnv:
                 'job_completed': job_completed,
                 'wait_time_norm': wait_time_norm
             })
+            
+            # [ADAPTIVE-FIX-3] Track machine/operator choices for entropy calculation
+            if hasattr(self, 'recent_machine_choices'):
+                self.recent_machine_choices.append(chosen_m_name)
+            
+            # Operator tracking with validation
+            if hasattr(self, 'recent_operator_choices'):
+                # Try multiple sources for operator label
+                op_label = None
+                if 'chosen_op_label' in locals():
+                    op_label = chosen_op_label
+                elif isinstance(avail_row, dict) and 'operator' in avail_row:
+                    op_label = avail_row['operator']
+                elif hasattr(self, 'last_operator_assigned'):
+                    op_label = self.last_operator_assigned
+                
+                # Only append if valid label found
+                if op_label is not None and op_label != '':
+                    self.recent_operator_choices.append(op_label)
 
             # [C1] Acquire machine resource - fail-fast if indexing fails
             # [PHASE5-FIX] Task 5.1: Validate machine_resources exists and is not empty
@@ -1433,7 +1502,7 @@ class MASAEnv:
     def _build_all_agent_obs(self):
         # Strict delegation to utils.env_obs.build_agent_obs. Missing helper
         # will raise ImportError at module import time so errors are explicit.
-        return [build_agent_obs(self, j) for j in self.jobs]
+        return [build_agent_obs(self, j, job_index=idx) for idx, j in enumerate(self.jobs)]
 
     def _build_agent_obs(self, job: JobAgent):
         # Strict delegation to canonical helper. Let exceptions propagate for

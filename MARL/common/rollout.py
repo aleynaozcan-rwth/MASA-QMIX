@@ -91,9 +91,21 @@ class RolloutWorker:
         # [C1] Step counter and diagnostics - configuration must be valid (fail-fast)
         self.step_counter = int(getattr(self.args, 'start_step_counter', 0) or 0)
         self.epsilon_log_every = int(getattr(self.args, 'epsilon_diagnostics_every', 50) or 50)
+        
+        # [ADAPTIVE-FIX-1] SimPy-time-based epsilon decay (training-wide, continuous)
+        self.cumulative_sim_time = 0.0  # Total SimPy time across ALL episodes
+        self.last_env_now = 0.0  # Last observed env.env.now (for delta calculation)
+        
+        # Precompute total training time and epsilon annealing horizon
+        n_epochs = int(getattr(self.args, 'n_epochs', 400))
+        n_episodes = int(getattr(self.args, 'n_episodes', 4))
+        self.total_training_time = n_epochs * n_episodes * self.episode_limit
+        epsilon_anneal_fraction = float(getattr(self.args, 'epsilon_anneal_fraction', 0.15))
+        self.epsilon_anneal_time = self.total_training_time * epsilon_anneal_fraction
 
         # log
         print(f"[RolloutWorker] init | episode_limit={self.episode_limit} | device={self.device}")
+        print(f"[ADAPTIVE-FIX-1] Epsilon will anneal over {self.epsilon_anneal_time:.0f} SimPy time units (first {epsilon_anneal_fraction*100:.0f}% of training)")
 
     # -------------------------
     # Legacy step-based rollout
@@ -829,6 +841,11 @@ class RolloutWorker:
             # some reset signatures may return only obs
             obs_init = self.env.reset()
             info = {}
+        
+        # [ADAPTIVE-FIX-1] Reset last_env_now for new episode (SimPy time resets to 0)
+        if not evaluate:
+            self.last_env_now = 0.0
+        # CRITICAL: Do NOT reset self.cumulative_sim_time here!
 
         # Stamp the env with the current episode index so environment-level
         # appenders can record which episode a gantt record belongs to.
@@ -894,12 +911,20 @@ class RolloutWorker:
                 logging.getLogger(__name__).warning(f"[C1] Exception in rollout batch processing: {e}")
                 actions = []
 
-            # [TIME-BASED EPSILON DECAY] Update epsilon based on simulation time
+            # [ADAPTIVE-FIX-1] Track cumulative SimPy time across ALL episodes (training-wide)
             if not evaluate:
-                current_t = float(self.env.env.now)
-                limit_t = float(self.episode_limit)
-                fraction = min(1.0, current_t / limit_t)
-                self.epsilon = self.epsilon_start - fraction * (self.epsilon_start - self.epsilon_end)
+                # Calculate delta since last step (SimPy time may jump by process durations)
+                current_env_now = float(self.env.env.now)
+                delta_t = max(0.0, current_env_now - self.last_env_now)
+                self.cumulative_sim_time += delta_t
+                self.last_env_now = current_env_now
+                
+                # Update epsilon based on cumulative training-wide SimPy time
+                if self.epsilon_anneal_time > 0:
+                    decay_fraction = min(1.0, self.cumulative_sim_time / self.epsilon_anneal_time)
+                else:
+                    decay_fraction = 1.0
+                self.epsilon = self.epsilon_start - decay_fraction * (self.epsilon_start - self.epsilon_end)
 
             # Filter actions for real agents only - apply only to non-padded agents
             real_batch = [item for item in batch if item.get('agent_mask', 1) == 1]

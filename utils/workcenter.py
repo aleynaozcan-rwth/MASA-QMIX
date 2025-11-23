@@ -291,22 +291,14 @@ class WorkCenters:
                     logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
                     continue
 
-            # extract processing_time_means from env.config if present and
-            # require explicit durations in strict mode
-            if getattr(env, 'config', None):
-                try:
-                    proc_means = env.config.get('processing_time_means', {})
-                    op_name = f"Op{op_idx_local+1}"
-                    op_means = proc_means.get(op_name, {}) if isinstance(proc_means, dict) else {}
-                    for m in allowed_machines:
-                        mi = int(mindex.get(m, 0))
-                        if m in op_means:
-                            per_machine_durations[mi] = float(op_means.get(m))
-                        else:
-                            raise ValueError(f"Missing duration for {op_name} on machine {m} (workcenter {mi}) - add to processing_time_means")
-                except Exception:
-                    raise
-        except Exception:
+            # Use DEFAULT_PROCESSING_TIMES directly - no config dependency
+            op_name = f"Op{op_idx_local+1}"
+            for m in allowed_machines:
+                mi = int(mindex.get(m, 0))
+                if m in DEFAULT_PROCESSING_TIMES and op_name in DEFAULT_PROCESSING_TIMES[m]:
+                    per_machine_durations[mi] = float(DEFAULT_PROCESSING_TIMES[m][op_name])
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[create_decision_item] Failed to populate per_machine_durations: {e}")
             allowed_machines = []
             allowed_machine_indices = []
             per_machine_durations = {}

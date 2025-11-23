@@ -66,7 +66,7 @@ def get_mutable_args():
     parser.add_argument('--result_dir', type=str, default='./result')
     parser.add_argument('--load_model', type=bool, default=False)
     parser.add_argument('--learn', type=bool, default=True)
-    parser.add_argument('--cuda', type=bool, default=False)
+    parser.add_argument('--cuda', type=bool, default=False)  # CPU for faster queue
 
     # ============================================================
     # === MASA-QMIX environment parameters =======================
@@ -158,9 +158,11 @@ def get_mutable_args():
     # === Exploration (epsilon schedule) =========================
     # ============================================================
     parser.add_argument('--epsilon_start', type=float, default=1.0,
-                        help='Initial epsilon value. Epsilon decays linearly with simulation time based on: epsilon(t) = epsilon_start - (t / episode_limit) * (epsilon_start - epsilon_end)')
+                        help='Initial epsilon value for exploration (SimPy-time-based decay)')
     parser.add_argument('--epsilon_end', type=float, default=0.05,
-                        help='Final epsilon value. Epsilon decays linearly with simulation time based on: epsilon(t) = epsilon_start - (t / episode_limit) * (epsilon_start - epsilon_end)')
+                        help='Final epsilon value for exploration (SimPy-time-based decay)')
+    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.15,
+                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.15 = first 15%). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,
@@ -169,6 +171,8 @@ def get_mutable_args():
     # ============================================================
     # === Logging / visualization ================================
     # ============================================================
+    parser.add_argument('--normalize_rewards', type=lambda x: str(x).lower() == 'true', default=True,
+                        help='Apply running mean/std normalization to rewards (Welford algorithm). Adaptive to reward scale changes.')
     parser.add_argument('--enable_logs', type=bool, default=True)
     parser.add_argument('--quiet_env', action='store_true', default=False,
                         help='Suppress verbose environment debug prints (wait_for_decisions, etc.)')

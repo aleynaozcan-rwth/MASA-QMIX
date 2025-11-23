@@ -173,11 +173,11 @@ class ReplayBuffer:
                 # Observations
                 if "o" in tr:
                     arr_o = _as_agents_obs(tr["o"], ensure_shape=(n_agents, obs_dim))
-                    if __debug__:
-                        try:
-                            print(f"[DEBUG shapes] o target={(n_agents, obs_dim)} src={arr_o.shape} (b={b},t={t})")
-                        except Exception:
-                            print(f"[DEBUG shapes] o src={getattr(arr_o, 'shape', None)} (b={b},t={t})")
+                    # if __debug__:
+                    #     try:
+                    #         print(f"[DEBUG shapes] o target={(n_agents, obs_dim)} src={arr_o.shape} (b={b},t={t})")
+                    #     except Exception:
+                    #         print(f"[DEBUG shapes] o src={getattr(arr_o, 'shape', None)} (b={b},t={t})")
                     # [PHASE1-FIX] Strict shape validation - fail if mismatch
                     if strict_validation and arr_o.shape != (n_agents, obs_dim):
                         raise ValueError(
@@ -189,11 +189,11 @@ class ReplayBuffer:
                     o[b, t] = arr_o
                 if "o_next" in tr:
                     arr_on = _as_agents_obs(tr["o_next"], ensure_shape=(n_agents, obs_dim))
-                    if __debug__:
-                        try:
-                            print(f"[DEBUG shapes] o_next target={(n_agents, obs_dim)} src={arr_on.shape} (b={b},t={t})")
-                        except Exception:
-                            print(f"[DEBUG shapes] o_next src={getattr(arr_on, 'shape', None)} (b={b},t={t})")
+                    # if __debug__:
+                    #     try:
+                    #         print(f"[DEBUG shapes] o_next target={(n_agents, obs_dim)} src={arr_on.shape} (b={b},t={t})")
+                    #     except Exception:
+                    #         print(f"[DEBUG shapes] o_next src={getattr(arr_on, 'shape', None)} (b={b},t={t})")
                     if strict_validation and arr_on.shape != (n_agents, obs_dim):
                         raise ValueError(
                             f"[PHASE1] o_next shape mismatch at (b={b}, t={t}): "
@@ -227,11 +227,11 @@ class ReplayBuffer:
                     mask = _as_agents_mask(tr["avail_a"], n_agents)
                     # mask shape: (n_agents, current_len)
                     curr_len = mask.shape[1]
-                    if __debug__:
-                        try:
-                            print(f"[DEBUG shapes] avail_a target=(B={B},T={T},n_agents={n_agents},max_avail={max_avail_len}) src={mask.shape} (b={b},t={t})")
-                        except Exception:
-                            print(f"[DEBUG shapes] avail_a src={getattr(mask,'shape',None)} (b={b},t={t})")
+                    # if __debug__:
+                    #     try:
+                    #         print(f"[DEBUG shapes] avail_a target=(B={B},T={T},n_agents={n_agents},max_avail={max_avail_len}) src={mask.shape} (b={b},t={t})")
+                    #     except Exception:
+                    #         print(f"[DEBUG shapes] avail_a src={getattr(mask,'shape',None)} (b={b},t={t})")
                     if avail_u is None:
                         # allocate conservative buffer if not pre-allocated
                         avail_u = np.zeros((B, T, n_agents, curr_len), dtype=np.float32)

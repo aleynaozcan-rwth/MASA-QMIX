@@ -1,11 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=masa_qmix_7b2
+#SBATCH --job-name=masa_cpu
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
 #SBATCH --time=03:00:00
-#SBATCH --partition=c23g
-#SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+#SBATCH --partition=c23m
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
 
 set -euo pipefail
