@@ -747,12 +747,146 @@ def plot_reward_components(history_dir: str = 'my_data_and_graph/historydata') -
         plt.close()
 
 
+def plot_epsilon_decay(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Plot epsilon decay over training steps with exploration/exploitation phases.
+    
+    Reads epsilon values from debug_output.txt ([EPSILON_DECAY] and [Diagnostics] lines)
+    and creates a comprehensive plot showing:
+    - Epsilon decay curve
+    - Phase transitions (exploration → exploitation)
+    - Key milestones (epsilon thresholds)
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    out_path = os.path.join(plots_dir, 'epsilon_decay.png')
+    
+    debug_file = os.path.join(history_dir, 'debug_output.txt')
+    if not os.path.exists(debug_file):
+        warnings.warn(f'[plot_epsilon_decay] Missing {debug_file}; skipping plot')
+        return
+    
+    try:
+        import re
+        
+        # Parse epsilon values from debug_output.txt
+        epsilon_data = []
+        
+        with open(debug_file, 'r') as f:
+            for line in f:
+                # Match [EPSILON_DECAY] step=X, epsilon=Y
+                match = re.search(r'\[EPSILON_DECAY\] step=(\d+), epsilon=([\d.]+)', line)
+                if match:
+                    step = int(match.group(1))
+                    eps = float(match.group(2))
+                    epsilon_data.append((step, eps))
+                    continue
+                
+                # Match [Diagnostics] Epoch X start | epsilon=Y
+                match = re.search(r'Epoch (\d+) start \| epsilon=([\d.]+)', line)
+                if match:
+                    epoch = int(match.group(1))
+                    eps = float(match.group(2))
+                    # Approximate step from epoch (assuming ~50 steps/epoch)
+                    step = epoch * 50
+                    epsilon_data.append((step, eps))
+        
+        if not epsilon_data:
+            warnings.warn('[plot_epsilon_decay] No epsilon data found')
+            return
+        
+        # Convert to arrays
+        epsilon_data = sorted(set(epsilon_data))  # Remove duplicates
+        steps = np.array([x[0] for x in epsilon_data])
+        epsilons = np.array([x[1] for x in epsilon_data])
+        
+        # Create plot
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Main epsilon curve
+        ax.plot(steps, epsilons, linewidth=2, color='#2E86AB', label='Epsilon')
+        ax.fill_between(steps, epsilons, alpha=0.3, color='#2E86AB')
+        
+        # Phase annotations
+        # High exploration: epsilon > 0.5
+        # Medium exploration: 0.2 < epsilon <= 0.5
+        # Low exploration: 0.05 < epsilon <= 0.2
+        # Exploitation: epsilon = 0.05
+        
+        high_exp = epsilons > 0.5
+        if high_exp.any():
+            ax.axhspan(0.5, 1.0, alpha=0.1, color='red', label='High Exploration (ε>0.5)')
+        
+        med_exp = (epsilons > 0.2) & (epsilons <= 0.5)
+        if med_exp.any():
+            ax.axhspan(0.2, 0.5, alpha=0.1, color='orange', label='Medium Exploration (0.2<ε≤0.5)')
+        
+        low_exp = (epsilons > 0.05) & (epsilons <= 0.2)
+        if low_exp.any():
+            ax.axhspan(0.05, 0.2, alpha=0.1, color='yellow', label='Low Exploration (0.05<ε≤0.2)')
+        
+        # Mark epsilon=0.05 (exploitation phase)
+        ax.axhline(y=0.05, color='green', linestyle='--', linewidth=2, 
+                   label='Min Epsilon (0.05) - Exploitation')
+        
+        # Find when epsilon reaches 0.05
+        exploitation_start = steps[epsilons <= 0.051].min() if (epsilons <= 0.051).any() else None
+        if exploitation_start is not None:
+            ax.axvline(x=exploitation_start, color='green', linestyle=':', alpha=0.5)
+            ax.text(exploitation_start, 0.5, f'  Exploitation\n  starts ~step {exploitation_start}',
+                   rotation=0, va='center', ha='left', fontsize=9,
+                   bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.7))
+        
+        # Mark key milestones
+        milestones = [0.9, 0.5, 0.2, 0.1]
+        for milestone in milestones:
+            milestone_steps = steps[(epsilons >= milestone - 0.01) & (epsilons <= milestone + 0.01)]
+            if len(milestone_steps) > 0:
+                step_at_milestone = milestone_steps[0]
+                ax.plot(step_at_milestone, milestone, 'ro', markersize=8, alpha=0.6)
+                ax.annotate(f'ε≈{milestone:.1f}\nstep {step_at_milestone}',
+                           xy=(step_at_milestone, milestone),
+                           xytext=(10, 10), textcoords='offset points',
+                           fontsize=8, alpha=0.7,
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.5),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+        
+        ax.set_xlabel('Training Step', fontsize=12)
+        ax.set_ylabel('Epsilon (ε)', fontsize=12)
+        ax.set_title('Epsilon Decay: Exploration → Exploitation Transition', fontsize=14, fontweight='bold')
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(loc='upper right', fontsize=9)
+        ax.set_ylim(-0.05, 1.05)
+        
+        # Add statistics box
+        final_eps = epsilons[-1]
+        initial_eps = epsilons[0]
+        stats_text = f"""Training Stats:
+Initial ε: {initial_eps:.4f}
+Final ε: {final_eps:.4f}
+Total steps: {steps[-1]}
+Decay rate: {(initial_eps - final_eps) / steps[-1] * 1000:.6f} per 1k steps"""
+        
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+               fontsize=9, verticalalignment='top', fontfamily='monospace',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f'[plot_epsilon_decay] Saved {out_path}')
+        
+    except Exception as e:
+        warnings.warn(f'[plot_epsilon_decay] Error: {e}')
+        import traceback
+        traceback.print_exc()
+
+
 # Convenience function to run all plots
 def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> None:
     plot_reward_trend(history_dir)
     plot_loss_trend(history_dir)
     plot_td_error_trend(history_dir)
     plot_q_value_trend(history_dir)  # New Q-value plot!
+    plot_epsilon_decay(history_dir)  # New epsilon decay plot!
     plot_kpi_summary(history_dir)
     # reward components plot (optional)
     try:
