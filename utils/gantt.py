@@ -81,19 +81,31 @@ def write_scheduling_trace(path: str, records: Iterable[Record]) -> None:
     out_lines = ["start,end,op_idx,op_name,wc,job_id,operator_grp,arrival,duration"]
     for r in records:
         try:
-            if not isinstance(r, (list, tuple)):
-                continue
-            if len(r) >= 8:
-                start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
-            elif len(r) == 6:
-                start, end, op_idx, wc, job_id, op_grp = r
-                arrival = ''
-                duration = ''
-            elif len(r) == 5:
-                start, end, op_idx, wc, job_id = r
-                op_grp = ''
-                arrival = ''
-                duration = ''
+            # Handle dict records (from environment.py gantt_records)
+            if isinstance(r, dict):
+                start = r.get('start', '')
+                end = r.get('end', '')
+                op_idx = r.get('op_idx', '')
+                wc = r.get('wc_idx', r.get('wc', ''))
+                job_id = r.get('job_id', '')
+                op_grp = r.get('op_grp', '')
+                arrival = r.get('arrival', '')
+                duration = r.get('duration', '')
+            # Handle tuple/list records (legacy format)
+            elif isinstance(r, (list, tuple)):
+                if len(r) >= 8:
+                    start, end, op_idx, wc, job_id, op_grp, arrival, duration = r[:8]
+                elif len(r) == 6:
+                    start, end, op_idx, wc, job_id, op_grp = r
+                    arrival = ''
+                    duration = ''
+                elif len(r) == 5:
+                    start, end, op_idx, wc, job_id = r
+                    op_grp = ''
+                    arrival = ''
+                    duration = ''
+                else:
+                    continue
             else:
                 continue
             try:
@@ -123,19 +135,31 @@ def write_job_timeline(path: str, records: Iterable[Record]) -> None:
         jobs_map = {}
         for rec in records:
             try:
-                if not isinstance(rec, (list, tuple)):
-                    continue
-                if len(rec) >= 8:
-                    s, e, op_idx, wc, job_id, op_grp, arrival, duration = rec[:8]
-                elif len(rec) == 6:
-                    s, e, op_idx, wc, job_id, op_grp = rec
-                    arrival = None
-                    duration = None
-                elif len(rec) == 5:
-                    s, e, op_idx, wc, job_id = rec
-                    op_grp = None
-                    arrival = None
-                    duration = None
+                # Handle dict records (from environment.py gantt_records)
+                if isinstance(rec, dict):
+                    s = rec.get('start', 0)
+                    e = rec.get('end', 0)
+                    op_idx = rec.get('op_idx', 0)
+                    wc = rec.get('wc_idx', rec.get('wc', 0))
+                    job_id = rec.get('job_id', 0)
+                    op_grp = rec.get('op_grp', None)
+                    arrival = rec.get('arrival', None)
+                    duration = rec.get('duration', None)
+                # Handle tuple/list records (legacy format)
+                elif isinstance(rec, (list, tuple)):
+                    if len(rec) >= 8:
+                        s, e, op_idx, wc, job_id, op_grp, arrival, duration = rec[:8]
+                    elif len(rec) == 6:
+                        s, e, op_idx, wc, job_id, op_grp = rec
+                        arrival = None
+                        duration = None
+                    elif len(rec) == 5:
+                        s, e, op_idx, wc, job_id = rec
+                        op_grp = None
+                        arrival = None
+                        duration = None
+                    else:
+                        continue
                 else:
                     continue
                 jid = int(job_id)

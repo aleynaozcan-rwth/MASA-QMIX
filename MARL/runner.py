@@ -1979,12 +1979,16 @@ class Runner:
                         makespan = getattr(self.env, "t", getattr(self.env, "env", None) and getattr(self.env, "env").now or 0.0)
                     
                     # Write epoch KPI with header on first write
-                    kpi_path = os.path.join(self.history_dir, "kpi_log.txt")
-                    write_header = not os.path.exists(kpi_path)
-                    with open(kpi_path, "a") as f:
-                        if write_header:
-                            f.write("# epoch,avg_wait_time,machine_util,operator_util,makespan\n")
-                        f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+                    # [v4-FIX] Make KPI logging more robust with try-except
+                    try:
+                        kpi_path = os.path.join(self.history_dir, "kpi_log.txt")
+                        write_header = not os.path.exists(kpi_path)
+                        with open(kpi_path, "a") as f:
+                            if write_header:
+                                f.write("# epoch,avg_wait_time,machine_util,operator_util,makespan\n")
+                            f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"[v4] KPI log write failed: {e}")
                     
                     # Write accumulated loss/td history from training
                     if hasattr(self, '_train_loss_history') and self._train_loss_history:

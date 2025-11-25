@@ -64,9 +64,9 @@ def get_mutable_args():
     parser.add_argument('--evaluate_epoch', type=int, default=5)
     parser.add_argument('--model_dir', type=str, default='./MARL/model')
     parser.add_argument('--result_dir', type=str, default='./result')
-    parser.add_argument('--load_model', type=bool, default=False)
-    parser.add_argument('--learn', type=bool, default=True)
-    parser.add_argument('--cuda', type=bool, default=False)  # CPU for faster queue
+    parser.add_argument('--load_model', action='store_true', default=False)
+    parser.add_argument('--learn', action='store_true', default=True)
+    parser.add_argument('--cuda', action='store_true', default=False)  # CPU for faster queue (use --cuda to enable GPU)
 
     # ============================================================
     # === MASA-QMIX environment parameters =======================

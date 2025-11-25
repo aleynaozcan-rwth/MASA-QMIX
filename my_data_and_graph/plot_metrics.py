@@ -75,48 +75,76 @@ def _read_series_file(path: str) -> Optional[pd.Series]:
 
 
 def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
-    """Plot reward trend from reward_log.txt and save reward_trend.png.
-
-    Expects a simple log file ./history_dir/reward_log.txt containing numeric
-    reward values (one per line) or two-column timestamp/value pairs.
+    """Plot episode reward trend aligned with training steps.
+    
+    Shows episode rewards over training steps (like Q-value plot) for better
+    correlation analysis. Includes moving average for trend visualization.
     """
     plots_dir = _ensure_plots_dir(history_dir)
-    src = os.path.join(history_dir, 'episode_rewards.txt')
-    ser = _read_series_file(src)
     out_path = os.path.join(plots_dir, 'reward_trend.png')
-
-    if ser is None:
-        warnings.warn(f'[plot_reward_trend] Missing or unreadable {src}; skipping plot')
+    
+    # Read learning metrics CSV
+    metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
+    if not os.path.exists(metrics_path):
+        warnings.warn(f'[plot_reward_trend] Missing {metrics_path}; skipping')
         return
-
-    plt.figure(figsize=(10, 5))
     
-    # Raw data with transparency
-    plt.plot(ser.index, ser.values, marker='o', linewidth=0.5, markersize=2, 
-             alpha=0.3, label='Raw reward', color='lightblue')
-    
-    # Moving average (window=50)
-    if len(ser) > 50:
-        ma_50 = ser.rolling(window=50, min_periods=1).mean()
-        plt.plot(ser.index, ma_50, linewidth=2, label='MA(50)', color='blue')
-    
-    # Moving average (window=100) for longer runs
-    if len(ser) > 100:
-        ma_100 = ser.rolling(window=100, min_periods=1).mean()
-        plt.plot(ser.index, ma_100, linewidth=2.5, label='MA(100)', color='darkblue')
-    
-    plt.grid(True, alpha=0.3)
-    plt.xlabel('Step / Epoch')
-    plt.ylabel('Reward')
-    plt.title('Reward Trend (with Moving Averages)')
-    plt.legend(loc='best')
-    plt.tight_layout()
     try:
-        plt.savefig(out_path, dpi=150)
-    except Exception as e:
-        warnings.warn(f'[plot_reward_trend] Could not write {out_path}: {e}')
-    finally:
+        # Load episode rewards
+        df = pd.read_csv(metrics_path)
+        if 'episode_reward' not in df.columns or 'episode' not in df.columns:
+            warnings.warn(f'[plot_reward_trend] Missing required columns in {metrics_path}')
+            return
+        
+        episodes = df['episode'].values
+        rewards = df['episode_reward'].values
+        
+        # Estimate training steps: assume ~50 training steps per episode (4 episodes per epoch)
+        # This is approximate - real correlation would need exact mapping
+        # For better visualization, we use episode count * 50 as proxy for training steps
+        training_steps = episodes * 50
+        
+        if len(rewards) == 0:
+            warnings.warn(f'[plot_reward_trend] No reward data in {metrics_path}')
+            return
+        
+        # Create plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(training_steps, rewards, color='blue', linewidth=1, alpha=0.5, label='Episode Reward')
+        
+        # Add moving average
+        if len(rewards) > 10:
+            window = min(20, len(rewards) // 5)
+            reward_series = pd.Series(rewards)
+            reward_rolling = reward_series.rolling(window=window, center=True).mean()
+            plt.plot(training_steps, reward_rolling, color='red', linewidth=2.5, label=f'{window}-episode MA')
+        
+        # Add mean line
+        mean_reward = np.mean(rewards)
+        plt.axhline(y=mean_reward, color='green', linestyle='--', alpha=0.5, label=f'Mean: {mean_reward:.3f}')
+        
+        # Annotations
+        if len(rewards) > 0:
+            first_reward = rewards[0]
+            last_reward = rewards[-1]
+            plt.axhline(y=first_reward, color='purple', linestyle=':', alpha=0.3, label=f'Initial: {first_reward:.3f}')
+            plt.axhline(y=last_reward, color='orange', linestyle=':', alpha=0.3, label=f'Final: {last_reward:.3f}')
+        
+        plt.xlabel('Approximate Training Step', fontsize=12)
+        plt.ylabel('Episode Reward', fontsize=12)
+        plt.title('Episode Reward Evolution During Training', fontsize=14, fontweight='bold')
+        plt.legend(loc='best')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        plt.savefig(out_path, dpi=100)
         plt.close()
+        print(f'[plot_reward_trend] Saved {out_path}')
+        
+    except Exception as e:
+        warnings.warn(f'[plot_reward_trend] Error: {e}')
+        import traceback
+        traceback.print_exc()
 
 
 def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
@@ -389,33 +417,295 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
         print(f"[WARN] Could not save utilization_summary_grid.png: {e}")
 
 
-def plot_reward_components(history_dir: str = 'my_data_and_graph/historydata') -> None:
-    """Plot reward component breakdown over simulation time.
-
-    Expects CSV file at <history_dir>/reward_components_log.txt with rows
-    env_time,CompletedNorm,AvgWait,WIP,ThroughputDelta,LoadVariance,R_global
-    (no header).
+def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Plot Q-value evolution from diagnostics log.
+    
+    Reads diagnostics_log.txt and extracts avg_q values over training steps.
+    Shows how the network's Q-value estimates evolve during learning.
     """
     plots_dir = _ensure_plots_dir(history_dir)
-    src = os.path.join(history_dir, 'reward_components_log.txt')
+    out_path = os.path.join(plots_dir, 'q_value_trend.png')
+    
+    diagnostics_path = os.path.join(history_dir, 'diagnostics_log.txt')
+    if not os.path.exists(diagnostics_path):
+        warnings.warn(f'[plot_q_value_trend] Missing {diagnostics_path}; skipping')
+        return
+    
+    try:
+        # Parse diagnostics file
+        # Format: timestamp,train_step,avg_q,grad_before,grad_after,target_updates,loss,td_error
+        train_steps = []
+        q_values = []
+        
+        with open(diagnostics_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('[') or 'epoch_start' in line or 'epoch_end' in line:
+                    continue
+                parts = line.split(',')
+                if len(parts) >= 3:
+                    try:
+                        step = int(parts[1])
+                        q_val = float(parts[2])
+                        train_steps.append(step)
+                        q_values.append(q_val)
+                    except (ValueError, IndexError):
+                        continue
+        
+        if not train_steps:
+            warnings.warn(f'[plot_q_value_trend] No Q-value data found in {diagnostics_path}')
+            return
+        
+        # Create plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(train_steps, q_values, color='darkgreen', linewidth=1.5, alpha=0.7)
+        
+        # Add moving average
+        if len(q_values) > 10:
+            window = min(20, len(q_values) // 5)
+            q_series = pd.Series(q_values)
+            q_rolling = q_series.rolling(window=window, center=True).mean()
+            plt.plot(train_steps, q_rolling, color='red', linewidth=2.5, label=f'{window}-step MA')
+        
+        # Add zero line
+        plt.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+        
+        # Annotations
+        if q_values:
+            first_q = q_values[0]
+            last_q = q_values[-1]
+            plt.axhline(y=first_q, color='blue', linestyle=':', alpha=0.3, label=f'Initial: {first_q:.0f}')
+            plt.axhline(y=last_q, color='orange', linestyle=':', alpha=0.3, label=f'Final: {last_q:.0f}')
+        
+        plt.xlabel('Training Step', fontsize=12)
+        plt.ylabel('Average Q-Value', fontsize=12)
+        plt.title('Q-Value Evolution During Training', fontsize=14, fontweight='bold')
+        plt.legend(loc='best')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        plt.savefig(out_path, dpi=100)
+        plt.close()
+        print(f'[plot_q_value_trend] Saved {out_path}')
+        
+    except Exception as e:
+        warnings.warn(f'[plot_q_value_trend] Error: {e}')
+        import traceback
+        traceback.print_exc()
+
+
+def plot_learning_analysis_comprehensive(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Generate comprehensive 6-panel learning analysis visualization.
+    
+    Creates a detailed analysis plot with:
+    1. Reward progression with moving average
+    2. Reward distribution by training quarters
+    3. Makespan evolution
+    4. Resource utilization trends
+    5. Reward stability (rolling std)
+    6. Training summary statistics
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    out_path = os.path.join(plots_dir, 'learning_analysis_comprehensive.png')
+    
+    # Load data
+    metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
+    kpi_path = os.path.join(history_dir, 'kpi_log.txt')
+    
+    if not os.path.exists(metrics_path):
+        warnings.warn(f'[plot_learning_analysis_comprehensive] Missing {metrics_path}; skipping')
+        return
+    
+    try:
+        metrics = pd.read_csv(metrics_path)
+        epoch_rewards = metrics.groupby('epoch')['episode_reward'].mean()
+        
+        # Load KPI data
+        if os.path.exists(kpi_path):
+            kpi = pd.read_csv(kpi_path, skiprows=1, 
+                             names=['epoch', 'avg_wait_time', 'machine_util', 'operator_util', 'makespan'])
+        else:
+            kpi = None
+        
+        # Create 2x3 subplot grid
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        fig.suptitle('MASA-QMIX Learning Analysis - Comprehensive View', fontsize=16, fontweight='bold')
+        
+        # 1. Reward trend with moving average
+        ax = axes[0, 0]
+        ax.plot(epoch_rewards.index, epoch_rewards.values, alpha=0.3, color='blue', label='Reward')
+        window = 10
+        rolling = epoch_rewards.rolling(window=window).mean()
+        ax.plot(rolling.index, rolling.values, color='darkblue', linewidth=2, label=f'{window}-epoch MA')
+        ax.axhline(y=epoch_rewards.mean(), color='red', linestyle='--', alpha=0.5, 
+                   label=f'Mean: {epoch_rewards.mean():.3f}')
+        ax.fill_between(epoch_rewards.index, 
+                        epoch_rewards.mean() - epoch_rewards.std(),
+                        epoch_rewards.mean() + epoch_rewards.std(),
+                        alpha=0.2, color='gray')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Reward')
+        ax.set_title('Reward Progression')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # 2. Reward distribution by quarters
+        ax = axes[0, 1]
+        n_epochs = len(epoch_rewards)
+        q_size = n_epochs // 4
+        quarters = [
+            epoch_rewards.iloc[:q_size],
+            epoch_rewards.iloc[q_size:2*q_size],
+            epoch_rewards.iloc[2*q_size:3*q_size],
+            epoch_rewards.iloc[3*q_size:]
+        ]
+        bp = ax.boxplot(quarters, labels=[f'Q1\n(0-{q_size})', f'Q2\n({q_size}-{2*q_size})', 
+                                           f'Q3\n({2*q_size}-{3*q_size})', f'Q4\n({3*q_size}-{n_epochs})'],
+                        patch_artist=True)
+        for patch, color in zip(bp['boxes'], ['lightblue', 'lightgreen', 'lightyellow', 'lightcoral']):
+            patch.set_facecolor(color)
+        ax.set_ylabel('Reward')
+        ax.set_title('Reward Distribution by Quarter')
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # 3. Makespan trend
+        ax = axes[0, 2]
+        if kpi is not None and 'makespan' in kpi.columns:
+            ax.plot(kpi['epoch'], kpi['makespan'], color='green', linewidth=1.5)
+            rolling_makespan = kpi['makespan'].rolling(window=10).mean()
+            ax.plot(kpi['epoch'], rolling_makespan, color='darkgreen', linewidth=2, label='10-epoch MA')
+            ax.axhline(y=kpi['makespan'].min(), color='red', linestyle='--', alpha=0.5, 
+                      label=f'Best: {kpi["makespan"].min():.1f}')
+            ax.legend()
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Makespan')
+        ax.set_title('Makespan Evolution')
+        ax.grid(True, alpha=0.3)
+        
+        # 4. Utilization trends
+        ax = axes[1, 0]
+        if kpi is not None:
+            ax.plot(kpi['epoch'], kpi['machine_util']*100, label='Machine', color='blue', linewidth=1.5)
+            ax.plot(kpi['epoch'], kpi['operator_util']*100, label='Operator', color='orange', linewidth=1.5)
+            ax.legend()
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Utilization (%)')
+        ax.set_title('Resource Utilization')
+        ax.grid(True, alpha=0.3)
+        
+        # 5. Reward variability (rolling std)
+        ax = axes[1, 1]
+        rolling_std = epoch_rewards.rolling(window=20).std()
+        ax.plot(rolling_std.index, rolling_std.values, color='purple', linewidth=2)
+        ax.axhline(y=0.015, color='green', linestyle='--', alpha=0.5, label='Good stability')
+        ax.axhline(y=0.025, color='orange', linestyle='--', alpha=0.5, label='Acceptable')
+        ax.fill_between(rolling_std.index, 0, 0.015, alpha=0.2, color='green')
+        ax.fill_between(rolling_std.index, 0.015, 0.025, alpha=0.2, color='yellow')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Rolling Std (20 epochs)')
+        ax.set_title('Reward Stability (Lower = Better)')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        
+        # 6. Performance metrics summary
+        ax = axes[1, 2]
+        ax.axis('off')
+        
+        # Build summary text
+        best_epoch = epoch_rewards.idxmax()
+        final_20_avg = epoch_rewards.iloc[-20:].mean() if len(epoch_rewards) >= 20 else epoch_rewards.mean()
+        final_20_std = epoch_rewards.iloc[-20:].std() if len(epoch_rewards) >= 20 else epoch_rewards.std()
+        
+        summary_text = f"""
+TRAINING SUMMARY
+{'='*40}
+
+Total Episodes: {len(metrics)}
+Total Epochs: {len(epoch_rewards)}
+
+REWARD METRICS
+  Average: {epoch_rewards.mean():.4f}
+  Best Epoch: {best_epoch} ({epoch_rewards.max():.4f})
+  Final 20 Avg: {final_20_avg:.4f}
+  Stability (σ): {final_20_std:.4f}
+"""
+        
+        if kpi is not None:
+            summary_text += f"""
+KPI METRICS
+  Avg Makespan: {kpi['makespan'].mean():.2f}
+  Best Makespan: {kpi['makespan'].min():.2f}
+  Machine Util: {kpi['machine_util'].mean()*100:.2f}%
+  Operator Util: {kpi['operator_util'].mean()*100:.2f}%
+"""
+        
+        # Check for convergence
+        if final_20_std < 0.015:
+            status = "Strong Convergence ✓"
+        elif final_20_std < 0.020:
+            status = "Good Convergence ✓"
+        else:
+            status = "Moderate Stability"
+        
+        summary_text += f"""
+LEARNING STATUS
+  Convergence: {status}
+  
+Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
+"""
+        
+        ax.text(0.1, 0.95, summary_text, transform=ax.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f'[plot_learning_analysis_comprehensive] Saved {out_path}')
+        
+    except Exception as e:
+        warnings.warn(f'[plot_learning_analysis_comprehensive] Error: {e}')
+        import traceback
+        traceback.print_exc()
+
+
+def plot_reward_components(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Plot reward components over simulation time.
+
+    Expects CSV file at <history_dir>/reward_components.csv (v4) or
+    <history_dir>/reward_components_log.txt (legacy) with columns:
+    step,sim_time,CompletedNorm,AvgWaitNorm,WIPNorm,ThroughputDelta,LoadBalance,R_global,R_total
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    
+    # [v4-FIX] Try new CSV format first, then fall back to legacy
+    src = os.path.join(history_dir, 'reward_components.csv')
+    if not os.path.exists(src):
+        src = os.path.join(history_dir, 'reward_components_log.txt')
+    
     out_path = os.path.join(plots_dir, 'reward_components.png')
 
     if not os.path.exists(src):
-        warnings.warn(f'[plot_reward_components] Missing {src}; skipping plot')
+        warnings.warn(f'[plot_reward_components] Missing reward components file; skipping plot')
         return
 
     try:
-        # Try reading with or without header
-        try:
-            df = pd.read_csv(src, header=None)
-            if df.shape[1] >= 7:
-                df = df.iloc[:, :7]
-                df.columns = ['env_time', 'CompletedNorm', 'AvgWait', 'WIP', 'ThroughputDelta', 'LoadVariance', 'R_global']
-            else:
-                # maybe file has header row
-                df = pd.read_csv(src)
-        except Exception:
-            df = pd.read_csv(src)
+        # [v4-FIX] Read CSV with comment lines (v4 format has # header comments)
+        df = pd.read_csv(src, comment='#')
+        
+        # v4 format: step,sim_time,CompletedNorm,AvgWaitNorm,WIPNorm,ThroughputDelta,LoadBalance,R_global,R_total
+        # Legacy format: env_time,CompletedNorm,AvgWait,WIP,ThroughputDelta,LoadVariance,R_global
+        
+        # Normalize column names
+        if 'sim_time' in df.columns:
+            df.rename(columns={'sim_time': 'env_time'}, inplace=True)
+        if 'AvgWaitNorm' in df.columns:
+            df.rename(columns={'AvgWaitNorm': 'AvgWait'}, inplace=True)
+        if 'WIPNorm' in df.columns:
+            df.rename(columns={'WIPNorm': 'WIP'}, inplace=True)
+        if 'LoadBalance' in df.columns:
+            df.rename(columns={'LoadBalance': 'LoadVariance'}, inplace=True)
+            
     except Exception as e:
         warnings.warn(f'[plot_reward_components] Could not read {src}: {e}')
         return
@@ -462,6 +752,7 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> No
     plot_reward_trend(history_dir)
     plot_loss_trend(history_dir)
     plot_td_error_trend(history_dir)
+    plot_q_value_trend(history_dir)  # New Q-value plot!
     plot_kpi_summary(history_dir)
     # reward components plot (optional)
     try:
@@ -473,6 +764,11 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> No
         utilization_summary_grid(history_dir)
     except Exception:
         warnings.warn('[generate_all_plots] utilization_summary_grid failed; continuing')
+    # comprehensive learning analysis (new!)
+    try:
+        plot_learning_analysis_comprehensive(history_dir)
+    except Exception:
+        warnings.warn('[generate_all_plots] plot_learning_analysis_comprehensive failed; continuing')
     try:
         print('[plot_metrics] All plots generated successfully.')
     except Exception:

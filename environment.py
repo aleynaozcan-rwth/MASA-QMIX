@@ -334,6 +334,15 @@ class MASAEnv:
 
         self.workcenters = self.workcenters_meta
 
+        # [BUG FIX #3] Cumulative job counter for dynamic normalization
+        self.total_jobs_cumulative = 0
+        # [BUG FIX #1] Simple variable for step-to-step throughput delta
+        self._prev_completed_count = 0
+        # [BUG FIX #2] GLOBAL entropy tracking windows (not reset per episode)
+        # [REBALANCE] Reduced from 200→50 so single action has 2% impact (was 0.5%)
+        self.recent_machine_choices = deque(maxlen=50)  # was 200, originally 30
+        self.recent_operator_choices = deque(maxlen=50)
+        
         self.jobs: List[JobAgent] = []
         self.job_counter = 0
         self.pending_jobs: List[List] = []
@@ -593,13 +602,20 @@ class MASAEnv:
         # Note: internal recent_rewards removed - use metrics APIs for reward history
         self.done = False
         
-        # [ADAPTIVE-FIX-3] Entropy tracking for load balance (sliding window)
-        # NOTE: These ARE reset per episode (local history for entropy calculation)
-        self.recent_machine_choices = deque(maxlen=30)
-        self.recent_operator_choices = deque(maxlen=30)
+        # [BUG-FIX] Window is now GLOBAL - do NOT reset here!
+        # Window persists across episodes for stable entropy calculation
+        # (initialized in __init__ instead)
         
         # NOTE: self.reward_normalizer is NOT reset here - it's global!
         # See __init__ for one-time initialization.
+        
+        # [BUG-FIX] Reset throughput delta tracker for new episode
+        # Without this, first step of new episode gets huge negative delta!
+        self._prev_completed_count = 0
+        
+        # [BUG-FIX] Reset cumulative job counter for new episode
+        # This counter is used for dynamic normalization within an episode
+        self.total_jobs_cumulative = 0
         
         # Reset global state counters
         self.total_jobs_arrived = 0
@@ -788,13 +804,10 @@ class MASAEnv:
         # ----- Global metrics (K1..K5) -----
         # K1: CompletedNorm
         completed_count = len([j for j in self.jobs if j.finished])
-        # Clip to [0,1] since completed_count can exceed max_jobs with dynamic arrivals
-        CompletedNorm = float(np.clip(completed_count / float(max(1, self.max_jobs)), 0.0, 1.0))
-        # Log if out of expected range but don't crash
-        if completed_count > self.max_jobs:
-            logging.getLogger(__name__).debug(
-                f"[PHASE3] CompletedNorm clipped: completed={completed_count} > max_jobs={self.max_jobs}"
-            )
+        # Use actual total jobs as denominator for dynamic arrivals
+        actual_total_jobs = max(self.total_jobs_cumulative, self.max_jobs, len(self.jobs))
+        CompletedNorm = float(completed_count / float(max(1, actual_total_jobs)))
+        # CompletedNorm will naturally be in [0,1] since completed_count <= actual_total_jobs
 
         # K2: AvgWaitNorm
         jobs_len = max(1, len(self.jobs))
@@ -810,23 +823,23 @@ class MASAEnv:
 
         # K3: WIPNorm
         wip_count = len([j for j in self.active_agents if not j.finished])
-        WIPNorm = float(wip_count) / float(max(1, self.max_jobs))
-        # [PHASE3-FIX] Validate WIPNorm bounds
-        if not (0.0 <= WIPNorm <= 1.0):
-            raise ValueError(
-                f"[PHASE3] WIPNorm out of bounds: {WIPNorm}. "
-                f"wip_count={wip_count}, max_jobs={self.max_jobs}"
-            )
+        # Use actual total jobs as denominator for dynamic arrivals
+        WIPNorm = float(wip_count) / float(max(1, actual_total_jobs))
+        # WIPNorm will naturally be in [0,1] since wip_count <= actual_total_jobs
 
-        # K4: ThroughputDelta (uses a small rolling history)
-        if not hasattr(self, '_throughput_history') or self._throughput_history is None:
-            self._throughput_history = deque(maxlen=10)
+        # K4: ThroughputDelta (immediate feedback when jobs complete)
+        # [BUG-FIX] Use simple previous value instead of deque for step-to-step comparison
+        # Calculate delta from PREVIOUS STEP (not N steps ago!)
         completed_now = len([j for j in self.jobs if j.finished])
-        self._throughput_history.append(completed_now)
-        if len(self._throughput_history) > 1:
-            throughput_delta = float(self._throughput_history[-1] - self._throughput_history[-2]) / float(max(1, self.max_jobs))
-        else:
-            throughput_delta = 0.0
+        
+        # Dynamic total jobs for normalization (handles dynamic arrivals)
+        actual_total_jobs = max(self.total_jobs_cumulative, self.max_jobs, len(self.jobs))
+        
+        # Delta from previous step
+        throughput_delta = float(completed_now - self._prev_completed_count) / float(max(1, actual_total_jobs))
+        
+        # Update for next step
+        self._prev_completed_count = completed_now
 
         # [ADAPTIVE-FIX-3] K5: LoadBalance (entropy-based, works mid-episode)
         # Use sliding window of recent choices (30 decisions ≈ 3 episodes)
@@ -858,12 +871,15 @@ class MASAEnv:
 
         # Compute R_global per spec
         # [ADAPTIVE-FIX-3] LoadBalance is now a positive reward (higher entropy = better)
+        # [v5-REBALANCE] Adjusted weights for action-sensitivity:
+        #   - w4: 5.0→8.0 (ThroughputDelta stronger immediate feedback)
+        #   - w5: 0.4→0.1 (LoadBalance reduced, was dominating 79% of reward)
         R_global = (
             (float(getattr(self, 'reward_w1', 1.0)) * float(CompletedNorm))
             - (float(getattr(self, 'reward_w2', 0.6)) * float(AvgWaitNorm))
             - (float(getattr(self, 'reward_w3', 0.3)) * float(WIPNorm))
-            + (float(getattr(self, 'reward_w4', 0.8)) * float(throughput_delta))
-            + (float(getattr(self, 'reward_w5', 0.4)) * float(load_balance_score))
+            + (float(getattr(self, 'reward_w4', 8.0)) * float(throughput_delta))
+            + (float(getattr(self, 'reward_w5', 0.1)) * float(load_balance_score))
         )
         # Quick Win C10: Validate R_global is finite
         if not np.isfinite(R_global):
@@ -873,60 +889,25 @@ class MASAEnv:
                 f"WIPNorm={WIPNorm}, throughput_delta={throughput_delta}, load_balance_score={load_balance_score}"
             )
 
-        # ----- Local rewards (per-decision) -----
-        R_local_mean = 0.0
-        if self._last_decision_info:
-            local_rewards = []
-            for entry in self._last_decision_info:
-                completed = 1.0 if entry.get('job_completed', False) else 0.0
-                wait_penalty = float(entry.get('wait_time_norm', 0.0))
-                # [PHASE3-FIX] Validate wait_penalty is in [0, 1] range
-                if not (0.0 <= wait_penalty <= 1.0):
-                    raise ValueError(
-                        f"[PHASE3] wait_time_norm out of bounds: {wait_penalty}. "
-                        f"job_id={entry.get('job_id', 'unknown')}"
-                    )
-                infeasible = 0.0
-                avail = entry.get('avail_row')
-                chosen = int(entry.get('chosen_action', -1)) if entry.get('chosen_action', None) is not None else -1
-                
-                # Fail-fast infeasibility detection: if avail info exists, validation must succeed
-                if avail is not None:
-                    try:
-                        arr = np.array(avail)
-                        valid_indices = np.where(arr == 1)[0]
-                        if chosen not in list(valid_indices):
-                            infeasible = 1.0
-                    except (ValueError, TypeError, IndexError) as e:
-                        raise RuntimeError(
-                            f"Infeasibility check failed in reward computation: "
-                            f"avail={avail}, chosen={chosen}, error={e}"
-                        ) from e
-                elif chosen != -1:
-                    # If avail is None but an action was chosen, this is a contract violation
-                    raise RuntimeError(
-                        f"Reward computation: action was chosen (chosen={chosen}) but avail_row is None. "
-                        "Cannot validate feasibility without availability information."
-                    )
-                
-                r_local_i = (
-                    (float(getattr(self, 'reward_a1', self.reward_a1_completion)) * completed)
-                    - (float(getattr(self, 'reward_a2', self.reward_a2_wait)) * wait_penalty)
-                    - (float(getattr(self, 'reward_a3', self.reward_a3_infeasible)) * infeasible)
-                )
-                local_rewards.append(float(r_local_i))
-            if local_rewards:
-                R_local_mean = float(np.mean(local_rewards))
-                # Validate R_local_mean is finite
-                if not np.isfinite(R_local_mean):
-                    raise RuntimeError(
-                        f"Invalid R_local_mean computed: {R_local_mean}. "
-                        f"Local rewards: {local_rewards}"
-                    )
-
-        # Combine
-        alpha_mix = float(getattr(self, 'reward_alpha_mix', self.reward_alpha_mix))
-        R_total = (alpha_mix * float(R_global)) + ((1.0 - alpha_mix) * float(R_local_mean))
+        # [v4-FIX] R_local component REMOVED
+        # Reasons:
+        # 1. Technical: _last_decision_info always empty due to timing bug (cleared before use)
+        # 2. Conceptual: Redundant with R_global components
+        #    - job_completed overlap with CompletedNorm
+        #    - wait_penalty overlap with AvgWaitNorm
+        #    - infeasible penalty unnecessary (action masking handles this)
+        # 3. Result: R_local_mean was always 0, contributing nothing to learning
+        # 
+        # Replacement: Scaled up ThroughputDelta (5.0x) provides immediate feedback
+        # Future: Can add dense operation-level rewards if needed
+        
+        R_total = float(R_global)  # Simplified: no mixing needed
+        
+        # [v6-FIX] Reward scaling for stable Q-learning
+        # QMIX loss explodes with large rewards (Loss was 3.8M!)
+        # Scale rewards to match SMAC range: episode ~45 → ~0.9
+        reward_scale = float(getattr(self, 'reward_scale', 50.0))
+        R_total = R_total / reward_scale
         
         # Validate final R_total is finite
         if not np.isfinite(R_total):
@@ -941,29 +922,66 @@ class MASAEnv:
             'AvgWaitNorm': float(AvgWaitNorm),
             'WIPNorm': float(WIPNorm),
             'ThroughputDelta': float(throughput_delta),
-            'LoadBalanceScore': float(load_balance_score),  # CHANGED: variance → balance
+            'LoadBalanceScore': float(load_balance_score),
             'R_global': float(R_global),
-            'R_local_mean': float(R_local_mean),
             'R_total': float(R_total),
+            # [v4-FIX] R_local_mean removed (was always 0)
         }
 
-        # Optional logging
+        # [v4-FIX] Log reward components to CSV file for analysis
+        if not hasattr(self, '_reward_log_initialized'):
+            self._reward_log_initialized = False
+        
+        try:
+            hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata'))
+            os.makedirs(hist_dir, exist_ok=True)
+            reward_log_path = os.path.join(hist_dir, 'reward_components.csv')
+            
+            # Write header with formula explanation on first call
+            if not self._reward_log_initialized:
+                with open(reward_log_path, 'w', encoding='utf-8') as f:
+                    f.write('# v4 Reward Formula: R_total = R_global\n')
+                    f.write('# R_global = w1*CompletedNorm - w2*AvgWaitNorm - w3*WIPNorm + w4*ThroughputDelta + w5*LoadBalance\n')
+                    f.write('# Coefficients: w1=1.0, w2=0.6, w3=0.3, w4=5.0 (scaled up!), w5=0.4\n')
+                    f.write('# CompletedNorm: fraction of jobs completed [0,1]\n')
+                    f.write('# AvgWaitNorm: normalized average wait time [0,1]\n')
+                    f.write('# WIPNorm: work-in-progress ratio [0,1]\n')
+                    f.write('# ThroughputDelta: change in completed jobs (normalized) - immediate feedback!\n')
+                    f.write('# LoadBalance: entropy-based load distribution [0,1] - higher is better\n')
+                    f.write('#\n')
+                    f.write('step,sim_time,CompletedNorm,AvgWaitNorm,WIPNorm,ThroughputDelta,LoadBalance,R_global,R_total\n')
+                self._reward_log_initialized = True
+            
+            # Append data row
+            if not hasattr(self, '_reward_step_counter'):
+                self._reward_step_counter = 0
+            self._reward_step_counter += 1
+            
+            sim_time = float(self.env.now) if hasattr(self, 'env') else 0.0
+            with open(reward_log_path, 'a', encoding='utf-8') as f:
+                f.write(f'{self._reward_step_counter},{sim_time:.2f},')
+                f.write(f'{CompletedNorm:.6f},{AvgWaitNorm:.6f},{WIPNorm:.6f},')
+                f.write(f'{throughput_delta:.6f},{load_balance_score:.6f},')
+                f.write(f'{R_global:.6f},{R_total:.6f}\n')
+        except Exception as e:
+            # Best-effort logging - don't crash training if logging fails
+            LOG.debug('[v4] Reward component logging failed: %s', e)
+
+        # Optional debug logging
         if bool(getattr(self, 'log_reward_components', False)):
             LOG.debug('[REWARD COMPONENTS] %s', self.last_reward_components)
 
-        # [ADAPTIVE-FIX-2] Apply reward normalization if enabled
-        # CRITICAL: Normalize AFTER mixing R_local and R_global
-        # Why this order?
-        # 1. R_local and R_global have compatible scales (both use normalized components)
-        # 2. α*R_global + (1-α)*R_local preserves semantic meaning
-        # 3. Final normalization ensures Q-learning stability
-        # Wrong order (normalize before mixing): would destroy relative magnitudes
-        # IMPORTANT: Normalize BEFORE updating statistics (use current mean/std)
-        # This ensures we normalize with the statistics computed from PREVIOUS observations
-        normalized_reward = self.reward_normalizer.normalize(R_total, clip_range=10.0)
-        # Then update statistics for NEXT normalization
-        self.reward_normalizer.update(R_total)
-        return float(normalized_reward)
+        # [v4-FIX] Reward normalizer REMOVED
+        # Issue: Normalizer was compressing already weak reward signal
+        # - Raw reward: -0.084 → Normalized: -0.0008 (10x smaller!)
+        # - This made learning impossible (signal too weak)
+        # Solution: Return raw R_total directly
+        # Note: If rewards become too large in future, can re-enable with proper tuning
+        
+        # Keep normalizer for future use but don't apply it
+        self.reward_normalizer.update(R_total)  # Track statistics only
+        
+        return float(R_total)  # Return raw reward without normalization
 
     # ---------------- SimPy job process (simple, robust) ----------------
     def _job_process(self, job: JobAgent):
@@ -1757,6 +1775,7 @@ class MASAEnv:
         
         # Append to master job list (arrival order) and advance counter
         self.jobs.append(job)
+        self.total_jobs_cumulative += 1  # Track cumulative jobs for dynamic normalization
         LOG.info("[Env] New job %s arrived at t=%.4f with %s ops", job.id, job.arrival_time, len(job.operations))
         self.job_counter = jid + 1
 
