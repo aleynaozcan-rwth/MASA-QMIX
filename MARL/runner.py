@@ -1307,9 +1307,73 @@ class Runner:
         except Exception as e:
             print(f"[WARN] Could not write initial job mapping: {e}")
 
-    def _append_learning_metrics(self, ep_idx: int, epoch: int, ep_r: float):
-        """Append one line to learning_metrics.csv in history_dir.
+    def _append_episode_metrics(self, ep_idx: int, epoch: int, ep_r: float, ep_duration: float, wait_time: float, 
+                                 avg_loss: float = None, avg_td: float = None, avg_q: float = None):
+        """Append episode-level metrics (SimPy time-based results).
+        
+        Logs: episode, epoch, episode_reward, episode_duration, wait_time, epsilon
+        This is the CLASSIC view - episode-by-episode system performance.
+        """
+        try:
+            if not getattr(self, 'allow_history_writes', False):
+                return
+            os.makedirs(self.history_dir, exist_ok=True)
+            metrics_path = os.path.join(self.history_dir, 'episode_metrics.csv')
+            
+            # Get current epsilon value at episode end
+            epsilon_val = getattr(self.rolloutWorker, 'epsilon', '')
+            if epsilon_val != '':
+                epsilon_val = f"{epsilon_val:.6f}"
+            # Build line: episode, epoch, reward, duration, wait_time, epsilon
+            new_line = f"{ep_idx},{epoch},{float(ep_r):.4f},{ep_duration:.2f},{wait_time:.4f},{epsilon_val}"
+            header_needed = not os.path.exists(metrics_path)
+            last_line = None
+            if os.path.exists(metrics_path):
+                with open(metrics_path, 'r') as f:
+                    lines = [l.strip() for l in f if l.strip()]
+                    if lines:
+                        last_line = lines[-1]
+            if last_line == new_line:
+                return  # Already written
+            with open(metrics_path, 'a') as f:
+                if header_needed:
+                    f.write("episode,epoch,episode_reward,episode_duration,wait_time,epsilon\n")
+                f.write(new_line + "\n")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in _append_episode_metrics: {e}")
+    
+    def _append_training_metrics(self, ep_idx: int, train_step: int, loss: float, td_error: float, q_value: float, batch_reward: float, epsilon: float):
+        """Append training-level metrics (gradient update results).
+        
+        Logs: episode, train_step, avg_loss, avg_td_error, avg_q_value, avg_batch_reward, batch_size, epsilon
+        This shows training progress - OUTSIDE SimPy time flow.
+        Format: 'Episode 0 ended → training started → train_step 1,2,3...'
+        """
+        try:
+            if not getattr(self, 'allow_history_writes', False):
+                return
+            os.makedirs(self.history_dir, exist_ok=True)
+            metrics_path = os.path.join(self.history_dir, 'training_metrics.csv')
+            batch_size = getattr(self.args, 'batch_size', None)
+            # Format values
+            loss_str = f"{loss:.6f}" if loss is not None and loss == loss else ''
+            td_str = f"{td_error:.6f}" if td_error is not None and td_error == td_error else ''
+            q_str = f"{q_value:.4f}" if q_value is not None and q_value == q_value else ''
+            reward_str = f"{batch_reward:.6f}" if batch_reward is not None and batch_reward == batch_reward else ''
+            eps_str = f"{epsilon:.6f}" if epsilon is not None and epsilon == epsilon else ''
+            batch_size_str = str(batch_size) if batch_size is not None else ''
+            new_line = f"{ep_idx},{train_step},{loss_str},{td_str},{q_str},{reward_str},{batch_size_str},{eps_str}"
+            header_needed = not os.path.exists(metrics_path)
+            with open(metrics_path, 'a') as f:
+                if header_needed:
+                    f.write("episode,train_step,avg_loss,avg_td_error,avg_q_value,avg_batch_reward,batch_size,epsilon\n")
+                f.write(new_line + "\n")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Exception in _append_training_metrics: {e}")
 
+    def _append_learning_metrics(self, ep_idx: int, epoch: int, ep_r: float):
+        """DEPRECATED: Use _append_episode_metrics() and _append_training_metrics() instead.
+        
         This centralizes metric writes so there's a single writer location.
         The write is idempotent for consecutive duplicate attempts (it will
         not append the exact same line twice).
@@ -1321,29 +1385,39 @@ class Runner:
             os.makedirs(self.history_dir, exist_ok=True)
             metrics_path = os.path.join(self.history_dir, 'learning_metrics.csv')
 
-            # Get loss/td from memory (training history) for this episode
+            # Get loss/td/train_step from memory (training history) for this episode
             # This avoids race conditions where files may not be written yet
             last_loss = ''
             last_td = ''
+            train_step = ''
             
-            # Search for the most recent loss/td value for this episode from training history
+            # ONLY use training values if training happened FOR THIS EPISODE
+            # Do NOT use stale values from previous epoch's training
             if hasattr(self, '_train_loss_history') and self._train_loss_history:
-                # Find the last entry for this episode (there may be multiple training steps)
-                for stored_ep_idx, loss_val in reversed(self._train_loss_history):
-                    if stored_ep_idx == ep_idx:
-                        if loss_val == loss_val and abs(loss_val) != float('inf'):  # Filter NaN/inf
-                            last_loss = str(loss_val)
-                        break
+                # Get the last training step values
+                # Format: (episode, train_step, loss)
+                stored_ep_idx, stored_train_step, loss_val = self._train_loss_history[-1]
+                
+                # ONLY use this value if it's from the current episode
+                if stored_ep_idx == ep_idx:
+                    if loss_val == loss_val and abs(loss_val) != float('inf'):  # Filter NaN/inf
+                        last_loss = str(loss_val)
+                    train_step = str(stored_train_step)
             
             if hasattr(self, '_train_td_history') and self._train_td_history:
-                for stored_ep_idx, td_val in reversed(self._train_td_history):
-                    if stored_ep_idx == ep_idx:
-                        if td_val == td_val and abs(td_val) != float('inf'):  # Filter NaN/inf
-                            last_td = str(td_val)
-                        break
+                # Format: (episode, train_step, td)
+                stored_ep_idx, stored_train_step, td_val = self._train_td_history[-1]
+                
+                # ONLY use this value if it's from the current episode
+                if stored_ep_idx == ep_idx:
+                    if td_val == td_val and abs(td_val) != float('inf'):  # Filter NaN/inf
+                        last_td = str(td_val)
+                    # Also update train_step if not already set
+                    if not train_step:
+                        train_step = str(stored_train_step)
 
             # Build the line we'd like to append.
-            new_line = f"{ep_idx},{epoch},{float(ep_r):.4f},{last_loss},{last_td}"
+            new_line = f"{ep_idx},{epoch},{float(ep_r):.4f},{train_step},{last_loss},{last_td}"
 
             header_needed = not os.path.exists(metrics_path)
 
@@ -1363,7 +1437,7 @@ class Runner:
                 try:
                     with open(metrics_path, 'a') as mf:
                         if header_needed:
-                            mf.write('episode,epoch,episode_reward,last_loss,last_td\n')
+                            mf.write('episode,epoch,episode_reward,train_step,last_loss,last_td\n')
                         mf.write(new_line + '\n')
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
@@ -1401,6 +1475,7 @@ class Runner:
         print("[Runner] === Training loop started ===")
 
         for epoch in range(self.args.n_epoch):
+            print(f"[DEBUG] allow_history_writes: {getattr(self, 'allow_history_writes', None)} (epoch {epoch})")
             sys.stdout.write(f"\rRun {num}, epoch {epoch}, avg rewards {np.mean(avg_rewards):.2f}")
             sys.stdout.flush()
             
@@ -1524,12 +1599,8 @@ class Runner:
                 with self._episode_rewards_lock:
                     self.episode_rewards.append(float(ep_r))
 
-                # Append per-episode metrics via single writer method
-                try:
-                    self._append_learning_metrics(global_ep_idx-1, epoch, ep_r)
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
-                    pass
+                # === MOVED: _append_learning_metrics will be called AFTER training ===
+                # So train_step is populated correctly in learning_metrics.csv
 
                 # Episode durations
                 if hasattr(self.rolloutWorker, "episode_duration"):
@@ -1538,13 +1609,45 @@ class Runner:
                     self.episode_durations.append(len(episode.get('r', [])))
 
                 # Wait times
+                current_wait_time = 0.0
                 if hasattr(self.env, "wait_time_dict"):
-                    self.wait_time_records.append(dict(self.env.wait_time_dict))
+                    wait_dict = dict(self.env.wait_time_dict)
+                    self.wait_time_records.append(wait_dict)
+                    # Get average wait time for episode metrics
+                    if wait_dict:
+                        current_wait_time = sum(wait_dict.values()) / len(wait_dict)
                 else:
                     # [C1] Fallback wait time computation - fail-fast if computation fails
                     # Replace legacy counter usage with computed count
                     _completed_count = max(1, len([j for j in getattr(self.env, 'jobs', []) if getattr(j, 'finished', False)]))
-                    self.wait_time_records.append({0: (self.env.total_wait_time / _completed_count)})
+                    current_wait_time = self.env.total_wait_time / _completed_count
+                    self.wait_time_records.append({0: current_wait_time})
+                
+                # Get episode duration for metrics (SimPy time)
+                current_episode_duration = 0.0
+                try:
+                    # Try to get SimPy time from environment
+                    if hasattr(self.env, 'env') and hasattr(self.env.env, 'now'):
+                        current_episode_duration = float(self.env.env.now)
+                    elif hasattr(self.rolloutWorker, "episode_duration") and self.rolloutWorker.episode_duration > 0:
+                        current_episode_duration = self.rolloutWorker.episode_duration
+                    else:
+                        # Fallback: count steps
+                        current_episode_duration = len(episode.get('r', []))
+                except Exception as e:
+                    # Fallback: count steps
+                    current_episode_duration = len(episode.get('r', []))
+                
+                # === APPEND EPISODE METRICS (SimPy time-based results) ===
+                # Don't write yet - wait until after training to include training summary
+                # Store episode info for later writing
+                self._pending_episode_metrics = {
+                    'ep_idx': global_ep_idx-1,
+                    'epoch': epoch,
+                    'ep_r': ep_r,
+                    'ep_duration': current_episode_duration,
+                    'wait_time': current_wait_time
+                }
 
                 # Optionally append a human-readable scheduling timeline for this episode
                 try:
@@ -1621,6 +1724,108 @@ class Runner:
                     logging.getLogger(__name__).warning(f"[C1] Exception while appending scheduling_timeline: {e}")
                     pass
 
+                # === Training updates (Replay-based) - MOVED TO EPISODE LEVEL ===
+                # Train after EACH episode for faster learning (was: epoch-level training)
+                if self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
+                    min_warm = getattr(self.args, "min_warmup_size",
+                                       getattr(self.args, "min_warmup",
+                                               getattr(self.args, "batch_size", 32)))
+                    if len(self.buffer) < min_warm:
+                        if global_ep_idx == 1:  # Only print once
+                            print(f"\n[DEBUG] Buffer warm-up ({len(self.buffer)}/{min_warm}) – skipping training")
+                    else:
+                        if global_ep_idx % 5 == 0:  # Print every 5 episodes
+                            print(f"\n[DEBUG] Training after episode {global_ep_idx-1} (buffer={len(self.buffer)})")
+                        # Print training start marker
+                        if global_ep_idx % 5 == 0:
+                            print(f"[TRAINING] Episode {global_ep_idx-1} ended → Training started (train_steps={self.args.train_steps})")
+                        
+                        for _ in range(self.args.train_steps):
+                            mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.run_args.n_actions)
+                            if mini_batch is None:
+                                break
+                            result = self.agents.train(mini_batch, train_steps)
+                            train_steps += 1
+                            if isinstance(result, dict):
+                                loss = result.get("loss")
+                                td = result.get("td_error")
+                                q_val = result.get("q_value", result.get("mean_q", None))
+                                batch_reward = result.get("reward", None)
+                                epsilon_val = getattr(self.rolloutWorker, 'epsilon', None)
+                                
+                                # Store loss/td for legacy compatibility (backward compat)
+                                if not hasattr(self, '_train_loss_history'):
+                                    self._train_loss_history = []
+                                    self._train_td_history = []
+                                    self._train_q_history = []
+                                if loss is not None:
+                                    self._train_loss_history.append((global_ep_idx-1, train_steps, loss))
+                                if td is not None:
+                                    self._train_td_history.append((global_ep_idx-1, train_steps, td))
+                                if q_val is not None:
+                                    self._train_q_history.append((global_ep_idx-1, train_steps, q_val))
+                                
+                                # === APPEND TRAINING METRICS (per gradient update) ===
+                                try:
+                                    self._append_training_metrics(
+                                        ep_idx=global_ep_idx-1,
+                                        train_step=train_steps,
+                                        loss=loss,
+                                        td_error=td,
+                                        q_value=q_val,
+                                        batch_reward=batch_reward,
+                                        epsilon=epsilon_val
+                                    )
+                                except Exception as e:
+                                    pass  # Best-effort
+                                
+                                if (train_steps % 100 == 0) and (loss is not None):
+                                    msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
+                                    if td is not None:
+                                        msg += f", td={td:.4f}"
+                                    msg += f", buffer={len(self.buffer)}"
+                                    print(msg)
+                        
+                        # Print training end marker
+                        if global_ep_idx % 5 == 0:
+                            print(f"[TRAINING] Episode {global_ep_idx-1} training completed (total_train_steps={train_steps})")
+                        
+                        # === UPDATE EPISODE METRICS with training results ===
+                        # Compute average training metrics for this episode
+                        try:
+                            episode_training_losses = []
+                            episode_training_tds = []
+                            episode_training_qs = []
+                            
+                            # Collect all training metrics from this episode's training session
+                            for stored_ep, _, loss_val in self._train_loss_history:
+                                if stored_ep == global_ep_idx-1:
+                                    episode_training_losses.append(loss_val)
+                            for stored_ep, _, td_val in self._train_td_history:
+                                if stored_ep == global_ep_idx-1:
+                                    episode_training_tds.append(td_val)
+                            for stored_ep, _, q_val in self._train_q_history:
+                                if stored_ep == global_ep_idx-1:
+                                    episode_training_qs.append(q_val)
+                            
+                            avg_loss = np.mean(episode_training_losses) if episode_training_losses else None
+                            avg_td = np.mean(episode_training_tds) if episode_training_tds else None
+                            avg_q = np.mean(episode_training_qs) if episode_training_qs else None
+                            
+                            # Re-write episode metrics with training summary
+                            self._append_episode_metrics(
+                                ep_idx=global_ep_idx-1,
+                                epoch=epoch,
+                                ep_r=ep_r,
+                                ep_duration=current_episode_duration,
+                                wait_time=current_wait_time,
+                                avg_loss=avg_loss,
+                                avg_td=avg_td,
+                                avg_q=avg_q
+                            )
+                        except Exception as e:
+                            logging.getLogger(__name__).debug(f"[C1] Could not update episode metrics with training results: {e}")
+
                 # === Per-Episode Plot Generation (immediate feedback) ===
                 # Generate plots after each episode so we see learning progress immediately
                 # This complements the epoch-based plots generated during evaluate()
@@ -1652,8 +1857,10 @@ class Runner:
                 except Exception as e:
                     logging.getLogger(__name__).debug(f"[Runner] Per-episode plot generation failed: {e}")
 
-            # === Training updates (Replay-based) ===
-            if self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
+            # === Training updates (Replay-based) - NOW MOVED TO EPISODE LEVEL ===
+            # Training now happens AFTER EACH EPISODE (see episode loop above)
+            # This block is kept for reference but disabled
+            if False and self.args.alg not in ['coma', 'central_v', 'reinforce'] and self.buffer is not None:
                 # configurable warm-up threshold (use args.min_warmup_size if present,
                 # fall back to args.batch_size or 32)
                 min_warm = getattr(self.args, "min_warmup_size",
@@ -1677,10 +1884,11 @@ class Runner:
                                 self._train_loss_history = []
                                 self._train_td_history = []
                             
+                            # Store (episode, train_step, value) for proper X-axis alignment
                             if loss is not None:
-                                self._train_loss_history.append((global_ep_idx-1, loss))
+                                self._train_loss_history.append((global_ep_idx-1, train_steps, loss))
                             if td is not None:
-                                self._train_td_history.append((global_ep_idx-1, td))
+                                self._train_td_history.append((global_ep_idx-1, train_steps, td))
                             
                             if (train_steps % 20 == 0) and (loss is not None):
                                 msg = f"[TRAIN] step={train_steps}, loss={loss:.4f}"
@@ -1980,6 +2188,7 @@ class Runner:
                     
                     # Write epoch KPI with header on first write
                     # [v4-FIX] Make KPI logging more robust with try-except
+                        print(f"[DEBUG] KPI log yazma kodu başlıyor | epoch={epoch} avg_wait={avg_wait} util_m={util_m} util_o={util_o} makespan={makespan}")
                     try:
                         kpi_path = os.path.join(self.history_dir, "kpi_log.txt")
                         write_header = not os.path.exists(kpi_path)
@@ -1987,27 +2196,37 @@ class Runner:
                             if write_header:
                                 f.write("# epoch,avg_wait_time,machine_util,operator_util,makespan\n")
                             f.write(f"{epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}\n")
+                            print(f"[DEBUG] KPI log dosyasına yazıldı: {epoch},{avg_wait:.4f},{util_m:.4f},{util_o:.4f},{makespan:.2f}")
                     except Exception as e:
-                        logging.getLogger(__name__).warning(f"[v4] KPI log write failed: {e}")
+                            logging.getLogger(__name__).warning(f"[v4] KPI log write failed: {e}")
+                            print(f"[DEBUG] KPI log yazma hatası: {e}")
                     
                     # Write accumulated loss/td history from training
                     if hasattr(self, '_train_loss_history') and self._train_loss_history:
                         lpath = os.path.join(self.history_dir, 'loss.txt')
                         with open(lpath, 'w') as lf:
-                            lf.write("episode last_loss\n")
-                            for ep_idx, loss_val in self._train_loss_history:
+                            lf.write("episode train_step last_loss\n")
+                            for entry in self._train_loss_history:
+                                # Expect (episode, train_step, loss) - no fallback
+                                if len(entry) != 3:
+                                    raise ValueError(f"Invalid loss history entry format: {entry}")
+                                ep_idx, train_step, loss_val = entry
                                 # Filter out NaN/inf
                                 if loss_val == loss_val and abs(loss_val) != float('inf'):
-                                    lf.write(f"{ep_idx} {loss_val}\n")
+                                    lf.write(f"{ep_idx} {train_step} {loss_val}\n")
                     
                     if hasattr(self, '_train_td_history') and self._train_td_history:
                         tpath = os.path.join(self.history_dir, 'td_error.txt')
                         with open(tpath, 'w') as tf:
-                            tf.write("episode last_td\n")
-                            for ep_idx, td_val in self._train_td_history:
+                            tf.write("episode train_step last_td\n")
+                            for entry in self._train_td_history:
+                                # Expect (episode, train_step, td) - no fallback
+                                if len(entry) != 3:
+                                    raise ValueError(f"Invalid TD history entry format: {entry}")
+                                ep_idx, train_step, td_val = entry
                                 # Filter out NaN/inf
                                 if td_val == td_val and abs(td_val) != float('inf'):
-                                    tf.write(f"{ep_idx} {td_val}\n")
+                                    tf.write(f"{ep_idx} {train_step} {td_val}\n")
             except Exception as e:
                 print(f"[WARN] KPI logging failed: {e}")
 
@@ -2659,7 +2878,16 @@ class Runner:
             print('[Runner] Loss/TD/Reward PNGs saved.')
         except Exception as e:
             print('[WARN] Could not create loss/reward PNGs:', e)
-
+            
+         # === Final comprehensive plots (epsilon decay, KPI summary, Q-value trend, etc.) ===
+        try:
+            if getattr(self, 'allow_history_writes', False):
+                from my_data_and_graph.plot_metrics import generate_all_plots
+                generate_all_plots(self.history_dir)
+                print(f"[Runner] FINAL plots generated in {self.history_dir}/plots/")
+        except Exception as e:
+            print(f"[Runner] WARNING: Could not run generate_all_plots(): {e}")
+            
     def evaluate(self, all_gantt_data, global_ep_idx):
         win_number, episode_rewards, gantt_eval = 0, 0, []
         for _ in range(self.args.evaluate_epoch):
@@ -2742,7 +2970,7 @@ class Runner:
                     avail_batch.append([1])
                     continue
 
-            # Default behavior: provide per-machine availability (n_actions == num_wcs)
+            # Default behavior: provide per-machine availability 
             # If a granular mask exists but user didn't request granular actions,
             # reduce it by OR-ing per-operator slots into a per-machine vector.
             # Prefer per-machine avail_row for agents; reduce operator-granular

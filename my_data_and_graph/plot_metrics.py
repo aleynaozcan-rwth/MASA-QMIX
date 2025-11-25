@@ -83,11 +83,14 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
     plots_dir = _ensure_plots_dir(history_dir)
     out_path = os.path.join(plots_dir, 'reward_trend.png')
     
-    # Read learning metrics CSV
-    metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
+    # Read episode metrics CSV (episode-based data)
+    metrics_path = os.path.join(history_dir, 'episode_metrics.csv')
     if not os.path.exists(metrics_path):
-        warnings.warn(f'[plot_reward_trend] Missing {metrics_path}; skipping')
-        return
+        # Fallback to old learning_metrics.csv for backward compatibility
+        metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
+        if not os.path.exists(metrics_path):
+            warnings.warn(f'[plot_reward_trend] Missing episode_metrics.csv; skipping')
+            return
     
     try:
         # Load episode rewards
@@ -99,25 +102,20 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
         episodes = df['episode'].values
         rewards = df['episode_reward'].values
         
-        # Estimate training steps: assume ~50 training steps per episode (4 episodes per epoch)
-        # This is approximate - real correlation would need exact mapping
-        # For better visualization, we use episode count * 50 as proxy for training steps
-        training_steps = episodes * 50
-        
         if len(rewards) == 0:
             warnings.warn(f'[plot_reward_trend] No reward data in {metrics_path}')
             return
         
-        # Create plot
+        # Create plot (X-axis: episode number, not train_step)
         plt.figure(figsize=(10, 6))
-        plt.plot(training_steps, rewards, color='blue', linewidth=1, alpha=0.5, label='Episode Reward')
+        plt.plot(episodes, rewards, color='blue', linewidth=1, alpha=0.5, label='Episode Reward')
         
         # Add moving average
         if len(rewards) > 10:
             window = min(20, len(rewards) // 5)
             reward_series = pd.Series(rewards)
             reward_rolling = reward_series.rolling(window=window, center=True).mean()
-            plt.plot(training_steps, reward_rolling, color='red', linewidth=2.5, label=f'{window}-episode MA')
+            plt.plot(episodes, reward_rolling, color='red', linewidth=2.5, label=f'{window}-episode MA')
         
         # Add mean line
         mean_reward = np.mean(rewards)
@@ -130,9 +128,9 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
             plt.axhline(y=first_reward, color='purple', linestyle=':', alpha=0.3, label=f'Initial: {first_reward:.3f}')
             plt.axhline(y=last_reward, color='orange', linestyle=':', alpha=0.3, label=f'Final: {last_reward:.3f}')
         
-        plt.xlabel('Approximate Training Step', fontsize=12)
+        plt.xlabel('Episode', fontsize=12)
         plt.ylabel('Episode Reward', fontsize=12)
-        plt.title('Episode Reward Evolution During Training', fontsize=14, fontweight='bold')
+        plt.title('Episode Reward Evolution (Episode-Based View)', fontsize=14, fontweight='bold')
         plt.legend(loc='best')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
@@ -148,63 +146,81 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
 
 
 def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
-    """Plot loss trend from loss_log.txt and save loss_trend.png.
+    """Plot loss trend from loss.txt using real training steps.
 
-    Expects a simple log file ./history_dir/loss_log.txt containing numeric
-    loss values (one per line) or two-column index/value pairs.
+    Expects loss.txt with columns: episode train_step last_loss
+    Falls back to episode index if train_step not available.
     """
     plots_dir = _ensure_plots_dir(history_dir)
     src = os.path.join(history_dir, 'loss.txt')
-    ser = _read_series_file(src)
     out_path = os.path.join(plots_dir, 'loss_trend.png')
 
-    if ser is None:
-        warnings.warn(f'[plot_loss_trend] Missing or unreadable {src}; skipping plot')
+    if not os.path.exists(src):
+        warnings.warn(f'[plot_loss_trend] Missing {src}; skipping plot')
         return
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(ser.index, ser.values, color='C1', linewidth=1)
-    plt.yscale('log')
-    plt.grid(True, alpha=0.3)
-    plt.xlabel('Training Step')
-    plt.ylabel('Loss (log scale)')
-    plt.title('Loss Trend')
-    plt.tight_layout()
     try:
-        plt.savefig(out_path)
+        df = pd.read_csv(src, sep=r'\s+', comment='#', header=0)
+        
+        # train_step and last_loss columns must exist - no fallback
+        x_vals = df['train_step'].values
+        y_vals = df['last_loss'].values
+        
+        plt.figure(figsize=(8, 4))
+        plt.plot(x_vals, y_vals, color='C1', linewidth=1)
+        plt.yscale('log')
+        plt.grid(True, alpha=0.3)
+        plt.xlabel('Training Step')
+        plt.ylabel('Loss (log scale)')
+        plt.title('Loss Trend')
+        plt.tight_layout()
+        try:
+            plt.savefig(out_path)
+        except Exception as e:
+            warnings.warn(f'[plot_loss_trend] Could not write {out_path}: {e}')
+        finally:
+            plt.close()
     except Exception as e:
-        warnings.warn(f'[plot_loss_trend] Could not write {out_path}: {e}')
-    finally:
-        plt.close()
+        warnings.warn(f'[plot_loss_trend] Error: {e}')
+        import traceback
+        traceback.print_exc()
 
 
 def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
-    """Plot TD-error trend from td_error_log.txt and save td_error_trend.png.
+    """Plot TD error trend from td_error.txt using real training steps.
 
-    Expects simple numeric log similar to loss_log.txt.
+    Expects td_error.txt with columns: episode train_step last_td
+    Falls back to episode index if train_step not available.
     """
     plots_dir = _ensure_plots_dir(history_dir)
     src = os.path.join(history_dir, 'td_error.txt')
-    ser = _read_series_file(src)
     out_path = os.path.join(plots_dir, 'td_error_trend.png')
 
-    if ser is None:
-        warnings.warn(f'[plot_td_error_trend] Missing or unreadable {src}; skipping plot')
+    if not os.path.exists(src):
+        warnings.warn(f'[plot_td_error_trend] Missing {src}; skipping plot')
         return
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(ser.index, ser.values, color='C2', linewidth=1)
-    plt.grid(True, alpha=0.3)
-    plt.xlabel('Training Step')
-    plt.ylabel('TD Error')
-    plt.title('TD Error Trend')
-    plt.tight_layout()
     try:
+        df = pd.read_csv(src, sep=r'\s+', comment='#', header=0)
+        
+        # train_step and last_td columns must exist - no fallback
+        x_vals = df['train_step'].values
+        y_vals = df['last_td'].values
+        
+        plt.figure(figsize=(8, 4))
+        plt.plot(x_vals, y_vals, color='C2', linewidth=1)
+        plt.grid(True, alpha=0.3)
+        plt.xlabel('Training Step')
+        plt.ylabel('TD Error')
+        plt.title('TD Error Trend')
+        plt.tight_layout()
         plt.savefig(out_path)
-    except Exception as e:
-        warnings.warn(f'[plot_td_error_trend] Could not write {out_path}: {e}')
-    finally:
         plt.close()
+        print(f'[plot_td_error_trend] Saved {out_path}')
+    except Exception as e:
+        warnings.warn(f'[plot_td_error_trend] Error: {e}')
+        import traceback
+        traceback.print_exc()
 
 
 def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None:
@@ -509,12 +525,15 @@ def plot_learning_analysis_comprehensive(history_dir: str = 'my_data_and_graph/h
     out_path = os.path.join(plots_dir, 'learning_analysis_comprehensive.png')
     
     # Load data
-    metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
-    kpi_path = os.path.join(history_dir, 'kpi_log.txt')
-    
+    metrics_path = os.path.join(history_dir, 'episode_metrics.csv')
     if not os.path.exists(metrics_path):
-        warnings.warn(f'[plot_learning_analysis_comprehensive] Missing {metrics_path}; skipping')
-        return
+        # Fallback to old format
+        metrics_path = os.path.join(history_dir, 'learning_metrics.csv')
+        if not os.path.exists(metrics_path):
+            warnings.warn(f'[plot_learning_analysis_comprehensive] Missing episode_metrics.csv; skipping')
+            return
+    
+    kpi_path = os.path.join(history_dir, 'kpi_log.txt')
     
     try:
         metrics = pd.read_csv(metrics_path)
@@ -879,6 +898,133 @@ Decay rate: {(initial_eps - final_eps) / steps[-1] * 1000:.6f} per 1k steps"""
         import traceback
         traceback.print_exc()
 
+def plot_loss_trend_combined(history_dir='my_data_and_graph/historydata'):
+    """Plot both last_loss (txt) and avg_loss (csv) on same graph."""
+    plots_dir = _ensure_plots_dir(history_dir)
+    out = os.path.join(plots_dir, 'loss_trend_combined.png')
+
+    loss_txt = os.path.join(history_dir, 'loss.txt')
+    metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
+
+    if not (os.path.exists(loss_txt) and os.path.exists(metrics_csv)):
+        warnings.warn("[plot_loss_trend_combined] Missing files")
+        return
+
+    try:
+        df_txt = pd.read_csv(loss_txt, sep=r'\s+', header=0)
+        df_csv = pd.read_csv(metrics_csv)
+
+        if 'train_step' not in df_txt.columns or 'last_loss' not in df_txt.columns:
+            warnings.warn("loss.txt invalid format")
+            return
+        if 'train_step' not in df_csv.columns or 'avg_loss' not in df_csv.columns:
+            warnings.warn("CSV missing avg_loss")
+            return
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(df_txt['train_step'], df_txt['last_loss'], label='Last Loss (txt)', color='C3')
+        plt.plot(df_csv['train_step'], df_csv['avg_loss'], label='Avg Loss (csv)', color='C1', linestyle='--')
+        plt.yscale('log')
+        plt.grid(True, alpha=0.3)
+        plt.xlabel('Training Step')
+        plt.ylabel('Loss')
+        plt.title('Loss Trend (txt vs csv)')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out)
+        plt.close()
+    except Exception as e:
+        warnings.warn(f"[plot_loss_trend_combined] Error: {e}")
+def plot_td_error_trend_combined(history_dir='my_data_and_graph/historydata'):
+    """Plot last_td (txt) + avg_td_error (csv) together."""
+    plots_dir = _ensure_plots_dir(history_dir)
+    out = os.path.join(plots_dir, 'td_error_trend_combined.png')
+
+    td_txt = os.path.join(history_dir, 'td_error.txt')
+    metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
+
+    if not (os.path.exists(td_txt) and os.path.exists(metrics_csv)):
+        warnings.warn("[plot_td_error_trend_combined] Missing files")
+        return
+
+    try:
+        df_txt = pd.read_csv(td_txt, sep=r'\s+', header=0)
+        df_csv = pd.read_csv(metrics_csv)
+
+        if 'train_step' not in df_txt.columns or 'last_td' not in df_txt.columns:
+            warnings.warn("td_error.txt invalid format")
+            return
+        if 'train_step' not in df_csv.columns or 'avg_td_error' not in df_csv.columns:
+            warnings.warn("CSV missing avg_td_error")
+            return
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(df_txt['train_step'], df_txt['last_td'], label='Last TD (txt)', color='C2')
+        plt.plot(df_csv['train_step'], df_csv['avg_td_error'], label='Avg TD (csv)', color='C0', linestyle='--')
+        plt.grid(True, alpha=0.3)
+        plt.xlabel('Training Step')
+        plt.ylabel('TD Error')
+        plt.title('TD Error Trend (txt vs csv)')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out)
+        plt.close()
+    except Exception as e:
+        warnings.warn(f"[plot_td_error_trend_combined] Error: {e}")
+def plot_q_value_csv(history_dir='my_data_and_graph/historydata'):
+    """Uses training_metrics.csv to plot avg_q_value over training steps."""
+    plots_dir = _ensure_plots_dir(history_dir)
+    out = os.path.join(plots_dir, 'q_value_csv.png')
+
+    csv_path = os.path.join(history_dir, 'training_metrics.csv')
+    if not os.path.exists(csv_path):
+        warnings.warn("[plot_q_value_csv] CSV missing")
+        return
+
+    try:
+        df = pd.read_csv(csv_path)
+        if 'train_step' not in df.columns or 'avg_q_value' not in df.columns:
+            warnings.warn("CSV missing avg_q_value")
+            return
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(df['train_step'], df['avg_q_value'], color='darkgreen', linewidth=1.5)
+        plt.grid(True, alpha=0.3)
+        plt.xlabel("Training Step")
+        plt.ylabel("Avg Q-Value")
+        plt.title("Q-Value Trend (from training_metrics.csv)")
+        plt.tight_layout()
+        plt.savefig(out)
+        plt.close()
+    except Exception as e:
+        warnings.warn(f"[plot_q_value_csv] Error: {e}")
+def plot_batch_reward_csv(history_dir='my_data_and_graph/historydata'):
+    """Plot avg_batch_reward from training_metrics.csv."""
+    plots_dir = _ensure_plots_dir(history_dir)
+    out = os.path.join(plots_dir, 'batch_reward_trend.png')
+
+    csv_path = os.path.join(history_dir, 'training_metrics.csv')
+    if not os.path.exists(csv_path):
+        warnings.warn("[plot_batch_reward_csv] CSV missing")
+        return
+
+    try:
+        df = pd.read_csv(csv_path)
+        if 'train_step' not in df.columns or 'avg_batch_reward' not in df.columns:
+            warnings.warn("CSV missing avg_batch_reward")
+            return
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(df['train_step'], df['avg_batch_reward'], color='C4')
+        plt.grid(True, alpha=0.3)
+        plt.xlabel("Training Step")
+        plt.ylabel("Avg Batch Reward")
+        plt.title("Batch Reward Trend (training_metrics.csv)")
+        plt.tight_layout()
+        plt.savefig(out)
+        plt.close()
+    except Exception as e:
+        warnings.warn(f"[plot_batch_reward_csv] Error: {e}")
 
 # Convenience function to run all plots
 def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> None:
@@ -888,6 +1034,11 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> No
     plot_q_value_trend(history_dir)  # New Q-value plot!
     plot_epsilon_decay(history_dir)  # New epsilon decay plot!
     plot_kpi_summary(history_dir)
+    plot_loss_trend_combined(history_dir)
+    plot_td_error_trend_combined(history_dir)
+    plot_q_value_csv(history_dir)
+    plot_batch_reward_csv(history_dir)
+
     # reward components plot (optional)
     try:
         plot_reward_components(history_dir)
@@ -903,6 +1054,25 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata') -> No
         plot_learning_analysis_comprehensive(history_dir)
     except Exception:
         warnings.warn('[generate_all_plots] plot_learning_analysis_comprehensive failed; continuing')
+    try:
+        plot_loss_trend_combined(history_dir)
+    except Exception:
+        warnings.warn('[generate_all_plots] plot_loss_trend_combined failed; continuing')
+
+    try:
+        plot_td_error_trend_combined(history_dir)
+    except Exception:
+        warnings.warn('[generate_all_plots] plot_td_error_trend_combined failed; continuing')
+
+    try:
+        plot_q_value_csv(history_dir)
+    except Exception:
+        warnings.warn('[generate_all_plots] plot_q_value_csv failed; continuing')
+
+    try:
+        plot_batch_reward_csv(history_dir)
+    except Exception:
+        warnings.warn('[generate_all_plots] plot_batch_reward_csv failed; continuing')
     try:
         print('[plot_metrics] All plots generated successfully.')
     except Exception:

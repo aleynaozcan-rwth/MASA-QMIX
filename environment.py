@@ -1445,7 +1445,9 @@ class MASAEnv:
                 with available_operator.resource.request() as opres_req, mr.request() as mc_req:
                     yield opres_req; yield mc_req
                     # We now hold the operator and machine resources.
-                    wait_dur = self.env.now - job.arrival_time
+                    # Calculate ACTUAL queue wait time: time from operation ready to resource allocated
+                    operation_ready = getattr(job, 'operation_ready_time', job.arrival_time)
+                    wait_dur = self.env.now - operation_ready
                     if wait_dur > 0:
                         job.wait_time += wait_dur
                         self.total_wait_time += wait_dur
@@ -1494,6 +1496,8 @@ class MASAEnv:
 
             job.current_op_idx += 1
             job.remaining_time = 0.0
+            # Update operation_ready_time: next operation is ready NOW (previous op just finished)
+            job.operation_ready_time = float(self.env.now)
             if job.current_op_idx >= len(job.operations):
                 # mark completion and only increment counters once
                 now_t = float(self.env.now)
@@ -1772,6 +1776,9 @@ class MASAEnv:
             job.arrival_time = 0.0
         else:
             job.arrival_time = float(self.env.now)
+        
+        # Initialize operation_ready_time: first operation is ready at arrival
+        job.operation_ready_time = job.arrival_time
         
         # Append to master job list (arrival order) and advance counter
         self.jobs.append(job)

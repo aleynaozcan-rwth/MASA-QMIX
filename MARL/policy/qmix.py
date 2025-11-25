@@ -185,18 +185,19 @@ class QMIX:
 
         # --- Logging ---
         # [C1] Loss/TD logging - best effort (Rule 3), diagnostics are informational only
+        # Compute avg_q and avg_reward for return value
+        avg_q = float(q_total_eval.mean().detach().cpu().item())
+        # Compute average reward from this batch (for training metrics)
+        avg_reward = float(r.mean().detach().cpu().item())
+        
         try:
             os.makedirs("./my_data_and_graph/historydata", exist_ok=True)
-            with open("./my_data_and_graph/historydata/loss.txt", "a") as f:
-                print(float(loss.item()), file=f)
-            with open("./my_data_and_graph/historydata/td_error.txt", "a") as f:
-                mean_td = float(td_error.abs().mean().item())
-                print(mean_td, file=f)
+            # NOTE: loss.txt and td_error.txt are written from runner at epoch-end
+            # We don't write them here to avoid format conflicts
             
             # append diagnostics line (lightweight, rate-limited)
             diagnostics_every = int(getattr(self.args, "diagnostics_every", 20) or 20)
             if diagnostics_every > 0 and (train_step % diagnostics_every == 0):
-                avg_q = float(q_total_eval.mean().detach().cpu().item())
                 ts = time.time()
                 # [PHASE7] Task 7.2: Use lock when reading target_update_count for logging
                 with self._target_update_lock:
@@ -212,7 +213,12 @@ class QMIX:
             import logging
             logging.getLogger(__name__).warning(f"[C1] Diagnostics logging failed (train_step={train_step}): {e}")
 
-        return {"loss": float(loss.item()), "td_error": float(td_error.abs().mean().item())}
+        return {
+            "loss": float(loss.item()), 
+            "td_error": float(td_error.abs().mean().item()), 
+            "q_value": avg_q,
+            "reward": avg_reward
+        }
 
     # ==========================================================
     # === Helper Functions =====================================

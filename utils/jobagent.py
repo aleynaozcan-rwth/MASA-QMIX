@@ -118,6 +118,9 @@ class JobAgent :
         self .remaining_time =0.0 
         self .wait_time =0.0 
         self .finished =False 
+        # Track when current operation became ready for resource allocation
+        # For first op: ready at arrival. For subsequent ops: ready when previous op finishes.
+        self .operation_ready_time =0.0 
         # --- Decision tracking ---
         self .last_chosen_machine =None 
         self .machine_history =[]# Stores chosen machine IDs
@@ -127,6 +130,10 @@ class JobAgent :
         # --- Arrival / activity control ---
         self .arrival_time =float (arrival_time )
         self .is_active =False 
+        
+        # Update operation_ready_time after arrival_time is set
+        # First operation is ready at arrival
+        self .operation_ready_time = self .arrival_time
 
         # --- Replay/log fields ---
         self .completed_at =None # SimPy time when completed
