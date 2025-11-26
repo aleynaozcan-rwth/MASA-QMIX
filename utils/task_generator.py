@@ -19,7 +19,7 @@ from typing import List
 # TODO(Phase3C.1): integrate with TaskGenerator via merge_config(DEFAULT_TASKGEN_PARAMS, cfg)
 DEFAULT_TASKGEN_PARAMS = {
     "task_generator": {
-        "arrival_lambda": 0.05,
+        "arrival_lambda": 0.2,
         "seq_length": {"min": 1, "max": 5}
     }
 }
@@ -176,11 +176,11 @@ class TaskGenerator:
         lam = float(arrival_lambda)
         
         # [STOCHASTIC_ARRIVAL] Lottery-based arrival is DEFAULT
-        use_exponential = bool(getattr(self, 'use_exponential_arrival', False))
+        use_exponential = bool(getattr(self, 'use_exponential_arrival', True))
         use_lottery = not use_exponential  # Lottery unless explicitly disabled
-        check_interval = float(getattr(self, 'arrival_check_interval', 20.0))
-        lottery_choices = list(getattr(self, 'arrival_lottery_choices', [0, 4, 8, 12, 16]))
-        lottery_probs = list(getattr(self, 'arrival_lottery_probs', [0.1, 0.3, 0.3, 0.2, 0.1]))
+        check_interval = float(getattr(self, 'arrival_check_interval', 1.0))
+        lottery_choices = list(getattr(self, 'arrival_lottery_choices', [0, 2, 4, 6, 8, 10]))
+        lottery_probs = list(getattr(self, 'arrival_lottery_probs', [0.10,0.25,0.35,0.2,0.1,0.05]))
         
         # Diagnostic: report proc_time_means size so we know whether
         # TaskGenerator has a durations mapping available at runtime.
