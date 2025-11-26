@@ -17,7 +17,7 @@ my_data_and_graph/historydata/scheduleresults.txt
 
 
 # Local historydata artifacts generated during env runs
-my_data_and_graph/historydata/*
+
 !my_data_and_graph/historydata/scheduling_timeline.txt
 !my_data_and_graph/historydata/**
-my_data_and_graph/historydata/debug_output.txt
+!my_data_and_graph/historydata/debug_output.txt**

@@ -71,7 +71,7 @@ def get_mutable_args():
     # ============================================================
     # === MASA-QMIX environment parameters =======================
     # ============================================================
-    parser.add_argument('--arrival_lambda', type=float, default=0.2,
+    parser.add_argument('--arrival_lambda', type=float, default=0.4,
                         help='Average job arrival rate λ (jobs per simulation time unit)')
     parser.add_argument('--num_operators', type=int, default=4)
     parser.add_argument('--job_min_ops', type=int, default=2,
@@ -119,7 +119,7 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=200,
+    parser.add_argument('--episode_limit', type=int, default=100,
                         help='Max SimPy time steps per episode (default 400 for longer scheduling episodes)')
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
@@ -138,7 +138,7 @@ def get_mutable_args():
                         help='Comma-separated probabilities for lottery choices (must sum to 1.0)')
     
     # Training loop sizes (production defaults, CLI overrideable)
-    parser.add_argument('--n_epoch', type=int, default=50,
+    parser.add_argument('--n_epoch', type=int, default=100,
                         help='Number of training epochs (default 400 for stable QMIX learning)')
     parser.add_argument('--n_episodes', type=int, default=1,
                         help='Episodes per epoch (default 4)')
