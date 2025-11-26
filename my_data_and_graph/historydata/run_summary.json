@@ -1,1261 +1,1261 @@
 {
   "evolutions": [
     {
-      "avg_machine_utilization": 0.28705048715677584,
-      "avg_operator_utilization": 0.35881310894596974,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.9779678496755024,
+      "avg_machine_utilization": 0.2808141592920353,
+      "avg_operator_utilization": 0.35101769911504416,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.111120023588547,
       "per_machine_utilization": {
-        "0": 0.279007971656333,
-        "1": 0.23826395039858256,
-        "2": 0.2829052258635962,
-        "3": 0.2790079716563328,
-        "4": 0.3560673162090346
+        "0": 0.22212389380530972,
+        "1": 0.23185840707964578,
+        "2": 0.3208849557522124,
+        "3": 0.29203539823008823,
+        "4": 0.33716814159292025
       },
       "per_operator_utilization": {
-        "O1": 0.4607617360496012,
-        "O2": 0.445881310894597,
-        "O3": 0.2752878653675819,
-        "O4": 0.2533215234720991
+        "O1": 0.45999999999999996,
+        "O2": 0.4676106194690265,
+        "O3": 0.29398230088495536,
+        "O4": 0.18247787610619465
       },
-      "avg_epoch_reward": 2.7178063015317617,
-      "timestamp": "2025-11-26T01:33:12.239527",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.9779678496755024,
-      "average_machine_utilization": 0.28705048715677584,
-      "average_operator_utilization": 0.35881310894596974
+      "avg_epoch_reward": 66.21498058586067,
+      "timestamp": "2025-11-26T02:22:47.283268",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.111120023588547,
+      "average_machine_utilization": 0.2808141592920353,
+      "average_operator_utilization": 0.35101769911504416
     },
     {
-      "avg_machine_utilization": 0.30171833480956595,
-      "avg_operator_utilization": 0.37714791851195745,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.53481567576246,
-      "per_machine_utilization": {
-        "0": 0.309123117803366,
-        "1": 0.22674933569530517,
-        "2": 0.2970770593445529,
-        "3": 0.3045172719220546,
-        "4": 0.3711248892825509
-      },
-      "per_operator_utilization": {
-        "O1": 0.4219663418954825,
-        "O2": 0.49300265721877756,
-        "O3": 0.33782108060230304,
-        "O4": 0.25580159433126654
-      },
-      "avg_epoch_reward": 2.6318146438110377,
-      "timestamp": "2025-11-26T01:33:29.482305",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.53481567576246,
-      "average_machine_utilization": 0.30171833480956595,
-      "average_operator_utilization": 0.37714791851195745
-    },
-    {
-      "avg_machine_utilization": 0.2982462356067315,
-      "avg_operator_utilization": 0.3728077945084144,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.8141635018494155,
-      "per_machine_utilization": {
-        "0": 0.32860938883968105,
-        "1": 0.16386182462356044,
-        "2": 0.30310008857395937,
-        "3": 0.35819309123117765,
-        "4": 0.3374667847652791
-      },
-      "per_operator_utilization": {
-        "O1": 0.49902568644818396,
-        "O2": 0.4614703277236493,
-        "O3": 0.3064658990256862,
-        "O4": 0.22426926483613804
-      },
-      "avg_epoch_reward": 2.7726054695786972,
-      "timestamp": "2025-11-26T01:33:53.974017",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.8141635018494155,
-      "average_machine_utilization": 0.2982462356067315,
-      "average_operator_utilization": 0.3728077945084144
-    },
-    {
-      "avg_machine_utilization": 0.29011494252873554,
-      "avg_operator_utilization": 0.3626436781609194,
+      "avg_machine_utilization": 0.3001591511936339,
+      "avg_operator_utilization": 0.3751989389920424,
       "average_makespan": 197.925,
-      "average_wait_time": 5.011228719240722,
+      "average_wait_time": 3.753511327936373,
       "per_machine_utilization": {
-        "0": 0.3483642793987621,
-        "1": 0.22281167108753275,
-        "2": 0.2638373121131743,
+        "0": 0.305923961096375,
+        "1": 0.1732979664014144,
+        "2": 0.3038019451812557,
+        "3": 0.307515473032714,
+        "4": 0.4102564102564103
+      },
+      "per_operator_utilization": {
+        "O1": 0.4277630415561448,
+        "O2": 0.4870026525198938,
+        "O3": 0.29089301503094606,
+        "O4": 0.2951370468611848
+      },
+      "avg_epoch_reward": 63.872887407594995,
+      "timestamp": "2025-11-26T02:23:04.184444",
+      "avg_makespan": 197.925,
+      "avg_wait_time": 3.753511327936373,
+      "average_machine_utilization": 0.3001591511936339,
+      "average_operator_utilization": 0.3751989389920424
+    },
+    {
+      "avg_machine_utilization": 0.29335695305580156,
+      "avg_operator_utilization": 0.36669619131975195,
+      "average_makespan": 197.575,
+      "average_wait_time": 3.916554806197243,
+      "per_machine_utilization": {
+        "0": 0.32683790965456144,
+        "1": 0.194862710363153,
+        "2": 0.30611160318866276,
+        "3": 0.3201062887511068,
+        "4": 0.3188662533215237
+      },
+      "per_operator_utilization": {
+        "O1": 0.5105403011514613,
+        "O2": 0.5238263950398583,
+        "O3": 0.2364924712134632,
+        "O4": 0.1959255978742249
+      },
+      "avg_epoch_reward": 68.61118381291715,
+      "timestamp": "2025-11-26T02:23:28.220051",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 3.916554806197243,
+      "average_machine_utilization": 0.29335695305580156,
+      "average_operator_utilization": 0.36669619131975195
+    },
+    {
+      "avg_machine_utilization": 0.2892307692307691,
+      "avg_operator_utilization": 0.3615384615384614,
+      "average_makespan": 197.925,
+      "average_wait_time": 5.004706980110288,
+      "per_machine_utilization": {
+        "0": 0.3227232537577364,
+        "1": 0.23165340406719678,
+        "2": 0.2558797524314767,
         "3": 0.3016799292661358,
-        "4": 0.31388152077807263
+        "4": 0.33421750663129984
       },
       "per_operator_utilization": {
-        "O1": 0.43412908930150285,
-        "O2": 0.45941644562334194,
-        "O3": 0.29902740937223676,
-        "O4": 0.2580017683465959
+        "O1": 0.4256410256410255,
+        "O2": 0.47709991158267,
+        "O3": 0.2880636604774533,
+        "O4": 0.2553492484526967
       },
-      "avg_epoch_reward": 2.7377402287178034,
-      "timestamp": "2025-11-26T01:34:17.480871",
+      "avg_epoch_reward": 68.48747060950106,
+      "timestamp": "2025-11-26T02:23:52.304925",
       "avg_makespan": 197.925,
-      "avg_wait_time": 5.011228719240722,
-      "average_machine_utilization": 0.29011494252873554,
-      "average_operator_utilization": 0.3626436781609194
+      "avg_wait_time": 5.004706980110288,
+      "average_machine_utilization": 0.2892307692307691,
+      "average_operator_utilization": 0.3615384615384614
     },
     {
-      "avg_machine_utilization": 0.30263950398582795,
-      "avg_operator_utilization": 0.37829937998228497,
-      "average_makespan": 197.575,
-      "average_wait_time": 5.384489588805941,
-      "per_machine_utilization": {
-        "0": 0.3170947741364036,
-        "1": 0.22674933569530537,
-        "2": 0.26519043401240044,
-        "3": 0.3082373782108057,
-        "4": 0.3959255978742248
-      },
-      "per_operator_utilization": {
-        "O1": 0.4311780336581041,
-        "O2": 0.5303808680248007,
-        "O3": 0.30487156775907853,
-        "O4": 0.24676705048715666
-      },
-      "avg_epoch_reward": 2.801685063955307,
-      "timestamp": "2025-11-26T01:34:46.932897",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 5.384489588805941,
-      "average_machine_utilization": 0.30263950398582795,
-      "average_operator_utilization": 0.37829937998228497
-    },
-    {
-      "avg_machine_utilization": 0.2899027409372235,
-      "avg_operator_utilization": 0.3623784261715294,
-      "average_makespan": 197.925,
-      "average_wait_time": 4.509706980110289,
-      "per_machine_utilization": {
-        "0": 0.33952254641909824,
-        "1": 0.1847922192749775,
-        "2": 0.2648983200707337,
-        "3": 0.285411140583554,
-        "4": 0.374889478337754
-      },
-      "per_operator_utilization": {
-        "O1": 0.4928381962864718,
-        "O2": 0.41326259946949595,
-        "O3": 0.3053934571175948,
-        "O4": 0.238019451812555
-      },
-      "avg_epoch_reward": 2.6061308058877883,
-      "timestamp": "2025-11-26T01:35:15.517943",
-      "avg_makespan": 197.925,
-      "avg_wait_time": 4.509706980110289,
-      "average_machine_utilization": 0.2899027409372235,
-      "average_operator_utilization": 0.3623784261715294
-    },
-    {
-      "avg_machine_utilization": 0.29746678476527877,
-      "avg_operator_utilization": 0.37183348095659846,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.789054806197246,
-      "per_machine_utilization": {
-        "0": 0.32063773250664285,
-        "1": 0.29140832595216964,
-        "2": 0.2834366696191318,
-        "3": 0.3155004428697959,
-        "4": 0.27635075287865374
-      },
-      "per_operator_utilization": {
-        "O1": 0.47688219663418924,
-        "O2": 0.48697962798937083,
-        "O3": 0.25314437555358693,
-        "O4": 0.27032772364924695
-      },
-      "avg_epoch_reward": 2.7776335614712435,
-      "timestamp": "2025-11-26T01:35:51.190735",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.789054806197246,
-      "average_machine_utilization": 0.29746678476527877,
-      "average_operator_utilization": 0.37183348095659846
-    },
-    {
-      "avg_machine_utilization": 0.2926017699115043,
-      "avg_operator_utilization": 0.3657522123893803,
+      "avg_machine_utilization": 0.29136283185840695,
+      "avg_operator_utilization": 0.3642035398230086,
       "average_makespan": 197.75,
-      "average_wait_time": 4.205685240979853,
+      "average_wait_time": 5.925685240979849,
       "per_machine_utilization": {
-        "0": 0.3283185840707963,
-        "1": 0.21238938053097317,
-        "2": 0.27858407079646036,
-        "3": 0.2994690265486722,
-        "4": 0.34424778761061925
+        "0": 0.28495575221238933,
+        "1": 0.2398230088495572,
+        "2": 0.24796460176991159,
+        "3": 0.2787610619469023,
+        "4": 0.40530973451327407
       },
       "per_operator_utilization": {
-        "O1": 0.47646017699115,
-        "O2": 0.4548672566371679,
-        "O3": 0.2911504424778759,
-        "O4": 0.24053097345132748
+        "O1": 0.43575221238938033,
+        "O2": 0.49203539823008813,
+        "O3": 0.28017699115044237,
+        "O4": 0.2488495575221238
       },
-      "avg_epoch_reward": 2.7222376936259387,
-      "timestamp": "2025-11-26T01:36:26.638876",
+      "avg_epoch_reward": 67.97198127046252,
+      "timestamp": "2025-11-26T02:24:23.770844",
       "avg_makespan": 197.75,
-      "avg_wait_time": 4.205685240979853,
-      "average_machine_utilization": 0.2926017699115043,
-      "average_operator_utilization": 0.3657522123893803
+      "avg_wait_time": 5.925685240979849,
+      "average_machine_utilization": 0.29136283185840695,
+      "average_operator_utilization": 0.3642035398230086
     },
     {
-      "avg_machine_utilization": 0.29020372010628864,
-      "avg_operator_utilization": 0.3627546501328609,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.001772197501591,
+      "avg_machine_utilization": 0.3016091954022987,
+      "avg_operator_utilization": 0.37701149425287345,
+      "average_makespan": 197.925,
+      "average_wait_time": 4.587750458371157,
       "per_machine_utilization": {
-        "0": 0.31620903454384397,
-        "1": 0.19043401240035404,
-        "2": 0.25704162976085054,
-        "3": 0.30735163861824594,
-        "4": 0.37998228520814875
+        "0": 0.35278514588859416,
+        "1": 0.24226348364279346,
+        "2": 0.3039787798408488,
+        "3": 0.2960212201591509,
+        "4": 0.3129973474801062
       },
       "per_operator_utilization": {
-        "O1": 0.4503100088573955,
-        "O2": 0.5073516386182463,
-        "O3": 0.2821966341895482,
-        "O4": 0.21116031886625333
+        "O1": 0.4618921308576478,
+        "O2": 0.4712643678160918,
+        "O3": 0.30362511052166224,
+        "O4": 0.27126436781609176
       },
-      "avg_epoch_reward": 2.5880153147455367,
-      "timestamp": "2025-11-26T01:37:08.326549",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.001772197501591,
-      "average_machine_utilization": 0.29020372010628864,
-      "average_operator_utilization": 0.3627546501328609
+      "avg_epoch_reward": 65.94300415470198,
+      "timestamp": "2025-11-26T02:24:54.169252",
+      "avg_makespan": 197.925,
+      "avg_wait_time": 4.587750458371157,
+      "average_machine_utilization": 0.3016091954022987,
+      "average_operator_utilization": 0.37701149425287345
     },
     {
-      "avg_machine_utilization": 0.2979469026548671,
-      "avg_operator_utilization": 0.3724336283185839,
+      "avg_machine_utilization": 0.28963684676705037,
+      "avg_operator_utilization": 0.362046058458813,
+      "average_makespan": 197.575,
+      "average_wait_time": 4.146880893153765,
+      "per_machine_utilization": {
+        "0": 0.2648361381753766,
+        "1": 0.190434012400354,
+        "2": 0.27528786536758204,
+        "3": 0.2889282550930023,
+        "4": 0.428697962798937
+      },
+      "per_operator_utilization": {
+        "O1": 0.4154118689105398,
+        "O2": 0.5188662533215235,
+        "O3": 0.31638618246235606,
+        "O4": 0.19751992914083263
+      },
+      "avg_epoch_reward": 65.24874019531026,
+      "timestamp": "2025-11-26T02:25:32.482092",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 4.146880893153765,
+      "average_machine_utilization": 0.28963684676705037,
+      "average_operator_utilization": 0.362046058458813
+    },
+    {
+      "avg_machine_utilization": 0.3000177147918511,
+      "avg_operator_utilization": 0.3750221434898138,
+      "average_makespan": 197.575,
+      "average_wait_time": 3.2672069801102883,
+      "per_machine_utilization": {
+        "0": 0.3480956598759962,
+        "1": 0.24003542958370203,
+        "2": 0.2871567759078832,
+        "3": 0.29619131975199264,
+        "4": 0.3286093888396812
+      },
+      "per_operator_utilization": {
+        "O1": 0.4623560673162086,
+        "O2": 0.4605845881310893,
+        "O3": 0.31302037201062866,
+        "O4": 0.2641275465013286
+      },
+      "avg_epoch_reward": 65.83110875389951,
+      "timestamp": "2025-11-26T02:26:10.536583",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 3.2672069801102883,
+      "average_machine_utilization": 0.3000177147918511,
+      "average_operator_utilization": 0.3750221434898138
+    },
+    {
+      "avg_machine_utilization": 0.2885385296722762,
+      "avg_operator_utilization": 0.3606731620903453,
+      "average_makespan": 197.575,
+      "average_wait_time": 3.7214461105450694,
+      "per_machine_utilization": {
+        "0": 0.3055801594331267,
+        "1": 0.2001771479185117,
+        "2": 0.23631532329495122,
+        "3": 0.3356953055801591,
+        "4": 0.3649247121346324
+      },
+      "per_operator_utilization": {
+        "O1": 0.4899911426040743,
+        "O2": 0.44393268379096507,
+        "O3": 0.3178033658104517,
+        "O4": 0.19096545615589006
+      },
+      "avg_epoch_reward": 63.745828052911286,
+      "timestamp": "2025-11-26T02:26:55.823663",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 3.7214461105450694,
+      "average_machine_utilization": 0.2885385296722762,
+      "average_operator_utilization": 0.3606731620903453
+    },
+    {
+      "avg_machine_utilization": 0.29325066430469426,
+      "avg_operator_utilization": 0.3665633303808679,
+      "average_makespan": 197.575,
+      "average_wait_time": 4.883728719240722,
+      "per_machine_utilization": {
+        "0": 0.31620903454384425,
+        "1": 0.23206377325066418,
+        "2": 0.29619131975199287,
+        "3": 0.2232063773250661,
+        "4": 0.39858281665190415
+      },
+      "per_operator_utilization": {
+        "O1": 0.43914968999114234,
+        "O2": 0.44162976085030986,
+        "O3": 0.3119574844995568,
+        "O4": 0.27351638618246243
+      },
+      "avg_epoch_reward": 67.8071758529571,
+      "timestamp": "2025-11-26T02:27:42.152023",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 4.883728719240722,
+      "average_machine_utilization": 0.29325066430469426,
+      "average_operator_utilization": 0.3665633303808679
+    },
+    {
+      "avg_machine_utilization": 0.2927546501328607,
+      "avg_operator_utilization": 0.36594331266607594,
+      "average_makespan": 197.575,
+      "average_wait_time": 5.547206980110287,
+      "per_machine_utilization": {
+        "0": 0.36403897254207257,
+        "1": 0.2338352524357835,
+        "2": 0.2717449069973427,
+        "3": 0.25845881310894564,
+        "4": 0.3356953055801594
+      },
+      "per_operator_utilization": {
+        "O1": 0.42037201062887486,
+        "O2": 0.5224092116917624,
+        "O3": 0.2526129317980513,
+        "O4": 0.2683790965456154
+      },
+      "avg_epoch_reward": 67.82555719719332,
+      "timestamp": "2025-11-26T02:28:33.782069",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 5.547206980110287,
+      "average_machine_utilization": 0.2927546501328607,
+      "average_operator_utilization": 0.36594331266607594
+    },
+    {
+      "avg_machine_utilization": 0.28889282550930007,
+      "avg_operator_utilization": 0.3611160318866251,
+      "average_makespan": 197.575,
+      "average_wait_time": 3.9063374148928967,
+      "per_machine_utilization": {
+        "0": 0.28343666961913183,
+        "1": 0.27989371124889234,
+        "2": 0.19734278122232055,
+        "3": 0.2595217006200174,
+        "4": 0.4242692648361383
+      },
+      "per_operator_utilization": {
+        "O1": 0.48538529672276315,
+        "O2": 0.4386182462356063,
+        "O3": 0.2887511071744907,
+        "O4": 0.23170947741364026
+      },
+      "avg_epoch_reward": 68.92785382706464,
+      "timestamp": "2025-11-26T02:29:20.919199",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 3.9063374148928967,
+      "average_machine_utilization": 0.28889282550930007,
+      "average_operator_utilization": 0.3611160318866251
+    },
+    {
+      "avg_machine_utilization": 0.29123117803365794,
+      "avg_operator_utilization": 0.3640389725420724,
+      "average_makespan": 197.575,
+      "average_wait_time": 4.0753591540233325,
+      "per_machine_utilization": {
+        "0": 0.3365810451727191,
+        "1": 0.20903454384410966,
+        "2": 0.2329495128432239,
+        "3": 0.3410097431355179,
+        "4": 0.33658104517271925
+      },
+      "per_operator_utilization": {
+        "O1": 0.49123117803365773,
+        "O2": 0.42763507528786515,
+        "O3": 0.3236492471213463,
+        "O4": 0.2136403897254206
+      },
+      "avg_epoch_reward": 66.06088323708849,
+      "timestamp": "2025-11-26T02:30:11.136039",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 4.0753591540233325,
+      "average_machine_utilization": 0.29123117803365794,
+      "average_operator_utilization": 0.3640389725420724
+    },
+    {
+      "avg_machine_utilization": 0.2929203539823008,
+      "avg_operator_utilization": 0.366150442477876,
       "average_makespan": 197.75,
-      "average_wait_time": 5.229054806197243,
+      "average_wait_time": 3.8950330670668087,
       "per_machine_utilization": {
-        "0": 0.39911504424778754,
-        "1": 0.27522123893805267,
-        "2": 0.229557522123894,
-        "3": 0.2044247787610617,
-        "4": 0.38141592920353967
+        "0": 0.29911504424778773,
+        "1": 0.19203539823008833,
+        "2": 0.28955752212389385,
+        "3": 0.2582300884955749,
+        "4": 0.4256637168141592
       },
       "per_operator_utilization": {
-        "O1": 0.44300884955752173,
-        "O2": 0.5099115044247785,
-        "O3": 0.3109734513274336,
-        "O4": 0.2258407079646017
+        "O1": 0.4555752212389378,
+        "O2": 0.45504424778761055,
+        "O3": 0.3415929203539823,
+        "O4": 0.21238938053097334
       },
-      "avg_epoch_reward": 2.8714185529684597,
-      "timestamp": "2025-11-26T01:37:50.300216",
+      "avg_epoch_reward": 67.0435570272484,
+      "timestamp": "2025-11-26T02:31:02.169513",
       "avg_makespan": 197.75,
-      "avg_wait_time": 5.229054806197243,
-      "average_machine_utilization": 0.2979469026548671,
-      "average_operator_utilization": 0.3724336283185839
+      "avg_wait_time": 3.8950330670668087,
+      "average_machine_utilization": 0.2929203539823008,
+      "average_operator_utilization": 0.366150442477876
     },
     {
-      "avg_machine_utilization": 0.29232949512843204,
-      "avg_operator_utilization": 0.36541186891054006,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.581880893153767,
+      "avg_machine_utilization": 0.29146902654867235,
+      "avg_operator_utilization": 0.3643362831858405,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.860685240979853,
       "per_machine_utilization": {
-        "0": 0.36138175376439324,
-        "1": 0.24180690876882155,
-        "2": 0.30062001771479185,
-        "3": 0.29654561558901654,
-        "4": 0.26129317980513717
+        "0": 0.2734513274336284,
+        "1": 0.2168141592920352,
+        "2": 0.30530973451327426,
+        "3": 0.28654867256637134,
+        "4": 0.3752212389380527
       },
       "per_operator_utilization": {
-        "O1": 0.44251550044286947,
-        "O2": 0.5326837909654559,
-        "O3": 0.2898139946855623,
-        "O4": 0.19663418954827258
+        "O1": 0.41646017699115034,
+        "O2": 0.4653097345132741,
+        "O3": 0.36300884955752183,
+        "O4": 0.21256637168141573
       },
-      "avg_epoch_reward": 2.6975738264034974,
-      "timestamp": "2025-11-26T01:38:38.742387",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.581880893153767,
-      "average_machine_utilization": 0.29232949512843204,
-      "average_operator_utilization": 0.36541186891054006
+      "avg_epoch_reward": 69.5655799189297,
+      "timestamp": "2025-11-26T02:31:54.290353",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.860685240979853,
+      "average_machine_utilization": 0.29146902654867235,
+      "average_operator_utilization": 0.3643362831858405
     },
     {
-      "avg_machine_utilization": 0.29193976970770574,
-      "avg_operator_utilization": 0.3649247121346323,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.795250458371157,
-      "per_machine_utilization": {
-        "0": 0.36581045172719207,
-        "1": 0.235606731620903,
-        "2": 0.29760850310008863,
-        "3": 0.2409211691762618,
-        "4": 0.3197519929140833
-      },
-      "per_operator_utilization": {
-        "O1": 0.44021257750221404,
-        "O2": 0.5073516386182457,
-        "O3": 0.28166519043401245,
-        "O4": 0.23046944198405664
-      },
-      "avg_epoch_reward": 2.6802437497210487,
-      "timestamp": "2025-11-26T01:39:24.151253",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.795250458371157,
-      "average_machine_utilization": 0.29193976970770574,
-      "average_operator_utilization": 0.3649247121346323
-    },
-    {
-      "avg_machine_utilization": 0.2928255093002656,
-      "avg_operator_utilization": 0.3660318866253319,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.4852504583711568,
-      "per_machine_utilization": {
-        "0": 0.39238263950398544,
-        "1": 0.2294065544729847,
-        "2": 0.2249778565101861,
-        "3": 0.32772364924712105,
-        "4": 0.2896368467670505
-      },
-      "per_operator_utilization": {
-        "O1": 0.4940655447298489,
-        "O2": 0.46536758193091243,
-        "O3": 0.31461470327723623,
-        "O4": 0.19007971656333025
-      },
-      "avg_epoch_reward": 2.534845829073304,
-      "timestamp": "2025-11-26T01:40:10.533853",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.4852504583711568,
-      "average_machine_utilization": 0.2928255093002656,
-      "average_operator_utilization": 0.3660318866253319
-    },
-    {
-      "avg_machine_utilization": 0.2947480106100794,
-      "avg_operator_utilization": 0.36843501326259925,
+      "avg_machine_utilization": 0.2939345711759504,
+      "avg_operator_utilization": 0.36741821396993796,
       "average_makespan": 197.925,
-      "average_wait_time": 3.7453591540233315,
+      "average_wait_time": 4.185467849675504,
       "per_machine_utilization": {
-        "0": 0.3536693191865604,
-        "1": 0.25110521662245766,
-        "2": 0.26525198938992045,
-        "3": 0.24739168877099882,
-        "4": 0.35632183908045956
+        "0": 0.29973474801061,
+        "1": 0.251989389920424,
+        "2": 0.2664898320070735,
+        "3": 0.3083996463306805,
+        "4": 0.3430592396109639
       },
       "per_operator_utilization": {
-        "O1": 0.42988505747126404,
-        "O2": 0.5011494252873561,
-        "O3": 0.3409372236958441,
-        "O4": 0.2017683465959327
+        "O1": 0.4509283819628643,
+        "O2": 0.47798408488063654,
+        "O3": 0.3313881520778073,
+        "O4": 0.20937223695844376
       },
-      "avg_epoch_reward": 2.605279853331961,
-      "timestamp": "2025-11-26T01:40:54.229649",
+      "avg_epoch_reward": 70.39039790168688,
+      "timestamp": "2025-11-26T02:32:44.678316",
       "avg_makespan": 197.925,
-      "avg_wait_time": 3.7453591540233315,
-      "average_machine_utilization": 0.2947480106100794,
-      "average_operator_utilization": 0.36843501326259925
+      "avg_wait_time": 4.185467849675504,
+      "average_machine_utilization": 0.2939345711759504,
+      "average_operator_utilization": 0.36741821396993796
     },
     {
-      "avg_machine_utilization": 0.29307351638618234,
-      "avg_operator_utilization": 0.36634189548272794,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.281663501849418,
+      "avg_machine_utilization": 0.3047433628318583,
+      "avg_operator_utilization": 0.38092920353982296,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.941011327936374,
       "per_machine_utilization": {
-        "0": 0.34278122232063785,
-        "1": 0.2701505757307346,
-        "2": 0.23613817537643939,
-        "3": 0.2806023029229403,
-        "4": 0.3356953055801595
+        "0": 0.31504424778761075,
+        "1": 0.23362831858407046,
+        "2": 0.29061946902654884,
+        "3": 0.25787610619469,
+        "4": 0.42654867256637174
       },
       "per_operator_utilization": {
-        "O1": 0.4348981399468553,
-        "O2": 0.473870682019486,
-        "O3": 0.34614703277236497,
-        "O4": 0.21045172719220542
+        "O1": 0.4355752212389379,
+        "O2": 0.4959292035398229,
+        "O3": 0.3541592920353982,
+        "O4": 0.23805309734513275
       },
-      "avg_epoch_reward": 2.715833346023176,
-      "timestamp": "2025-11-26T01:41:39.472960",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.281663501849418,
-      "average_machine_utilization": 0.29307351638618234,
-      "average_operator_utilization": 0.36634189548272794
+      "avg_epoch_reward": 66.11843992174657,
+      "timestamp": "2025-11-26T02:33:36.862558",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.941011327936374,
+      "average_machine_utilization": 0.3047433628318583,
+      "average_operator_utilization": 0.38092920353982296
     },
     {
-      "avg_machine_utilization": 0.2943943412908928,
-      "avg_operator_utilization": 0.367992926613616,
-      "average_makespan": 197.925,
-      "average_wait_time": 4.4809026322842005,
-      "per_machine_utilization": {
-        "0": 0.3987621573828467,
-        "1": 0.2201591511936336,
-        "2": 0.24756852343059246,
-        "3": 0.24385499557913318,
-        "4": 0.3616268788682581
-      },
-      "per_operator_utilization": {
-        "O1": 0.4611847922192744,
-        "O2": 0.4721485411140582,
-        "O3": 0.34235190097259055,
-        "O4": 0.1962864721485409
-      },
-      "avg_epoch_reward": 2.72598321443351,
-      "timestamp": "2025-11-26T01:42:23.051664",
-      "avg_makespan": 197.925,
-      "avg_wait_time": 4.4809026322842005,
-      "average_machine_utilization": 0.2943943412908928,
-      "average_operator_utilization": 0.367992926613616
-    },
-    {
-      "avg_machine_utilization": 0.2921169176262178,
-      "avg_operator_utilization": 0.36514614703277215,
+      "avg_machine_utilization": 0.2962976085031,
+      "avg_operator_utilization": 0.3703720106288752,
       "average_makespan": 197.575,
-      "average_wait_time": 3.906337414892896,
+      "average_wait_time": 4.895033067066807,
       "per_machine_utilization": {
-        "0": 0.31709477413640375,
-        "1": 0.2931798051372893,
-        "2": 0.30434012400354316,
-        "3": 0.22267493356953025,
+        "0": 0.30646589902568655,
+        "1": 0.18334809565987584,
+        "2": 0.3137289636846769,
+        "3": 0.35465013286093866,
         "4": 0.32329495128432245
       },
       "per_operator_utilization": {
-        "O1": 0.4529672276350749,
-        "O2": 0.5002657218777677,
-        "O3": 0.2896368467670504,
-        "O4": 0.2177147918511958
+        "O1": 0.428520814880425,
+        "O2": 0.49565987599645706,
+        "O3": 0.3034543844109833,
+        "O4": 0.2538529672276351
       },
-      "avg_epoch_reward": 2.5577450335921035,
-      "timestamp": "2025-11-26T01:43:07.534338",
+      "avg_epoch_reward": 65.188723605627,
+      "timestamp": "2025-11-26T02:34:26.918490",
       "avg_makespan": 197.575,
-      "avg_wait_time": 3.906337414892896,
-      "average_machine_utilization": 0.2921169176262178,
-      "average_operator_utilization": 0.36514614703277215
+      "avg_wait_time": 4.895033067066807,
+      "average_machine_utilization": 0.2962976085031,
+      "average_operator_utilization": 0.3703720106288752
     },
     {
-      "avg_machine_utilization": 0.297112488928255,
-      "avg_operator_utilization": 0.37139061116031874,
+      "avg_machine_utilization": 0.2975376439326836,
+      "avg_operator_utilization": 0.37192205491585456,
       "average_makespan": 197.575,
-      "average_wait_time": 4.546446110545071,
+      "average_wait_time": 4.089924371414636,
       "per_machine_utilization": {
-        "0": 0.4269264836138174,
-        "1": 0.2701505757307348,
-        "2": 0.20265721877767948,
-        "3": 0.2306465899025683,
-        "4": 0.3551815766164748
+        "0": 0.31709477413640363,
+        "1": 0.25509300265721846,
+        "2": 0.2620017714791851,
+        "3": 0.2620017714791848,
+        "4": 0.39149689991142617
       },
       "per_operator_utilization": {
-        "O1": 0.526837909654561,
-        "O2": 0.4563330380868025,
-        "O3": 0.2511957484499555,
-        "O4": 0.2511957484499558
+        "O1": 0.42798937112488905,
+        "O2": 0.46554472984942397,
+        "O3": 0.35128432240921165,
+        "O4": 0.24286979627989366
       },
-      "avg_epoch_reward": 2.7057471170714287,
-      "timestamp": "2025-11-26T01:43:50.458617",
+      "avg_epoch_reward": 63.81304581414294,
+      "timestamp": "2025-11-26T02:35:18.129270",
       "avg_makespan": 197.575,
-      "avg_wait_time": 4.546446110545071,
-      "average_machine_utilization": 0.297112488928255,
-      "average_operator_utilization": 0.37139061116031874
+      "avg_wait_time": 4.089924371414636,
+      "average_machine_utilization": 0.2975376439326836,
+      "average_operator_utilization": 0.37192205491585456
     },
     {
-      "avg_machine_utilization": 0.29786030061892105,
-      "avg_operator_utilization": 0.3723253757736513,
+      "avg_machine_utilization": 0.29223695844385483,
+      "avg_operator_utilization": 0.3652961980548185,
       "average_makespan": 197.925,
-      "average_wait_time": 5.075793936632026,
+      "average_wait_time": 3.8049243714146344,
       "per_machine_utilization": {
-        "0": 0.4031830238726788,
-        "1": 0.25110521662245755,
-        "2": 0.30380194518125536,
-        "3": 0.27038019451812517,
-        "4": 0.26083112290008825
+        "0": 0.31299734748010616,
+        "1": 0.24226348364279351,
+        "2": 0.2901856763925727,
+        "3": 0.26030061892130824,
+        "4": 0.3554376657824935
       },
       "per_operator_utilization": {
-        "O1": 0.5025641025641021,
-        "O2": 0.4687886825817857,
-        "O3": 0.29478337754199785,
-        "O4": 0.2231653404067195
+        "O1": 0.4509283819628644,
+        "O2": 0.5177718832891243,
+        "O3": 0.2664898320070733,
+        "O4": 0.22599469496021196
       },
-      "avg_epoch_reward": 2.6136062489077028,
-      "timestamp": "2025-11-26T01:44:35.149980",
+      "avg_epoch_reward": 65.5065684723175,
+      "timestamp": "2025-11-26T02:36:07.730720",
       "avg_makespan": 197.925,
-      "avg_wait_time": 5.075793936632026,
-      "average_machine_utilization": 0.29786030061892105,
-      "average_operator_utilization": 0.3723253757736513
+      "avg_wait_time": 3.8049243714146344,
+      "average_machine_utilization": 0.29223695844385483,
+      "average_operator_utilization": 0.3652961980548185
     },
     {
-      "avg_machine_utilization": 0.2928495575221238,
-      "avg_operator_utilization": 0.3660619469026548,
+      "avg_machine_utilization": 0.2976637168141592,
+      "avg_operator_utilization": 0.37207964601769905,
       "average_makespan": 197.75,
-      "average_wait_time": 3.965250458371156,
+      "average_wait_time": 4.160902632284198,
       "per_machine_utilization": {
-        "0": 0.35486725663716817,
-        "1": 0.21415929203539785,
-        "2": 0.2798230088495577,
-        "3": 0.29061946902654834,
-        "4": 0.3247787610619469
+        "0": 0.2884955752212391,
+        "1": 0.2398230088495572,
+        "2": 0.21982300884955777,
+        "3": 0.36318584070796434,
+        "4": 0.3769911504424778
       },
       "per_operator_utilization": {
-        "O1": 0.5217699115044246,
-        "O2": 0.482300884955752,
-        "O3": 0.2608849557522122,
-        "O4": 0.19929203539823015
+        "O1": 0.4364601769911503,
+        "O2": 0.48601769911504417,
+        "O3": 0.3072566371681414,
+        "O4": 0.25858407079646034
       },
-      "avg_epoch_reward": 2.6930253132349224,
-      "timestamp": "2025-11-26T01:45:19.068410",
+      "avg_epoch_reward": 70.01620304909619,
+      "timestamp": "2025-11-26T02:36:59.777781",
       "avg_makespan": 197.75,
-      "avg_wait_time": 3.965250458371156,
-      "average_machine_utilization": 0.2928495575221238,
-      "average_operator_utilization": 0.3660619469026548
+      "avg_wait_time": 4.160902632284198,
+      "average_machine_utilization": 0.2976637168141592,
+      "average_operator_utilization": 0.37207964601769905
     },
     {
-      "avg_machine_utilization": 0.29394690265486717,
-      "avg_operator_utilization": 0.367433628318584,
+      "avg_machine_utilization": 0.2984424778761061,
+      "avg_operator_utilization": 0.37305309734513264,
       "average_makespan": 197.75,
-      "average_wait_time": 4.137750458371157,
+      "average_wait_time": 4.509924371414633,
       "per_machine_utilization": {
-        "0": 0.33805309734513284,
-        "1": 0.2999999999999995,
-        "2": 0.2649557522123896,
-        "3": 0.2631858407079642,
-        "4": 0.3035398230088497
+        "0": 0.3115044247787612,
+        "1": 0.19203539823008817,
+        "2": 0.2812389380530976,
+        "3": 0.3472566371681413,
+        "4": 0.36017699115044244
       },
       "per_operator_utilization": {
-        "O1": 0.457522123893805,
-        "O2": 0.4776991150442478,
-        "O3": 0.30831858407079643,
-        "O4": 0.22619469026548666
+        "O1": 0.4376991150442477,
+        "O2": 0.4683185840707964,
+        "O3": 0.31929203539822987,
+        "O4": 0.2669026548672568
       },
-      "avg_epoch_reward": 2.697757411061072,
-      "timestamp": "2025-11-26T01:46:05.707444",
+      "avg_epoch_reward": 68.73219008954554,
+      "timestamp": "2025-11-26T02:37:49.169778",
       "avg_makespan": 197.75,
-      "avg_wait_time": 4.137750458371157,
-      "average_machine_utilization": 0.29394690265486717,
-      "average_operator_utilization": 0.367433628318584
+      "avg_wait_time": 4.509924371414633,
+      "average_machine_utilization": 0.2984424778761061,
+      "average_operator_utilization": 0.37305309734513264
     },
     {
-      "avg_machine_utilization": 0.2952701505757306,
-      "avg_operator_utilization": 0.3690876882196632,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.557424371414636,
-      "per_machine_utilization": {
-        "0": 0.4180690876882195,
-        "1": 0.264836138175376,
-        "2": 0.29176262178919393,
-        "3": 0.21913197519929106,
-        "4": 0.28255093002657233
-      },
-      "per_operator_utilization": {
-        "O1": 0.45084145261293146,
-        "O2": 0.470150575730735,
-        "O3": 0.30770593445526995,
-        "O4": 0.24765279007971636
-      },
-      "avg_epoch_reward": 2.7115723142525843,
-      "timestamp": "2025-11-26T01:46:50.117153",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.557424371414636,
-      "average_machine_utilization": 0.2952701505757306,
-      "average_operator_utilization": 0.3690876882196632
-    },
-    {
-      "avg_machine_utilization": 0.29826548672566344,
-      "avg_operator_utilization": 0.37283185840707933,
+      "avg_machine_utilization": 0.29292035398230076,
+      "avg_operator_utilization": 0.366150442477876,
       "average_makespan": 197.75,
-      "average_wait_time": 4.137859154023331,
+      "average_wait_time": 4.276880893153766,
       "per_machine_utilization": {
-        "0": 0.3654867256637167,
-        "1": 0.30265486725663676,
-        "2": 0.29044247787610605,
-        "3": 0.25486725663716775,
-        "4": 0.2778761061946902
+        "0": 0.30796460176991164,
+        "1": 0.19646017699115,
+        "2": 0.2787610619469027,
+        "3": 0.33628318584070765,
+        "4": 0.34513274336283173
       },
       "per_operator_utilization": {
-        "O1": 0.48973451327433576,
-        "O2": 0.4807079646017695,
-        "O3": 0.28106194690265485,
-        "O4": 0.23982300884955743
+        "O1": 0.49858407079645994,
+        "O2": 0.4330973451327431,
+        "O3": 0.2996460176991149,
+        "O4": 0.23327433628318578
       },
-      "avg_epoch_reward": 2.580016418546221,
-      "timestamp": "2025-11-26T01:47:35.668179",
+      "avg_epoch_reward": 68.22901970314473,
+      "timestamp": "2025-11-26T02:38:39.876450",
       "avg_makespan": 197.75,
-      "avg_wait_time": 4.137859154023331,
-      "average_machine_utilization": 0.29826548672566344,
-      "average_operator_utilization": 0.37283185840707933
+      "avg_wait_time": 4.276880893153766,
+      "average_machine_utilization": 0.29292035398230076,
+      "average_operator_utilization": 0.366150442477876
     },
     {
-      "avg_machine_utilization": 0.29562444641275437,
-      "avg_operator_utilization": 0.369530558015943,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.7286200235885487,
-      "per_machine_utilization": {
-        "0": 0.3835252435783878,
-        "1": 0.30735163861824566,
-        "2": 0.2678476527900797,
-        "3": 0.21913197519929106,
-        "4": 0.30026572187776784
-      },
-      "per_operator_utilization": {
-        "O1": 0.4556244464127543,
-        "O2": 0.5459698848538528,
-        "O3": 0.2887511071744903,
-        "O4": 0.18777679362267477
-      },
-      "avg_epoch_reward": 2.651858731447237,
-      "timestamp": "2025-11-26T01:48:19.359110",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.7286200235885487,
-      "average_machine_utilization": 0.29562444641275437,
-      "average_operator_utilization": 0.369530558015943
-    },
-    {
-      "avg_machine_utilization": 0.2984588131089458,
-      "avg_operator_utilization": 0.37307351638618225,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.7432939366320275,
-      "per_machine_utilization": {
-        "0": 0.47475642161204584,
-        "1": 0.27546501328609346,
-        "2": 0.18866253321523463,
-        "3": 0.2513728963684674,
-        "4": 0.30203720106288745
-      },
-      "per_operator_utilization": {
-        "O1": 0.5057573073516383,
-        "O2": 0.4534986713906109,
-        "O3": 0.2974313551815764,
-        "O4": 0.2356067316209032
-      },
-      "avg_epoch_reward": 2.687159148842799,
-      "timestamp": "2025-11-26T01:49:04.240965",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.7432939366320275,
-      "average_machine_utilization": 0.2984588131089458,
-      "average_operator_utilization": 0.37307351638618225
-    },
-    {
-      "avg_machine_utilization": 0.29881310894596963,
-      "avg_operator_utilization": 0.37351638618246213,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.198728719240725,
-      "per_machine_utilization": {
-        "0": 0.42072630646589876,
-        "1": 0.302037201062887,
-        "2": 0.2421612046058459,
-        "3": 0.2510186005314434,
-        "4": 0.2781222320637733
-      },
-      "per_operator_utilization": {
-        "O1": 0.44340124003542924,
-        "O2": 0.5069973427812221,
-        "O3": 0.3151461470327721,
-        "O4": 0.22852081488042494
-      },
-      "avg_epoch_reward": 2.6376417180295215,
-      "timestamp": "2025-11-26T01:49:47.546714",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.198728719240725,
-      "average_machine_utilization": 0.29881310894596963,
-      "average_operator_utilization": 0.37351638618246213
-    },
-    {
-      "avg_machine_utilization": 0.3015221238938051,
-      "avg_operator_utilization": 0.3769026548672565,
+      "avg_machine_utilization": 0.3008495575221238,
+      "avg_operator_utilization": 0.3760619469026546,
       "average_makespan": 197.75,
-      "average_wait_time": 5.237424371414635,
+      "average_wait_time": 3.9130765453276792,
       "per_machine_utilization": {
-        "0": 0.40353982300884933,
-        "1": 0.28761061946902616,
-        "2": 0.28035398230088504,
-        "3": 0.281238938053097,
-        "4": 0.2548672566371683
+        "0": 0.2867256637168141,
+        "1": 0.292035398230088,
+        "2": 0.3030088495575221,
+        "3": 0.2614159292035395,
+        "4": 0.361061946902655
       },
       "per_operator_utilization": {
-        "O1": 0.48123893805309687,
-        "O2": 0.47663716814159285,
-        "O3": 0.26991150442477874,
-        "O4": 0.27982300884955735
+        "O1": 0.43168141592920306,
+        "O2": 0.5532743362831858,
+        "O3": 0.3058407079646018,
+        "O4": 0.21345132743362807
       },
-      "avg_epoch_reward": 2.7184190525261123,
-      "timestamp": "2025-11-26T01:50:32.582590",
+      "avg_epoch_reward": 65.43224448724715,
+      "timestamp": "2025-11-26T02:39:29.596252",
       "avg_makespan": 197.75,
-      "avg_wait_time": 5.237424371414635,
-      "average_machine_utilization": 0.3015221238938051,
-      "average_operator_utilization": 0.3769026548672565
+      "avg_wait_time": 3.9130765453276792,
+      "average_machine_utilization": 0.3008495575221238,
+      "average_operator_utilization": 0.3760619469026546
     },
     {
-      "avg_machine_utilization": 0.2954118689105401,
-      "avg_operator_utilization": 0.36926483613817507,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.454815675762463,
+      "avg_machine_utilization": 0.29203539823008845,
+      "avg_operator_utilization": 0.36504424778761063,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.469380893153764,
       "per_machine_utilization": {
-        "0": 0.44995571302037163,
-        "1": 0.2825509300265718,
-        "2": 0.17856510186005312,
-        "3": 0.28343666961913166,
-        "4": 0.2825509300265722
+        "0": 0.28230088495575245,
+        "1": 0.23539823008849528,
+        "2": 0.3470796460176992,
+        "3": 0.2909734513274333,
+        "4": 0.30442477876106205
       },
       "per_operator_utilization": {
-        "O1": 0.48963684676705005,
-        "O2": 0.41629760850310005,
-        "O3": 0.3287865367581928,
-        "O4": 0.24233835252435762
+        "O1": 0.3922123893805308,
+        "O2": 0.5021238938053096,
+        "O3": 0.2801769911504423,
+        "O4": 0.2856637168141594
       },
-      "avg_epoch_reward": 2.7062411860056343,
-      "timestamp": "2025-11-26T01:51:15.898602",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.454815675762463,
-      "average_machine_utilization": 0.2954118689105401,
-      "average_operator_utilization": 0.36926483613817507
+      "avg_epoch_reward": 65.99473946476833,
+      "timestamp": "2025-11-26T02:40:20.451897",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.469380893153764,
+      "average_machine_utilization": 0.29203539823008845,
+      "average_operator_utilization": 0.36504424778761063
     },
     {
-      "avg_machine_utilization": 0.295766164747564,
-      "avg_operator_utilization": 0.36970770593445496,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.4629678496755063,
+      "avg_machine_utilization": 0.29830088495575213,
+      "avg_operator_utilization": 0.3728761061946902,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.8852504583711576,
       "per_machine_utilization": {
-        "0": 0.38529672276350724,
-        "1": 0.31178033658104465,
-        "2": 0.2770593445527015,
-        "3": 0.23985828166519013,
-        "4": 0.2648361381753765
+        "0": 0.3353982300884955,
+        "1": 0.23716814159291996,
+        "2": 0.26460176991150464,
+        "3": 0.2923893805309731,
+        "4": 0.36194690265486734
       },
       "per_operator_utilization": {
-        "O1": 0.4830823737821076,
-        "O2": 0.45721877767936175,
-        "O3": 0.282905225863596,
-        "O4": 0.25562444641275456
+        "O1": 0.4474336283185837,
+        "O2": 0.49274336283185854,
+        "O3": 0.3201769911504424,
+        "O4": 0.23115044247787597
       },
-      "avg_epoch_reward": 2.5993863056039364,
-      "timestamp": "2025-11-26T01:52:01.101395",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.4629678496755063,
-      "average_machine_utilization": 0.295766164747564,
-      "average_operator_utilization": 0.36970770593445496
+      "avg_epoch_reward": 65.18915798035437,
+      "timestamp": "2025-11-26T02:41:09.890355",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.8852504583711576,
+      "average_machine_utilization": 0.29830088495575213,
+      "average_operator_utilization": 0.3728761061946902
     },
     {
-      "avg_machine_utilization": 0.29332152347209894,
-      "avg_operator_utilization": 0.36665190434012374,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.274598284458116,
-      "per_machine_utilization": {
-        "0": 0.3941541186891052,
-        "1": 0.30292294065544695,
-        "2": 0.22480070859167392,
-        "3": 0.28255093002657183,
-        "4": 0.26217891939769705
-      },
-      "per_operator_utilization": {
-        "O1": 0.46465899025686414,
-        "O2": 0.46341895482728024,
-        "O3": 0.3165633303808679,
-        "O4": 0.22196634189548262
-      },
-      "avg_epoch_reward": 2.733510974092845,
-      "timestamp": "2025-11-26T01:52:44.516586",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.274598284458116,
-      "average_machine_utilization": 0.29332152347209894,
-      "average_operator_utilization": 0.36665190434012374
-    },
-    {
-      "avg_machine_utilization": 0.2974358974358972,
-      "avg_operator_utilization": 0.37179487179487153,
+      "avg_machine_utilization": 0.30022988505747117,
+      "avg_operator_utilization": 0.3752873563218389,
       "average_makespan": 197.925,
-      "average_wait_time": 3.6899243714146364,
+      "average_wait_time": 4.049163501849415,
       "per_machine_utilization": {
-        "0": 0.4137931034482756,
-        "1": 0.3572060123784256,
-        "2": 0.2351900972590629,
-        "3": 0.22546419098143203,
-        "4": 0.2555260831122901
+        "0": 0.317418213969938,
+        "1": 0.2413793103448271,
+        "2": 0.29796640141467745,
+        "3": 0.30221043324491564,
+        "4": 0.3421750663129976
       },
       "per_operator_utilization": {
-        "O1": 0.4792219274977889,
-        "O2": 0.4940760389036248,
-        "O3": 0.3165340406719718,
-        "O4": 0.19734748010610065
+        "O1": 0.43625110521662214,
+        "O2": 0.5055702917771882,
+        "O3": 0.3336870026525198,
+        "O4": 0.22564102564102567
       },
-      "avg_epoch_reward": 2.6363150194577845,
-      "timestamp": "2025-11-26T01:53:33.335819",
+      "avg_epoch_reward": 69.03105287685004,
+      "timestamp": "2025-11-26T02:42:00.349719",
       "avg_makespan": 197.925,
-      "avg_wait_time": 3.6899243714146364,
-      "average_machine_utilization": 0.2974358974358972,
-      "average_operator_utilization": 0.37179487179487153
+      "avg_wait_time": 4.049163501849415,
+      "average_machine_utilization": 0.30022988505747117,
+      "average_operator_utilization": 0.3752873563218389
     },
     {
-      "avg_machine_utilization": 0.3026749335695304,
-      "avg_operator_utilization": 0.378343666961913,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.2820982844581135,
+      "avg_machine_utilization": 0.2983362831858406,
+      "avg_operator_utilization": 0.3729203539823008,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.82677219750159,
       "per_machine_utilization": {
-        "0": 0.4605845881310892,
-        "1": 0.28697962798937077,
-        "2": 0.23720106288751105,
-        "3": 0.22568644818423347,
-        "4": 0.30292294065544734
+        "0": 0.2761061946902656,
+        "1": 0.2575221238938049,
+        "2": 0.315575221238938,
+        "3": 0.34070796460176955,
+        "4": 0.30176991150442484
       },
       "per_operator_utilization": {
-        "O1": 0.5225863596102741,
-        "O2": 0.4850310008857394,
-        "O3": 0.27174490699734266,
-        "O4": 0.2340124003542957
+        "O1": 0.47451327433628293,
+        "O2": 0.47929203539822995,
+        "O3": 0.3219469026548672,
+        "O4": 0.21592920353982292
       },
-      "avg_epoch_reward": 2.6331354948115027,
-      "timestamp": "2025-11-26T01:54:20.517161",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.2820982844581135,
-      "average_machine_utilization": 0.3026749335695304,
-      "average_operator_utilization": 0.378343666961913
+      "avg_epoch_reward": 69.75311105742875,
+      "timestamp": "2025-11-26T02:42:49.304164",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.82677219750159,
+      "average_machine_utilization": 0.2983362831858406,
+      "average_operator_utilization": 0.3729203539823008
     },
     {
-      "avg_machine_utilization": 0.3012201591511935,
-      "avg_operator_utilization": 0.37652519893899183,
+      "avg_machine_utilization": 0.2877099911582669,
+      "avg_operator_utilization": 0.3596374889478336,
       "average_makespan": 197.925,
-      "average_wait_time": 4.113293936632028,
+      "average_wait_time": 3.466880893153765,
       "per_machine_utilization": {
-        "0": 0.4482758620689653,
-        "1": 0.3236074270557024,
-        "2": 0.28169761273209554,
-        "3": 0.1916887709991154,
-        "4": 0.26083112290008864
+        "0": 0.25817860300618933,
+        "1": 0.2528735632183903,
+        "2": 0.23006189213085768,
+        "3": 0.28806366047745324,
+        "4": 0.4093722369584439
       },
       "per_operator_utilization": {
-        "O1": 0.47656940760388977,
-        "O2": 0.5294429708222811,
-        "O3": 0.2518125552608311,
-        "O4": 0.24827586206896543
+        "O1": 0.41803713527851427,
+        "O2": 0.511936339522546,
+        "O3": 0.3085764809902742,
+        "O4": 0.19999999999999987
       },
-      "avg_epoch_reward": 2.6313635104466946,
-      "timestamp": "2025-11-26T01:55:08.792153",
+      "avg_epoch_reward": 65.11819167531397,
+      "timestamp": "2025-11-26T02:43:40.052212",
       "avg_makespan": 197.925,
-      "avg_wait_time": 4.113293936632028,
-      "average_machine_utilization": 0.3012201591511935,
-      "average_operator_utilization": 0.37652519893899183
+      "avg_wait_time": 3.466880893153765,
+      "average_machine_utilization": 0.2877099911582669,
+      "average_operator_utilization": 0.3596374889478336
     },
     {
-      "avg_machine_utilization": 0.29114058355437644,
-      "avg_operator_utilization": 0.3639257294429705,
+      "avg_machine_utilization": 0.28849557522123875,
+      "avg_operator_utilization": 0.36061946902654846,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.482206980110287,
+      "per_machine_utilization": {
+        "0": 0.31592920353982296,
+        "1": 0.22831858407079614,
+        "2": 0.2814159292035397,
+        "3": 0.31858407079645984,
+        "4": 0.29823008849557514
+      },
+      "per_operator_utilization": {
+        "O1": 0.45079646017699065,
+        "O2": 0.47415929203539803,
+        "O3": 0.2925663716814159,
+        "O4": 0.2249557522123893
+      },
+      "avg_epoch_reward": 67.25307268333908,
+      "timestamp": "2025-11-26T02:44:29.376261",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.482206980110287,
+      "average_machine_utilization": 0.28849557522123875,
+      "average_operator_utilization": 0.36061946902654846
+    },
+    {
+      "avg_machine_utilization": 0.2930026572187775,
+      "avg_operator_utilization": 0.3662533215234719,
+      "average_makespan": 197.575,
+      "average_wait_time": 3.414272197501592,
+      "per_machine_utilization": {
+        "0": 0.2984942426926485,
+        "1": 0.24003542958370197,
+        "2": 0.271036315323295,
+        "3": 0.28166519043401206,
+        "4": 0.37378210806023004
+      },
+      "per_operator_utilization": {
+        "O1": 0.42692648361381724,
+        "O2": 0.4809565987599643,
+        "O3": 0.3348095659875995,
+        "O4": 0.22232063773250665
+      },
+      "avg_epoch_reward": 65.27010073399467,
+      "timestamp": "2025-11-26T02:45:21.295793",
+      "avg_makespan": 197.575,
+      "avg_wait_time": 3.414272197501592,
+      "average_machine_utilization": 0.2930026572187775,
+      "average_operator_utilization": 0.3662533215234719
+    },
+    {
+      "avg_machine_utilization": 0.286867256637168,
+      "avg_operator_utilization": 0.35858407079646004,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.351446110545068,
+      "per_machine_utilization": {
+        "0": 0.29115044247787625,
+        "1": 0.2592920353982296,
+        "2": 0.2495575221238938,
+        "3": 0.28212389380530944,
+        "4": 0.35221238938053107
+      },
+      "per_operator_utilization": {
+        "O1": 0.4226548672566373,
+        "O2": 0.46477876106194654,
+        "O3": 0.32318584070796447,
+        "O4": 0.2237168141592919
+      },
+      "avg_epoch_reward": 64.71052669165519,
+      "timestamp": "2025-11-26T02:46:10.324986",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.351446110545068,
+      "average_machine_utilization": 0.286867256637168,
+      "average_operator_utilization": 0.35858407079646004
+    },
+    {
+      "avg_machine_utilization": 0.30079575596816965,
+      "avg_operator_utilization": 0.37599469496021215,
       "average_makespan": 197.925,
-      "average_wait_time": 4.176446110545071,
+      "average_wait_time": 4.232641762718982,
       "per_machine_utilization": {
-        "0": 0.45358090185676364,
-        "1": 0.26790450928381915,
-        "2": 0.21609195402298847,
-        "3": 0.22281167108753275,
-        "4": 0.2953138815207781
+        "0": 0.3174182139699382,
+        "1": 0.17860300618921257,
+        "2": 0.26896551724137946,
+        "3": 0.33669319186560526,
+        "4": 0.40229885057471276
       },
       "per_operator_utilization": {
-        "O1": 0.4974358974358969,
-        "O2": 0.48258178603006163,
-        "O3": 0.2974358974358971,
-        "O4": 0.17824933687002645
+        "O1": 0.4937223695844384,
+        "O2": 0.4806366047745356,
+        "O3": 0.32042440318302373,
+        "O4": 0.20919540229885056
       },
-      "avg_epoch_reward": 2.6878643545382213,
-      "timestamp": "2025-11-26T01:55:55.246568",
+      "avg_epoch_reward": 65.60272498645078,
+      "timestamp": "2025-11-26T02:47:00.030891",
       "avg_makespan": 197.925,
-      "avg_wait_time": 4.176446110545071,
-      "average_machine_utilization": 0.29114058355437644,
-      "average_operator_utilization": 0.3639257294429705
+      "avg_wait_time": 4.232641762718982,
+      "average_machine_utilization": 0.30079575596816965,
+      "average_operator_utilization": 0.37599469496021215
     },
     {
-      "avg_machine_utilization": 0.2987776793622673,
-      "avg_operator_utilization": 0.37347209920283414,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.503293936632027,
+      "avg_machine_utilization": 0.28870796460176973,
+      "avg_operator_utilization": 0.36088495575221213,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.603185240979853,
       "per_machine_utilization": {
-        "0": 0.44995571302037185,
-        "1": 0.3622674933569525,
-        "2": 0.19503985828166526,
-        "3": 0.2333038086802477,
-        "4": 0.2533215234720993
+        "0": 0.34159292035398237,
+        "1": 0.2212389380530968,
+        "2": 0.19840707964601778,
+        "3": 0.2690265486725661,
+        "4": 0.4132743362831856
       },
       "per_operator_utilization": {
-        "O1": 0.44162976085030964,
-        "O2": 0.5068201948627102,
-        "O3": 0.30274579273693514,
-        "O4": 0.2426926483613816
+        "O1": 0.4925663716814157,
+        "O2": 0.413451327433628,
+        "O3": 0.32070796460176976,
+        "O4": 0.21681415929203526
       },
-      "avg_epoch_reward": 2.6498935724312846,
-      "timestamp": "2025-11-26T01:56:42.211764",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.503293936632027,
-      "average_machine_utilization": 0.2987776793622673,
-      "average_operator_utilization": 0.37347209920283414
+      "avg_epoch_reward": 65.16949026137533,
+      "timestamp": "2025-11-26T02:47:50.321591",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.603185240979853,
+      "average_machine_utilization": 0.28870796460176973,
+      "average_operator_utilization": 0.36088495575221213
     },
     {
-      "avg_machine_utilization": 0.2917271922054915,
-      "avg_operator_utilization": 0.3646589902568644,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.224598284458113,
+      "avg_machine_utilization": 0.2894867256637166,
+      "avg_operator_utilization": 0.3618584070796457,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.127098284458112,
       "per_machine_utilization": {
-        "0": 0.42958370239149685,
-        "1": 0.3135518157661642,
-        "2": 0.24145261293179832,
-        "3": 0.23755535872453462,
-        "4": 0.2364924712134635
+        "0": 0.30176991150442484,
+        "1": 0.2053097345132739,
+        "2": 0.22584070796460162,
+        "3": 0.2879646017699111,
+        "4": 0.42654867256637163
       },
       "per_operator_utilization": {
-        "O1": 0.4814880425154999,
-        "O2": 0.4421612046058457,
-        "O3": 0.27511071744907006,
-        "O4": 0.2598759964570418
+        "O1": 0.5024778761061943,
+        "O2": 0.48584070796460127,
+        "O3": 0.26601769911504414,
+        "O4": 0.19309734513274338
       },
-      "avg_epoch_reward": 2.6016269398215868,
-      "timestamp": "2025-11-26T01:57:29.079917",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.224598284458113,
-      "average_machine_utilization": 0.2917271922054915,
-      "average_operator_utilization": 0.3646589902568644
+      "avg_epoch_reward": 68.21873283530799,
+      "timestamp": "2025-11-26T02:48:42.125813",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.127098284458112,
+      "average_machine_utilization": 0.2894867256637166,
+      "average_operator_utilization": 0.3618584070796457
     },
     {
-      "avg_machine_utilization": 0.2970062001771477,
-      "avg_operator_utilization": 0.3712577502214346,
+      "avg_machine_utilization": 0.2838263950398581,
+      "avg_operator_utilization": 0.3547829937998226,
       "average_makespan": 197.575,
-      "average_wait_time": 3.978837414892898,
+      "average_wait_time": 3.577967849675505,
       "per_machine_utilization": {
-        "0": 0.4154118689105398,
-        "1": 0.3374667847652785,
-        "2": 0.2823737821080602,
-        "3": 0.19645704162976046,
-        "4": 0.2533215234720993
+        "0": 0.24623560673162095,
+        "1": 0.26395039858281616,
+        "2": 0.20814880425155002,
+        "3": 0.28981399468556207,
+        "4": 0.41098317094774117
       },
       "per_operator_utilization": {
-        "O1": 0.4720992028343662,
-        "O2": 0.50593445527015,
-        "O3": 0.25137289636846744,
-        "O4": 0.2556244464127546
+        "O1": 0.4669619131975197,
+        "O2": 0.4472984942426924,
+        "O3": 0.3038086802480069,
+        "O4": 0.20106288751107138
       },
-      "avg_epoch_reward": 2.4924857876878246,
-      "timestamp": "2025-11-26T01:58:16.982830",
+      "avg_epoch_reward": 67.0264858150032,
+      "timestamp": "2025-11-26T02:49:31.192538",
       "avg_makespan": 197.575,
-      "avg_wait_time": 3.978837414892898,
-      "average_machine_utilization": 0.2970062001771477,
-      "average_operator_utilization": 0.3712577502214346
+      "avg_wait_time": 3.577967849675505,
+      "average_machine_utilization": 0.2838263950398581,
+      "average_operator_utilization": 0.3547829937998226
     },
     {
-      "avg_machine_utilization": 0.30767050487156755,
-      "avg_operator_utilization": 0.38458813108945944,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.8140548061972455,
+      "avg_machine_utilization": 0.29037168141592906,
+      "avg_operator_utilization": 0.3629646017699113,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.282206980110288,
       "per_machine_utilization": {
-        "0": 0.4596988485385294,
-        "1": 0.34809565987599583,
-        "2": 0.28113374667847657,
-        "3": 0.22798937112488887,
-        "4": 0.22143489813994693
+        "0": 0.33097345132743355,
+        "1": 0.19823008849557483,
+        "2": 0.20070796460176982,
+        "3": 0.28300884955752176,
+        "4": 0.43893805309734507
       },
       "per_operator_utilization": {
-        "O1": 0.5282550930026567,
-        "O2": 0.5156775907883078,
-        "O3": 0.2506643046944197,
-        "O4": 0.24375553587245347
+        "O1": 0.46690265486725613,
+        "O2": 0.4541592920353979,
+        "O3": 0.3568141592920354,
+        "O4": 0.17398230088495564
       },
-      "avg_epoch_reward": 2.669804360183785,
-      "timestamp": "2025-11-26T01:59:04.155185",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.8140548061972455,
-      "average_machine_utilization": 0.30767050487156755,
-      "average_operator_utilization": 0.38458813108945944
+      "avg_epoch_reward": 69.6575719173479,
+      "timestamp": "2025-11-26T02:50:22.533562",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.282206980110288,
+      "average_machine_utilization": 0.29037168141592906,
+      "average_operator_utilization": 0.3629646017699113
     },
     {
-      "avg_machine_utilization": 0.2942072630646587,
-      "avg_operator_utilization": 0.3677590788308234,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.863946110545072,
+      "avg_machine_utilization": 0.2881769911504423,
+      "avg_operator_utilization": 0.3602212389380529,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.9253591540233304,
       "per_machine_utilization": {
-        "0": 0.43224092116917595,
-        "1": 0.3436669619131969,
-        "2": 0.2953055801594331,
-        "3": 0.21204605845881275,
-        "4": 0.18777679362267516
+        "0": 0.33716814159292036,
+        "1": 0.21858407079645978,
+        "2": 0.14584070796460163,
+        "3": 0.28088495575221206,
+        "4": 0.45840707964601773
       },
       "per_operator_utilization": {
-        "O1": 0.4558015943312662,
-        "O2": 0.49034543844109796,
-        "O3": 0.2487156775907882,
-        "O4": 0.2761736049601415
+        "O1": 0.4511504424778758,
+        "O2": 0.4669026548672562,
+        "O3": 0.3394690265486726,
+        "O4": 0.18336283185840704
       },
-      "avg_epoch_reward": 2.5610120188997674,
-      "timestamp": "2025-11-26T01:59:53.099229",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.863946110545072,
-      "average_machine_utilization": 0.2942072630646587,
-      "average_operator_utilization": 0.3677590788308234
+      "avg_epoch_reward": 66.89284624668831,
+      "timestamp": "2025-11-26T02:51:11.891038",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.9253591540233304,
+      "average_machine_utilization": 0.2881769911504423,
+      "average_operator_utilization": 0.3602212389380529
     },
     {
-      "avg_machine_utilization": 0.29544729849424245,
-      "avg_operator_utilization": 0.36930912311780306,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.8134026322842027,
+      "avg_machine_utilization": 0.2874336283185839,
+      "avg_operator_utilization": 0.3592920353982299,
+      "average_makespan": 197.75,
+      "average_wait_time": 5.357641762718981,
       "per_machine_utilization": {
-        "0": 0.398582816651904,
-        "1": 0.34455270150575684,
-        "2": 0.2914083259521699,
-        "3": 0.19645704162976046,
-        "4": 0.24623560673162095
+        "0": 0.27345132743362827,
+        "1": 0.20176991150442444,
+        "2": 0.21823008849557524,
+        "3": 0.31716814159292,
+        "4": 0.42654867256637174
       },
       "per_operator_utilization": {
-        "O1": 0.4984942426926479,
-        "O2": 0.5015057573073513,
-        "O3": 0.25420726306465874,
-        "O4": 0.22302922940655437
+        "O1": 0.4297345132743361,
+        "O2": 0.4695575221238935,
+        "O3": 0.335221238938053,
+        "O4": 0.20265486725663712
       },
-      "avg_epoch_reward": 2.665226111166597,
-      "timestamp": "2025-11-26T02:00:40.395699",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.8134026322842027,
-      "average_machine_utilization": 0.29544729849424245,
-      "average_operator_utilization": 0.36930912311780306
+      "avg_epoch_reward": 68.14941588759274,
+      "timestamp": "2025-11-26T02:52:01.162462",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 5.357641762718981,
+      "average_machine_utilization": 0.2874336283185839,
+      "average_operator_utilization": 0.3592920353982299
     },
     {
-      "avg_machine_utilization": 0.29410097431355153,
-      "avg_operator_utilization": 0.36762621789193956,
-      "average_makespan": 197.575,
-      "average_wait_time": 5.2629678496755075,
+      "avg_machine_utilization": 0.2879292035398229,
+      "avg_operator_utilization": 0.3599115044247786,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.707424371414632,
       "per_machine_utilization": {
-        "0": 0.47475642161204584,
-        "1": 0.3418954827280773,
-        "2": 0.2552701505757307,
-        "3": 0.16031886625332112,
-        "4": 0.23826395039858306
+        "0": 0.30884955752212395,
+        "1": 0.18938053097345098,
+        "2": 0.19999999999999998,
+        "3": 0.28654867256637134,
+        "4": 0.4548672566371682
       },
       "per_operator_utilization": {
-        "O1": 0.4756421612046053,
-        "O2": 0.4903454384410982,
-        "O3": 0.23560673162090337,
-        "O4": 0.2689105403011513
+        "O1": 0.4768141592920351,
+        "O2": 0.47769911504424745,
+        "O3": 0.3017699115044249,
+        "O4": 0.18336283185840704
       },
-      "avg_epoch_reward": 2.5403830860027297,
-      "timestamp": "2025-11-26T02:01:29.025596",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 5.2629678496755075,
-      "average_machine_utilization": 0.29410097431355153,
-      "average_operator_utilization": 0.36762621789193956
+      "avg_epoch_reward": 67.06218124532299,
+      "timestamp": "2025-11-26T02:52:50.830948",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.707424371414632,
+      "average_machine_utilization": 0.2879292035398229,
+      "average_operator_utilization": 0.3599115044247786
     },
     {
-      "avg_machine_utilization": 0.29427812223206357,
-      "avg_operator_utilization": 0.36784765279007947,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.524380893153769,
+      "avg_machine_utilization": 0.283433628318584,
+      "avg_operator_utilization": 0.3542920353982299,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.784598284458113,
       "per_machine_utilization": {
-        "0": 0.48804251550044264,
-        "1": 0.3330380868024794,
-        "2": 0.26908768821966345,
-        "3": 0.1695305580159429,
-        "4": 0.21169176262178943
+        "0": 0.29292035398230093,
+        "1": 0.23185840707964556,
+        "2": 0.17292035398230096,
+        "3": 0.28141592920353947,
+        "4": 0.43805309734513287
       },
       "per_operator_utilization": {
-        "O1": 0.47776793622674885,
-        "O2": 0.49707705934455254,
-        "O3": 0.2480070859167404,
-        "O4": 0.24853852967227616
+        "O1": 0.48141592920353954,
+        "O2": 0.4146902654867252,
+        "O3": 0.3805309734513274,
+        "O4": 0.1405309734513275
       },
-      "avg_epoch_reward": 2.700984947254862,
-      "timestamp": "2025-11-26T02:02:18.725202",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.524380893153769,
-      "average_machine_utilization": 0.29427812223206357,
-      "average_operator_utilization": 0.36784765279007947
+      "avg_epoch_reward": 69.2594599848828,
+      "timestamp": "2025-11-26T02:53:40.629145",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.784598284458113,
+      "average_machine_utilization": 0.283433628318584,
+      "average_operator_utilization": 0.3542920353982299
     },
     {
-      "avg_machine_utilization": 0.2940301151461468,
-      "avg_operator_utilization": 0.3675376439326835,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.962859154023333,
+      "avg_machine_utilization": 0.28534513274336265,
+      "avg_operator_utilization": 0.3566814159292034,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.570576545327679,
       "per_machine_utilization": {
-        "0": 0.45969884853852927,
-        "1": 0.3507528786536753,
-        "2": 0.3000885739592559,
-        "3": 0.16474756421612005,
-        "4": 0.19486271036315342
+        "0": 0.2716814159292037,
+        "1": 0.23716814159292007,
+        "2": 0.223716814159292,
+        "3": 0.26761061946902615,
+        "4": 0.4265486725663715
       },
       "per_operator_utilization": {
-        "O1": 0.45881310894596944,
-        "O2": 0.5257750221434893,
-        "O3": 0.2621789193976969,
-        "O4": 0.22338352524357835
+        "O1": 0.4700884955752209,
+        "O2": 0.4297345132743362,
+        "O3": 0.3532743362831856,
+        "O4": 0.17362831858407057
       },
-      "avg_epoch_reward": 2.6737614429849916,
-      "timestamp": "2025-11-26T02:03:06.697130",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.962859154023333,
-      "average_machine_utilization": 0.2940301151461468,
-      "average_operator_utilization": 0.3675376439326835
+      "avg_epoch_reward": 68.70076634165892,
+      "timestamp": "2025-11-26T02:54:28.543557",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.570576545327679,
+      "average_machine_utilization": 0.28534513274336265,
+      "average_operator_utilization": 0.3566814159292034
     },
     {
-      "avg_machine_utilization": 0.30051372896368456,
-      "avg_operator_utilization": 0.37564216120460575,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.326446110545071,
+      "avg_machine_utilization": 0.27819469026548654,
+      "avg_operator_utilization": 0.3477433628318582,
+      "average_makespan": 197.75,
+      "average_wait_time": 5.593293936632024,
       "per_machine_utilization": {
-        "0": 0.4605845881310893,
-        "1": 0.34632418069087645,
-        "2": 0.2607617360496015,
-        "3": 0.18069087688219626,
-        "4": 0.25420726306465924
+        "0": 0.36814159292035403,
+        "1": 0.200884955752212,
+        "2": 0.16442477876106196,
+        "3": 0.23008849557522087,
+        "4": 0.42743362831858395
       },
       "per_operator_utilization": {
-        "O1": 0.5004428697962795,
-        "O2": 0.5059344552701506,
-        "O3": 0.2719220549158547,
-        "O4": 0.22426926483613802
+        "O1": 0.4619469026548668,
+        "O2": 0.4120353982300883,
+        "O3": 0.31061946902654863,
+        "O4": 0.20637168141592907
       },
-      "avg_epoch_reward": 2.603862643544102,
-      "timestamp": "2025-11-26T02:03:54.173900",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.326446110545071,
-      "average_machine_utilization": 0.30051372896368456,
-      "average_operator_utilization": 0.37564216120460575
+      "avg_epoch_reward": 64.10184483707486,
+      "timestamp": "2025-11-26T02:55:17.370954",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 5.593293936632024,
+      "average_machine_utilization": 0.27819469026548654,
+      "average_operator_utilization": 0.3477433628318582
     },
     {
-      "avg_machine_utilization": 0.2926483613817535,
-      "avg_operator_utilization": 0.3658104517271919,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.445793936632029,
+      "avg_machine_utilization": 0.2845663716814158,
+      "avg_operator_utilization": 0.3557079646017698,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.980793936632024,
       "per_machine_utilization": {
-        "0": 0.46678476527900775,
-        "1": 0.31886625332152285,
-        "2": 0.26767050487156774,
-        "3": 0.19468556244464089,
-        "4": 0.2152347209920284
+        "0": 0.272566371681416,
+        "1": 0.18584070796460153,
+        "2": 0.17150442477876104,
+        "3": 0.2787610619469023,
+        "4": 0.5141592920353981
       },
       "per_operator_utilization": {
-        "O1": 0.5114260407440206,
-        "O2": 0.4850310008857394,
-        "O3": 0.23153232949512823,
-        "O4": 0.23525243578387936
+        "O1": 0.42707964601769904,
+        "O2": 0.42530973451327414,
+        "O3": 0.3968141592920352,
+        "O4": 0.17362831858407068
       },
-      "avg_epoch_reward": 2.5766127294052144,
-      "timestamp": "2025-11-26T02:04:41.832636",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.445793936632029,
-      "average_machine_utilization": 0.2926483613817535,
-      "average_operator_utilization": 0.3658104517271919
+      "avg_epoch_reward": 68.13618940268604,
+      "timestamp": "2025-11-26T02:56:04.208131",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.980793936632024,
+      "average_machine_utilization": 0.2845663716814158,
+      "average_operator_utilization": 0.3557079646017698
     },
     {
-      "avg_machine_utilization": 0.2983525243578386,
-      "avg_operator_utilization": 0.37294065544729826,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.55698958880594,
+      "avg_machine_utilization": 0.2796460176991149,
+      "avg_operator_utilization": 0.3495575221238937,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.5292721975015913,
       "per_machine_utilization": {
-        "0": 0.4357838795394151,
-        "1": 0.3436669619131971,
-        "2": 0.2820194862710362,
-        "3": 0.2398582816651901,
-        "4": 0.1904340124003544
+        "0": 0.2743362831858406,
+        "1": 0.19469026548672538,
+        "2": 0.15769911504424783,
+        "3": 0.2706194690265484,
+        "4": 0.5008849557522125
       },
       "per_operator_utilization": {
-        "O1": 0.5349867139061112,
-        "O2": 0.4891054030115142,
-        "O3": 0.25580159433126654,
-        "O4": 0.21186891054030102
+        "O1": 0.42690265486725637,
+        "O2": 0.43982300884955733,
+        "O3": 0.34814159292035385,
+        "O4": 0.18336283185840696
       },
-      "avg_epoch_reward": 2.654964167456942,
-      "timestamp": "2025-11-26T02:05:28.686833",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.55698958880594,
-      "average_machine_utilization": 0.2983525243578386,
-      "average_operator_utilization": 0.37294065544729826
+      "avg_epoch_reward": 65.93029221180377,
+      "timestamp": "2025-11-26T02:56:53.803262",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.5292721975015913,
+      "average_machine_utilization": 0.2796460176991149,
+      "average_operator_utilization": 0.3495575221238937
     },
     {
-      "avg_machine_utilization": 0.2942781222320635,
-      "avg_operator_utilization": 0.3678476527900794,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.417750458371158,
+      "avg_machine_utilization": 0.27975221238938036,
+      "avg_operator_utilization": 0.34969026548672555,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.2543808931537646,
       "per_machine_utilization": {
-        "0": 0.43666961913197494,
-        "1": 0.3658104517271915,
-        "2": 0.2368467670504872,
-        "3": 0.21151461470327693,
-        "4": 0.22054915854738716
+        "0": 0.28761061946902655,
+        "1": 0.17876106194690247,
+        "2": 0.13787610619469023,
+        "3": 0.2838938053097342,
+        "4": 0.5106194690265485
       },
       "per_operator_utilization": {
-        "O1": 0.4823737821080596,
-        "O2": 0.4979627989371122,
-        "O3": 0.28981399468556235,
-        "O4": 0.2012400354295837
+        "O1": 0.4759292035398227,
+        "O2": 0.4435398230088493,
+        "O3": 0.35398230088495575,
+        "O4": 0.1253097345132742
       },
-      "avg_epoch_reward": 2.541464556697246,
-      "timestamp": "2025-11-26T02:06:14.973869",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.417750458371158,
-      "average_machine_utilization": 0.2942781222320635,
-      "average_operator_utilization": 0.3678476527900794
+      "avg_epoch_reward": 68.07871451358801,
+      "timestamp": "2025-11-26T02:57:40.415220",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.2543808931537646,
+      "average_machine_utilization": 0.27975221238938036,
+      "average_operator_utilization": 0.34969026548672555
     },
     {
-      "avg_machine_utilization": 0.29874224977856484,
-      "avg_operator_utilization": 0.37342781222320603,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.044163501849419,
+      "avg_machine_utilization": 0.28431858407079624,
+      "avg_operator_utilization": 0.35539823008849536,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.533837414892897,
       "per_machine_utilization": {
-        "0": 0.4632418069087684,
-        "1": 0.3436669619131969,
-        "2": 0.3078830823737821,
-        "3": 0.1920283436669615,
-        "4": 0.18689105403011524
+        "0": 0.3044247787610618,
+        "1": 0.1999999999999996,
+        "2": 0.17309734513274336,
+        "3": 0.2529203539823005,
+        "4": 0.4911504424778761
       },
       "per_operator_utilization": {
-        "O1": 0.4674933569530553,
-        "O2": 0.5263064658990253,
-        "O3": 0.2524357838795392,
-        "O4": 0.2474756421612044
+        "O1": 0.3987610619469023,
+        "O2": 0.4407079646017697,
+        "O3": 0.3833628318584068,
+        "O4": 0.19876106194690252
       },
-      "avg_epoch_reward": 2.6897952752751184,
-      "timestamp": "2025-11-26T02:07:00.885453",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.044163501849419,
-      "average_machine_utilization": 0.29874224977856484,
-      "average_operator_utilization": 0.37342781222320603
+      "avg_epoch_reward": 67.6573052570254,
+      "timestamp": "2025-11-26T02:58:29.159333",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.533837414892897,
+      "average_machine_utilization": 0.28431858407079624,
+      "average_operator_utilization": 0.35539823008849536
     },
     {
-      "avg_machine_utilization": 0.296403897254207,
-      "avg_operator_utilization": 0.37050487156775874,
-      "average_makespan": 197.575,
-      "average_wait_time": 3.5617721975015932,
+      "avg_machine_utilization": 0.27709734513274326,
+      "avg_operator_utilization": 0.34637168141592906,
+      "average_makespan": 197.75,
+      "average_wait_time": 4.915685240979852,
       "per_machine_utilization": {
-        "0": 0.4313551815766162,
-        "1": 0.33658104517271875,
-        "2": 0.29530558015943303,
-        "3": 0.20531443755535833,
-        "4": 0.21346324180690884
+        "0": 0.35486725663716806,
+        "1": 0.17256637168141564,
+        "2": 0.1431858407079647,
+        "3": 0.2484955752212386,
+        "4": 0.4663716814159291
       },
       "per_operator_utilization": {
-        "O1": 0.5007971656333033,
-        "O2": 0.5213463241806905,
-        "O3": 0.2536758193091229,
-        "O4": 0.20620017714791836
+        "O1": 0.45769911504424743,
+        "O2": 0.361592920353982,
+        "O3": 0.34654867256637184,
+        "O4": 0.219646017699115
       },
-      "avg_epoch_reward": 2.622134206488773,
-      "timestamp": "2025-11-26T02:07:48.323866",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 3.5617721975015932,
-      "average_machine_utilization": 0.296403897254207,
-      "average_operator_utilization": 0.37050487156775874
+      "avg_epoch_reward": 65.07246700454034,
+      "timestamp": "2025-11-26T02:59:15.160373",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 4.915685240979852,
+      "average_machine_utilization": 0.27709734513274326,
+      "average_operator_utilization": 0.34637168141592906
     },
     {
-      "avg_machine_utilization": 0.2964393268379094,
-      "avg_operator_utilization": 0.3705491585473868,
-      "average_makespan": 197.575,
-      "average_wait_time": 4.518728719240724,
+      "avg_machine_utilization": 0.2813451327433627,
+      "avg_operator_utilization": 0.3516814159292033,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.844924371414635,
       "per_machine_utilization": {
-        "0": 0.469441984056687,
-        "1": 0.318866253321523,
-        "2": 0.2905225863596102,
-        "3": 0.2085031000885736,
-        "4": 0.1948627103631533
+        "0": 0.31150442477876095,
+        "1": 0.2106194690265484,
+        "2": 0.1033628318584071,
+        "3": 0.2555752212389377,
+        "4": 0.5256637168141594
       },
       "per_operator_utilization": {
-        "O1": 0.4977856510186,
-        "O2": 0.4961913197519925,
-        "O3": 0.26341895482728067,
-        "O4": 0.22480070859167395
+        "O1": 0.41150442477876065,
+        "O2": 0.4350442477876104,
+        "O3": 0.34053097345132743,
+        "O4": 0.2196460176991149
       },
-      "avg_epoch_reward": 2.544171010685462,
-      "timestamp": "2025-11-26T02:08:35.046733",
-      "avg_makespan": 197.575,
-      "avg_wait_time": 4.518728719240724,
-      "average_machine_utilization": 0.2964393268379094,
-      "average_operator_utilization": 0.3705491585473868
+      "avg_epoch_reward": 66.24029039898677,
+      "timestamp": "2025-11-26T03:00:04.162700",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.844924371414635,
+      "average_machine_utilization": 0.2813451327433627,
+      "average_operator_utilization": 0.3516814159292033
+    },
+    {
+      "avg_machine_utilization": 0.27851327433628303,
+      "avg_operator_utilization": 0.34814159292035374,
+      "average_makespan": 197.75,
+      "average_wait_time": 3.883076545327678,
+      "per_machine_utilization": {
+        "0": 0.3106194690265485,
+        "1": 0.20973451327433595,
+        "2": 0.14353982300884957,
+        "3": 0.21008849557522088,
+        "4": 0.5185840707964602
+      },
+      "per_operator_utilization": {
+        "O1": 0.4474336283185838,
+        "O2": 0.41911504424778756,
+        "O3": 0.30778761061946874,
+        "O4": 0.21823008849557501
+      },
+      "avg_epoch_reward": 66.59670194533642,
+      "timestamp": "2025-11-26T03:00:50.348268",
+      "avg_makespan": 197.75,
+      "avg_wait_time": 3.883076545327678,
+      "average_machine_utilization": 0.27851327433628303,
+      "average_operator_utilization": 0.34814159292035374
     }
   ],
-  "avg_machine_utilization": 0.2964393268379094,
-  "avg_operator_utilization": 0.3705491585473868,
-  "avg_epoch_reward": 2.544171010685462,
-  "last_10_avg_reward": 2.5940000000000003,
+  "avg_machine_utilization": 0.27851327433628303,
+  "avg_operator_utilization": 0.34814159292035374,
+  "avg_epoch_reward": 66.59670194533642,
+  "last_10_avg_reward": 66.463,
   "last_10_avg_loss": null,
   "last_10_avg_td": null,
-  "avg_makespan": 197.575
+  "avg_makespan": 197.75
 }

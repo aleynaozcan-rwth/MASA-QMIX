@@ -19,7 +19,7 @@ from typing import List
 # TODO(Phase3C.1): integrate with TaskGenerator via merge_config(DEFAULT_TASKGEN_PARAMS, cfg)
 DEFAULT_TASKGEN_PARAMS = {
     "task_generator": {
-        "arrival_lambda": 0.2,
+        "arrival_lambda": 0.4,
         "seq_length": {"min": 1, "max": 5}
     }
 }

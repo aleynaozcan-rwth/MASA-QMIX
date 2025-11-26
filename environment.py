@@ -906,7 +906,7 @@ class MASAEnv:
         # [v6-FIX] Reward scaling for stable Q-learning
         # QMIX loss explodes with large rewards (Loss was 3.8M!)
         # Scale rewards to match SMAC range: episode ~45 → ~0.9
-        reward_scale = float(getattr(self, 'reward_scale', 50.0))
+        reward_scale = float(getattr(self, 'reward_scale', 2.0))
         R_total = R_total / reward_scale
         
         # Validate final R_total is finite
