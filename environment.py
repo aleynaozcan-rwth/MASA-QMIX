@@ -24,6 +24,8 @@ import logging
 import math
 import random
 import time
+import csv
+
 from collections import deque, Counter
 from typing import Optional, Any, Dict, List
 from dataclasses import dataclass, asdict, field
@@ -1074,6 +1076,51 @@ class MASAEnv:
                 yield self.env.timeout(1e-9)
                 continue
             
+            # ===================== DECISION LOGGING =====================
+            try:
+                decision_time = float(self.env.now)
+                job_id = int(job.id)
+
+                # Allowed machines parsed from operation metadata
+                allowed_machine_indices_log = list(allowed_machine_indices) if allowed_machine_indices else []
+
+                # Availability mask for this job
+                avail_actions_all = self._build_avail_actions()
+                j_index = self.jobs.index(job)
+                avail_actions_log = avail_actions_all[j_index].tolist()
+
+                # Action chosen by agent
+                action_idx = int(chosen_idx)
+
+                # Observation for this job
+                obs_vec = self._build_agent_obs(job)
+
+                # Global state vector
+                state_vec = self._build_global_state()
+
+                # Write logs
+                self._write_observation_log(
+                    decision_time,
+                    job_id,
+                    allowed_machine_indices_log,
+                    avail_actions_log,
+                    action_idx,
+                    obs_vec
+                )
+
+                self._write_state_log(
+                    decision_time,
+                    job_id,
+                    allowed_machine_indices_log,
+                    avail_actions_log,
+                    action_idx,
+                    state_vec
+                )
+
+            except Exception as e:
+                print(f"[LOGGING ERROR] Could not write decision logs for job {getattr(job, 'id', '?')}: {e}")
+            # ================== END DECISION LOGGING =====================
+                
             # C13 FIX: Strict machine index validation
             # Validate against actual machine count (len(machine_resources)),
             # not n_actions (which is an abstract action space concept).
@@ -1524,8 +1571,131 @@ class MASAEnv:
             self.done = True
             if not getattr(self.decisions_ready, 'triggered', False):
                 self.decisions_ready.succeed()
+    # ======================================================
+    # Helper functions for decision logging
+    # ======================================================
+
+    def _colorize(self, value, color_name=None, *args, **kwargs):
+        """Universal safe version: ignore colors and return raw clean value."""
+        if isinstance(value, (list, dict)):
+            try:
+                return json.dumps(value)
+            except Exception:
+                return str(value)
+        return value
+
+
+    def _write_observation_log(
+        self, decision_time, job_id, allowed_machine_indices,
+        avail_actions, action_idx, obs
+    ):
+        """Append to decision_observation_metrics.csv (7-element observation)."""
+        log_dir = os.path.join("my_data_and_graph", "historydata")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "decision_observation_metrics.csv")
+
+        header = [
+            "decision_time",
+            "job_id",
+            "allowed_machine_indices",
+            "avail_actions",
+            "action_idx",
+            "obs_current_op_type",
+            "obs_total_operations",
+            "obs_remaining_operations",
+            "obs_wait_time",
+            "obs_theoretical_machine_count",
+            "obs_free_machine_count",
+            "obs_n_jobs_active",
+        ]
+
+        row = [
+            self._colorize(decision_time, "red"),
+            self._colorize(job_id, "blue"),
+            self._colorize(allowed_machine_indices, "green"),
+            self._colorize(avail_actions, "purple"),
+            self._colorize(action_idx, "orange"),
+            self._colorize(float(obs[0]), "cyan"),
+            self._colorize(float(obs[1]), "cyan"),
+            self._colorize(float(obs[2]), "cyan"),
+            self._colorize(float(obs[3]), "cyan"),
+            self._colorize(float(obs[4]), "cyan"),
+            self._colorize(float(obs[5]), "cyan"),
+            self._colorize(float(obs[6]), "cyan"),
+        ]
+
+        write_header = not os.path.exists(log_path)
+        with open(log_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(header)
+            writer.writerow(row)
+
+    def _write_state_log(
+        self, decision_time, job_id, allowed_machine_indices,
+        avail_actions, action_idx, state
+    ):
+        """Append to decision_state_metrics.csv (10-element global state)."""
+        log_dir = os.path.join("my_data_and_graph", "historydata")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "decision_state_metrics.csv")
+
+        header = [
+            "decision_time",
+            "job_id",
+            "allowed_machine_indices",
+            "avail_actions",
+            "action_idx",
+            "state_n_jobs_arrived",
+            "state_n_jobs_processing",
+            "state_n_jobs_waiting",
+            "state_n_ops_arrived",
+            "state_n_ops_processing",
+            "state_n_ops_waiting",
+            "state_avg_machine_util",
+            "state_avg_operator_util",
+            "state_global_avg_wait",
+            "state_episode_time_fraction",
+        ]
+
+        row = [
+            self._colorize(decision_time, "red"),
+            self._colorize(job_id, "blue"),
+            self._colorize(allowed_machine_indices, "green"),
+            self._colorize(avail_actions, "purple"),
+            self._colorize(action_idx, "orange"),
+            self._colorize(float(state[0]), "yellow"),
+            self._colorize(float(state[1]), "yellow"),
+            self._colorize(float(state[2]), "yellow"),
+            self._colorize(float(state[3]), "yellow"),
+            self._colorize(float(state[4]), "yellow"),
+            self._colorize(float(state[5]), "yellow"),
+            self._colorize(float(state[6]), "yellow"),
+            self._colorize(float(state[7]), "yellow"),
+            self._colorize(float(state[8]), "yellow"),
+            self._colorize(float(state[9]), "yellow"),
+        ]
+
+        write_header = not os.path.exists(log_path)
+        with open(log_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(header)
+            writer.writerow(row)
+
+
+
+
+    # ======================================================
+    # END HELPER FUNCTIONS
+    # ======================================================
+
+    def _build_global_state(self):
+        """Wrapper around canonical build_state_vector()."""
+        return build_state_vector(self)
 
     # ---------------- Observation / State / Avail -----------------
+
     def _build_all_agent_obs(self):
         # Strict delegation to utils.env_obs.build_agent_obs. Missing helper
         # will raise ImportError at module import time so errors are explicit.

@@ -74,6 +74,20 @@ class QMIX:
         self.model_dir = base_dir
         print(f"[QMIX] Checkpoints dir: {self.model_dir}")
         print(f"[QMIX] Policy initialized and moved to device: {self.device}")
+        
+    def _grad_norm(self):
+        """Compute global L2 norm of all gradients in self.params.
+
+        NOTE: clip_grad_norm_ returns the norm *before* clipping,
+        so we use this helper to measure grad_before and grad_after correctly.
+        """
+        total = 0.0
+        for p in self.params:
+            if p.grad is None:
+                continue
+            param_norm = p.grad.data.norm(2)
+            total += param_norm.item() ** 2
+        return total ** 0.5
 
     # ==========================================================
     # === Main Learning Function ===============================
@@ -129,13 +143,24 @@ class QMIX:
 
         # [PHASE6-FIX] Task 6.6: Use clip_grad_norm_ return value for grad norm computation
         # This is more efficient (computed internally) and avoids manual loops with .item() calls
-        grad_norm_before = torch.nn.utils.clip_grad_norm_(self.params, float('inf'))  # Compute norm without clipping
-        grad_norm_before = float(grad_norm_before)  # Convert to Python float once
+        #grad_norm_before = torch.nn.utils.clip_grad_norm_(self.params, float('inf'))  # Compute norm without clipping
+        #grad_norm_before = float(grad_norm_before)  # Convert to Python float once
         
         # [C1] Gradient clipping is CRITICAL for training stability - must not fail silently
-        grad_norm_after = torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
-        grad_norm_after = float(grad_norm_after)  # Convert to Python float once
+        #grad_norm_after = torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+        #grad_norm_after = float(grad_norm_after)  # Convert to Python float once
+        # NOTE: clip_grad_norm_ returns the pre-clipping gradient norm, 
+        # so we must compute grad_before/after manually. The first call 
+        # does NOT give the clipped norm. We use a custom grad_norm() 
+        # function to correctly measure both before and after clipping.
 
+        # 1) Gradient norm BEFORE clipping
+        grad_norm_before = self._grad_norm()
+        # 2) Apply gradient clipping (modifies gradients in-place)
+        torch.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+        # 3) Gradient norm AFTER clipping
+        grad_norm_after = self._grad_norm()
+        # 4) Optimizer update
         self.optimizer.step()
 
         # --- Target update ---
