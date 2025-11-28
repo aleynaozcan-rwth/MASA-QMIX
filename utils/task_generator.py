@@ -352,87 +352,30 @@ class TaskGenerator:
             logging.getLogger(__name__).exception("[TaskGen] Failed to start arrival loop: %s", e)
 
     def create_job(self, num_ops: Optional[int] = None):
-        """Create a single converted job (op tuples) suitable for MASAEnv.add_job().
-
-        This helper mirrors the conversion logic used in `arrival_loop` but
-        returns the converted operations list so callers (MASAEnv) can add
-        it at the desired arrival time.
         """
-        # Use owner env if available so we can consult workcenters_meta / config
+        Create a single converted job whose operation tuples are canonical:
+            (op_type,)
+        All machine eligibility (allowed_machine_indices), durations,
+        operator eligibility and masks will be computed later inside
+        WorkCenter.create_decision_item() and MASAEnv.
+        """
+
+        # Use owner env if available so we can consult machine topology
         owner = getattr(self, '_owner_env', None)
         env = owner if owner is not None else None
 
         # Generate raw job objects (ops sequence)
-        ops_objs = self.generate_constrained_task(num_ops=num_ops, jobagent_id=(len(getattr(env, 'jobs', [])) if env is not None else None))
+        ops_objs = self.generate_constrained_task(
+            num_ops=num_ops,
+            jobagent_id=(len(getattr(env, 'jobs', [])) if env is not None else None)
+        )
 
-        # Convert ops_objs into (op_type, allowed_machine_indices, per_machine) tuples
+        # Convert ops_objs → canonical form: (op_type,)
         converted_ops = []
-        # Build capability_map: operation index -> list of MACHINE NAMES that support it
-        # MACHINE-BASED (not WorkCenter-based) - WorkCenter is metadata only
-        capability_map = {op: [] for op in range(0, 32)}
-        machine_to_wc = {}  # Track machine -> workcenter mapping for metadata
-        try:
-            machine_registry = getattr(getattr(env, 'workcenters_meta', {}), 'machine_registry', {})
-            for mname, mdata in machine_registry.items():
-                wc = int(mdata.get('workcenter', 0))
-                machine_to_wc[mname] = wc
-                caps = list(mdata.get('capabilities', []))
-                # Map operation -> machines that CAN DO this operation
-                for c in caps:
-                    capability_map.setdefault(int(c), []).append(mname)
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
 
         for jobobj in ops_objs:
             op_type = int(getattr(jobobj, 'index_id', 0))
-            op_name = f"Op{op_type+1}"
-            # capability_map now stores MACHINE NAMES that can do this operation
-            allowed_machines = list(sorted(set(capability_map.get(op_type, []))))
-            if not allowed_machines:
-                raise ValueError(f"No capable machines for operation {op_name}; check machine capabilities")
-
-            # For each capable machine, lookup duration from proc_time_means
-            per_machine_indices = []
-            per_wc = {}
-            op_map = self.proc_time_means.get(op_name, {})
-
-            wc_meta = getattr(env, 'workcenters_meta', None)
-            machine_index_map = {}
-            try:
-                if wc_meta is not None:
-                    machine_index_map = getattr(wc_meta, 'machine_index', {}) or {}
-            except Exception as e:
-                machine_index_map = {}
-
-            # Extract WorkCenter IDs from capable machines (for backward compat)
-            allowed_wcs = list(sorted(set(machine_to_wc.get(m, 0) for m in allowed_machines)))
-
-            for machine_name in allowed_machines:
-                # Check if duration exists for this machine
-                if machine_name not in op_map:
-                    raise ValueError(
-                        f"Missing duration for {op_name} on {machine_name}. "
-                        f"Machine {machine_name} is capable (in capabilities list) but no processing time defined. "
-                        f"Check DEFAULT_PROCESSING_TIMES consistency."
-                    )
-
-
-                try:
-                    mi = int(machine_index_map.get(machine_name))
-                except Exception as e:
-                    # Fallback: try to get machine index from WorkCenter
-                    wc = machine_to_wc.get(machine_name, 0)
-                    try:
-                        mi = int(self.machine_name_by_wc.get(int(wc), 0))
-                    except Exception as e:
-                        mi = 0
-
-                per_machine_indices.append(int(mi))
-                per_wc[int(mi)] = float(op_map.get(machine_name))
-
-            # IMPORTANT: keep the second tuple element as the list of allowed
-            # workcenters (not machine indices) to remain compatible with
-            # tests and legacy callers expecting workcenter ids here.
-            converted_ops.append((op_type, allowed_wcs, per_wc))
+            converted_ops.append((op_type,))   # canonical minimal form
 
         return converted_ops
+

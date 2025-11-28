@@ -1020,17 +1020,29 @@ class MASAEnv:
 
             # normalize op formats: support legacy (allowed_machine_indices, dur) and
             # canonical (op_type, allowed_machine_indices, per_wc_durations)
-            op_type = None
-            allowed_machine_indices = []
-            per_wc = None
-            base_dur = None
-            if isinstance(op, (list, tuple)):
-                if len(op) == 2:
-                    allowed_machine_indices, base_dur = op
-                elif len(op) >= 3:
-                    op_type = op[0]
-                    allowed_machine_indices = op[1]
-                    per_wc = op[2]
+            #op_type = None
+            #allowed_machine_indices = []
+            #per_wc = None
+            #base_dur = None
+            #if isinstance(op, (list, tuple)):
+            #    if len(op) == 2:
+            #        allowed_machine_indices, base_dur = op
+            #    elif len(op) >= 3:
+            #        op_type = op[0]
+            #        allowed_machine_indices = op[1]
+            #        per_wc = op[2]
+
+            # NEW FIXED: operation tuple normalization – no legacy allowed_machine_indices parsing
+            # Canonical format: (op_type,) only. Real allowed machines come from WorkCenter.
+            try:
+                op_type = int(op[0]) if isinstance(op, (list, tuple)) and len(op) >= 1 else int(job.current_op_idx)
+            except:
+                op_type = int(job.current_op_idx)
+
+            allowed_machine_indices = []   # will be filled later by WorkCenter.create_decision_item
+            per_wc = {}
+            base_dur = 0.0
+
 
             # C1 FIX Rule 2: Removed exception swallowing - invalid op_idx must fail explicitly
             # Resolve operation index (machine-level op index) for use in
@@ -1072,28 +1084,159 @@ class MASAEnv:
                 self.decisions_ready.succeed()
 
             chosen_idx = (yield resume_evt)
-            if chosen_idx is None:
-                yield self.env.timeout(1e-9)
+            # Eğer agent aksiyon seçemedi (chosen_idx == -1), job beklesin ve bir sonraki decision pointte tekrar denesin
+            if chosen_idx is None or int(chosen_idx) == -1:
+                # Log: No valid action, job waits
+                decision_time = float(self.env.now)
+                job_id = int(job.id)
+                allowed_machine_indices_log = list(decision_item.get("allowed_machine_indices", []))
+                avail_actions_all = self._build_avail_actions()
+                j_index = self.jobs.index(job)
+                n_machines = len(avail_actions_all[j_index])
+                allowed_set = set(allowed_machine_indices_log)
+                avail_actions_log = [1 if i in allowed_set else 0 for i in range(n_machines)]
+                action_idx = -1
+                obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
+                state_vec = self._build_global_state()
+                self._write_observation_log(
+                    decision_time,
+                    job_id,
+                    allowed_machine_indices_log,
+                    avail_actions_log,
+                    action_idx,
+                    obs_vec
+                )
+                self._write_state_log(
+                    decision_time,
+                    job_id,
+                    allowed_machine_indices_log,
+                    avail_actions_log,
+                    action_idx,
+                    job.current_op_idx,
+                    state_vec
+                )
+                # Loglama fonksiyonuna reason ekle
+                # scheduling_trace.csv için reason: no_valid_action_job_waits
+                if hasattr(self, '_write_scheduling_trace_log'):
+                    self._write_scheduling_trace_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        action_idx,
+                        None,
+                        'no_valid_action_job_waits'
+                    )
+                # Job beklesin (ör: 1 simpy time unit)
+                yield self.env.timeout(1)
                 continue
             
             # ===================== DECISION LOGGING =====================
+            # Fail-safe: Eğer agent maskte 0 olan bir aksiyonu seçtiyse, job beklesin ve tekrar denesin
+            if 'action_idx' in locals() and action_idx >= 0 and action_idx < len(avail_actions_log):
+                if avail_actions_log[action_idx] == 0:
+                    print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={action_idx}) according to mask. Job will wait and retry.")
+                    self._write_observation_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        action_idx,
+                        obs_vec
+                    )
+                    self._write_state_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        action_idx,
+                        job.current_op_idx,
+                        state_vec
+                    )
+                    if hasattr(self, '_write_scheduling_trace_log'):
+                        self._write_scheduling_trace_log(
+                            decision_time,
+                            job_id,
+                            allowed_machine_indices_log,
+                            avail_actions_log,
+                            action_idx,
+                            None,
+                            'unavailable_machine_selected_job_waits'
+                        )
+                    yield self.env.timeout(1)
+                    continue
             try:
                 decision_time = float(self.env.now)
                 job_id = int(job.id)
 
                 # Allowed machines parsed from operation metadata
-                allowed_machine_indices_log = list(allowed_machine_indices) if allowed_machine_indices else []
+                #allowed_machine_indices_log = list(allowed_machine_indices) if allowed_machine_indices else []
+                # ----------------------------------------------
+                # Allowed machines for LOGGING (canonical version)
+                # ----------------------------------------------
+                #if isinstance(decision_item, dict) and 'allowed_machine_indices' in decision_item:
+                #    allowed_machine_indices_log = list(decision_item['allowed_machine_indices'])
+                #else:
+                #    allowed_machine_indices_log = list(allowed_machine_indices) if allowed_machine_indices else []
+                # ----------------------------------------------
+
+                # Canonical allowed machine list (ONLY from decision_item)
+                allowed_machine_indices_log = list(decision_item.get("allowed_machine_indices", []))         
 
                 # Availability mask for this job
                 avail_actions_all = self._build_avail_actions()
                 j_index = self.jobs.index(job)
-                avail_actions_log = avail_actions_all[j_index].tolist()
+                # Mask only allowed machines as 1, others as 0
+                n_machines = len(avail_actions_all[j_index])
+                allowed_set = set(allowed_machine_indices_log)
+                avail_actions_log = [1 if i in allowed_set else 0 for i in range(n_machines)]
 
                 # Action chosen by agent
                 action_idx = int(chosen_idx)
+                # Seçilen aksiyonun gerçekten uygulanabilirliğini kontrol et
+                action_failed = False
+                fail_reason = ''
+                chosen_machine_name = None
+                if action_idx >= 0 and action_idx < len(avail_actions_log):
+                    # Makine ve operatör uygun mu?
+                    mlist = self.workcenters_meta.machine_list if hasattr(self.workcenters_meta, 'machine_list') else list(range(len(avail_actions_log)))
+                    mname = mlist[action_idx] if action_idx < len(mlist) else str(action_idx)
+                    # Makine busy mi?
+                    m_busy = False
+                    if self.machine_resources and 0 <= action_idx < len(self.machine_resources):
+                        res = self.machine_resources[action_idx]
+                        m_busy = len(res.users) > 0
+                    # Operatör uygun mu?
+                    op_ok = False
+                    if self.operators is not None:
+                        registry = self.workcenters_meta.machine_registry or {}
+                        wc_idx_for_m = int(registry[mname].get('workcenter', -1)) if mname in registry else None
+                        for op_obj in self.operators.operators_object_list:
+                            if mname in op_obj.qualified_machines and wc_idx_for_m is not None and op_obj.can_do_job(job.current_op_idx, wc_idx_for_m) and not op_obj.is_busy:
+                                op_ok = True
+                                break
+                    if m_busy or not op_ok:
+                        action_failed = True
+                        fail_reason = 'action_failed_due_to_resource_contention'
+                        chosen_machine_name = None
+                else:
+                    if action_idx == -1:
+                        fail_reason = 'machine_not_available'
+                        chosen_machine_name = None
+                # Loglama fonksiyonuna reason ve bekleme süresi ekle
+                # ...existing code...
+                # DEBUG: action_idx ve maski yan yana yazdır
+                print(f"[DEBUG] action_idx: {action_idx}, avail_actions_log: {avail_actions_log}")
+                if action_idx < len(avail_actions_log):
+                    print(f"[DEBUG] Selected machine mask value: {avail_actions_log[action_idx]}")
+                    if avail_actions_log[action_idx] == 0:
+                        print(f"[WARNING] Agent selected a machine (idx={action_idx}) that is not available according to mask!")
+                # DEBUG: allowed_machine_indices_log ve avail_actions_log'u yan yana yazdır
+                print(f"[DEBUG] allowed_machine_indices_log: {allowed_machine_indices_log}")
+                print(f"[DEBUG] avail_actions_log: {avail_actions_log}")
 
                 # Observation for this job
-                obs_vec = self._build_agent_obs(job)
+                obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
 
                 # Global state vector
                 state_vec = self._build_global_state()
@@ -1114,6 +1257,7 @@ class MASAEnv:
                     allowed_machine_indices_log,
                     avail_actions_log,
                     action_idx,
+                    obs_vec[0] + 1,
                     state_vec
                 )
 
@@ -1133,6 +1277,39 @@ class MASAEnv:
                     f"[0, {n_machines}). Job={job.id}, op_idx={job.current_op_idx}, "
                     f"t={float(self.env.now):.2f}"
                 )
+            # MASK ELIGIBILITY FAIL-SAFE: Eğer agent maskte 0 olan bir aksiyonu seçtiyse, job beklesin ve tekrar denesin
+            if chosen_idx_int >= 0 and chosen_idx_int < len(avail_actions_log):
+                if avail_actions_log[chosen_idx_int] == 0:
+                    print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={chosen_idx_int}) according to mask. Job will wait and retry.")
+                    self._write_observation_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        chosen_idx_int,
+                        obs_vec
+                    )
+                    self._write_state_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        chosen_idx_int,
+                        job.current_op_idx,
+                        state_vec
+                    )
+                    if hasattr(self, '_write_scheduling_trace_log'):
+                        self._write_scheduling_trace_log(
+                            decision_time,
+                            job_id,
+                            allowed_machine_indices_log,
+                            avail_actions_log,
+                            chosen_idx_int,
+                            None,
+                            'unavailable_machine_selected_job_waits'
+                        )
+                    yield self.env.timeout(1)
+                    continue
 
             # C1 FIX Rule 2 + C17: Duration computation must not use fake default 0.0
             # compute duration - fail if no valid duration found
@@ -1154,23 +1331,35 @@ class MASAEnv:
             if dur is None and base_dur is not None:
                 dur = float(base_dur)
             
+            # File: MASAEnv.py (inside MASAEnv class, _job_process method)
+
+            # ... (duration calculation logic attempting to derive 'dur') ...
+                    
             # Final fallback: use a reasonable default (e.g., 2.0) instead of failing
             if dur is None or dur <= 0:
-                import random
-                dur = float(random.uniform(1.5, 3.5))  # Random duration between 1.5-3.5
-                LOG.warning(
-                    f"[DURATION_FALLBACK] No valid duration found for job={job.id}, machine={chosen_idx}. "
-                    f"Using fallback duration={dur:.2f}. "
+                # -------------------------------------------------------------
+                # !!! CRITICAL FIX 3: REMOVE RANDOM DURATION FALLBACK AND RAISE ERROR !!!
+                # Job execution is strictly deterministic and requires positive, finite duration.
+                
+                error_msg = (
+                    f"[CRITICAL ERROR - DURATION MISSING] No valid positive duration found for "
+                    f"job={job.id}, machine={chosen_idx}. Duration must be explicitly provided and positive. "
+                    f"Check TaskGenerator and processing_time_means configuration. "
                     f"per_machine_durations={decision_item.get('per_machine_durations', {})}, "
                     f"per_wc={per_wc}, base_dur={base_dur}"
                 )
-            
+                logging.getLogger(__name__).error(error_msg)
+                # Use ValueError as used elsewhere in this module for config errors (e.g., _validate_processing_times)
+                raise ValueError(error_msg)
+                # -------------------------------------------------------------
+
             # C17 validation: Duration must be positive and finite
             if dur <= 0 or not np.isfinite(dur):
                 raise ValueError(
                     f"[C1+C17] Invalid duration {dur} for job={job.id}, machine={chosen_idx}. "
                     f"Duration must be positive and finite."
                 )
+            # ...
 
             # Before acquiring resources, build a decision-time trace that
             # records machine/operator availability for every eligible machine.
@@ -1319,11 +1508,12 @@ class MASAEnv:
 
             # determine chosen machine/operator labels
             chosen_m_idx = int(chosen_idx)
+            chosen_mid = chosen_m_idx
             # if chosen_idx indexes into allowed_list (legacy), map
-            if allowed_list and chosen_m_idx < len(allowed_list) and int(allowed_list[chosen_m_idx]) != chosen_m_idx:
-                chosen_mid = int(allowed_list[chosen_m_idx])
-            else:
-                chosen_mid = chosen_m_idx
+            #if allowed_list and chosen_m_idx < len(allowed_list) and int(allowed_list[chosen_m_idx]) != chosen_m_idx:
+            #    chosen_mid = int(allowed_list[chosen_midx])
+            #else:
+            #    chosen_mid = chosen_m_idx
             
             chosen_m_name = mlist[chosen_mid] if mlist and 0 <= int(chosen_mid) < len(mlist) else f"M{int(chosen_mid)}"
             chosen_op_label = str(op_id_for_record) if 'op_id_for_record' in locals() else None
@@ -1615,7 +1805,7 @@ class MASAEnv:
             self._colorize(allowed_machine_indices, "green"),
             self._colorize(avail_actions, "purple"),
             self._colorize(action_idx, "orange"),
-            self._colorize(float(obs[0]), "cyan"),
+            self._colorize(float(obs[0]) + 1, "cyan"),
             self._colorize(float(obs[1]), "cyan"),
             self._colorize(float(obs[2]), "cyan"),
             self._colorize(float(obs[3]), "cyan"),
@@ -1633,7 +1823,7 @@ class MASAEnv:
 
     def _write_state_log(
         self, decision_time, job_id, allowed_machine_indices,
-        avail_actions, action_idx, state
+        avail_actions, action_idx, obs_current_op_type, state
     ):
         """Append to decision_state_metrics.csv (10-element global state)."""
         log_dir = os.path.join("my_data_and_graph", "historydata")
@@ -1643,6 +1833,7 @@ class MASAEnv:
         header = [
             "decision_time",
             "job_id",
+            "obs_current_op_type",
             "allowed_machine_indices",
             "avail_actions",
             "action_idx",
@@ -1661,6 +1852,7 @@ class MASAEnv:
         row = [
             self._colorize(decision_time, "red"),
             self._colorize(job_id, "blue"),
+            self._colorize(obs_current_op_type, "cyan"),
             self._colorize(allowed_machine_indices, "green"),
             self._colorize(avail_actions, "purple"),
             self._colorize(action_idx, "orange"),
@@ -1683,9 +1875,6 @@ class MASAEnv:
                 writer.writerow(header)
             writer.writerow(row)
 
-
-
-
     # ======================================================
     # END HELPER FUNCTIONS
     # ======================================================
@@ -1701,7 +1890,7 @@ class MASAEnv:
         # will raise ImportError at module import time so errors are explicit.
         return [build_agent_obs(self, j, job_index=idx) for idx, j in enumerate(self.jobs)]
 
-    def _build_agent_obs(self, job: JobAgent):
+    def _build_agent_obs(self, job: JobAgent, allowed_machine_indices=None):
         # Strict delegation to canonical helper. Let exceptions propagate for
         # clearer debugging when the helper is missing or fails.
         # Find job_index for free_machine_count calculation
@@ -1710,7 +1899,8 @@ class MASAEnv:
             if j is job:
                 job_index = idx
                 break
-        return build_agent_obs(self, job, job_index=job_index)
+        return build_agent_obs(self, job, job_index=job_index, allowed_machine_indices=allowed_machine_indices)
+    # File: MASAEnv.py (inside MASAEnv class, _build_avail_actions method)
 
     def _build_avail_actions(self):
         """Build availability matrix for all jobs and machines.
@@ -1760,11 +1950,12 @@ class MASAEnv:
             if row is None:
                 continue
             
-            # Trust row from _avail_row_for_job (already checked: capable, machine_free, operator)
-            # Double-check machine_free defensively (should already be incorporated in row)
-            for m in range(n_m):
-                if int(row[m]) == 1 and machine_free[m]:
-                    avail[idx, m] = 1
+            # -------------------------------------------------------------
+            # !!! CRITICAL FIX 4: REMOVE REDUNDANT FILTERING !!!
+            # Trust the 'row' calculated by _avail_row_for_job as the single source
+            # of truth, which already contains the final filtered mask (capable & free).
+            avail[idx, :] = row
+            # -------------------------------------------------------------
         
         return avail
 

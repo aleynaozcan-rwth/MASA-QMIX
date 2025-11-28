@@ -119,18 +119,9 @@ class RolloutWorker:
     # ------------------------------------------------
     # Action selection helpers used by Runner fallback
     # ------------------------------------------------
+    # File: MARL/common/rollout.py (inside RolloutWorker class)
+
     def _select_actions(self, obs_batch: List[Any], avail_batch: Optional[List[Any]], evaluate: bool = False, epsilon: float = None, agent_masks: Optional[List[int]] = None) -> Tuple[List[Any], Any]:
-        """
-        Return (actions_list, hidden_state) where actions_list is a list of int actions
-        This wrapper tries common agent APIs then falls back to deterministic/random picks.
-        
-        Args:
-            obs_batch: List of observations
-            avail_batch: List of available actions
-            evaluate: Whether in evaluation mode
-            epsilon: Epsilon for exploration (required)
-            agent_masks: Binary mask (1=real agent, 0=padded)
-        """
         # Epsilon must be provided explicitly
         if epsilon is None:
             raise ValueError("epsilon must be provided explicitly to _select_actions")
@@ -149,6 +140,29 @@ class RolloutWorker:
                     return self.agents.select_actions(obs_batch, avail_batch, evaluate=evaluate), None
         if hasattr(self.agents, "choose_actions"):
             return self.agents.choose_actions(obs_batch, avail_batch, evaluate=evaluate), None
+        
+        # [C1] Try per-observation act method - fail-fast if fails
+        if hasattr(self.agents, "act"):
+            actions = []
+            for ob in obs_batch:
+                a = self.agents.act(ob, None, evaluate=evaluate)
+                actions.append(a)
+            return actions, None
+            
+        # -------------------------------------------------------------
+        # !!! CRITICAL FIX 1: REMOVE UNSAFE FALLBACK AND RAISE ERROR !!!
+        # This block ensures that if no valid policy API is available, 
+        # execution halts immediately to prevent random action generation 
+        # from corrupting the learning process.
+        
+        error_msg = (
+            "[CRITICAL ERROR - AGENT FAILURE] All expected agent APIs (select_actions, choose_actions, act) "
+            "failed to produce an action batch. The rollout worker cannot safely proceed without policy input. "
+            "Ensure the 'self.agents' object implements at least one of these methods correctly."
+        )
+        logging.getLogger(__name__).error(error_msg)
+        raise RuntimeError(error_msg)
+        # -------------------------------------------------------------
 
         # [C1] Try per-observation act method - fail-fast if fails
         if hasattr(self.agents, "act"):
@@ -161,23 +175,18 @@ class RolloutWorker:
             # Fallback: pick first allowed or random
         actions = []
         for ob in obs_batch:
-            # try to extract allowed_machine_indices from ob if present
             allowed = None
             if isinstance(ob, dict):
                 allowed = ob.get("allowed_machine_indices", None) or ob.get("avail_row", None)
-            if allowed is None:
-                # no info — pick 0
-                actions.append(0)
+            allowed_list = list(allowed) if allowed is not None else []
+            # Sadece allowed_list'te varsa seçim yap, yoksa -1 ata
+            if len(allowed_list) == 0:
+                actions.append(-1)
             else:
-                # [C1] Fallback action selection - fail-fast if conversion fails
-                allowed_list = list(allowed)
-                if len(allowed_list) == 0:
-                    actions.append(None)
+                if evaluate:
+                    actions.append(int(allowed_list[0]))
                 else:
-                    if evaluate:
-                        actions.append(int(allowed_list[0]))
-                    else:
-                        actions.append(int(self.rng.choice(allowed_list)))
+                    actions.append(int(self.rng.choice(allowed_list)))
         return actions, None
 
     # ------------------------------------------------------------------
@@ -521,8 +530,8 @@ class RolloutWorker:
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"[C1] Failed to expand avail row (using permissive fallback): {e}")
 
-                    # final fallback: all-ones (permissive)
-                    avail_batch.append([1] * (max(1, num_m) * max(1, ops)))
+                    # final fallback: all-zeros (fail-safe)
+                    avail_batch.append([0] * (max(1, num_m) * max(1, ops)))
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"[C1] Failed to build avail for item (using None): {e}")
                     avail_batch.append(None)

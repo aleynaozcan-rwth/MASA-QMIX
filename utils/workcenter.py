@@ -221,181 +221,127 @@ class WorkCenters:
         return inst, int(num_wcs), int(num_ops)
     # ------------------------------------------------------------------
     def create_decision_item(self, env: Any, job: Any, op: Any, machine_free_status=None) -> Dict:
-        """Create a canonical decision_item describing an operation.
+        """
+        FIXED VERSION — Step 9A AllowedMachineIndices Stability
 
-        D: Extended with 3-step reasoning logging.
-
-        Args:
-            env: MASAEnv instance
-            job: JobAgent instance
-            op: operation tuple
-            machine_free_status: Optional[List[bool]] - per-machine free status for 3-step reasoning
-
-        Returns a dict containing at minimum the keys:
-            - job_id
-            - obs
-            - avail_row
-            - allowed_machine_indices (list of machine indices)
-            - per_machine_durations (dict machine_index -> duration)
-            - base_duration
-            - machines_can_do (D: Step 1 - capable machines)
-            - machines_free (D: Step 2 - capable + free machines)
-            - operator_details_per_machine (D: Step 3 - per-machine operator status)
-
-        Note: this function does NOT create or return a resume Event. The
-        environment is responsible for creating a `simpy.Event` and attaching
-        it to the returned decision_item under the key `resume_evt` before
-        presenting the item to the policy/runner. This keeps the resume Event
-        ownership in the env (single source of truth for SimPy events).
+        * No longer uses allowed_machine_indices from the op tuple.
+        * Only capability-based indexing is used.
+        * Stable machine_order → index mapping.
+        * No duplicates.
         """
 
-        # normalize op tuple formats
-        op_type = None
-        allowed_machine_indices = []
-        per_wc_durations = None
-        base_dur = None
-        if isinstance(op, (list, tuple)):
-            if len(op) == 2:
-                allowed_machine_indices, base_dur = op
-                op_type = None
-            elif len(op) == 3:
-                op_type = op[0]
-                allowed_machine_indices = op[1]
-                third = op[2]
-                if isinstance(third, dict):
-                    per_wc_durations = third
-                else:
-                    base_dur = float(third)
-            else:
-                try:
-                    allowed_machine_indices, base_dur = op[0], op[1]
-                except Exception:
-                    allowed_machine_indices, base_dur = [], 0.0
-        else:
-            allowed_machine_indices, base_dur = [], 0.0
-
-        allowed_machines = []
-        # allowed_machine_indices may have been provided in the op tuple; if
-        # not, we'll build it from the registry below.
-        allowed_machine_indices = list(allowed_machine_indices) if isinstance(allowed_machine_indices, (list, tuple)) else []
-        per_machine_durations = {}
-
-        try:
-            op_idx_local = int(op_type) if (op_type is not None) else int(getattr(job, 'current_op_idx', 0))
-            mlist = list(getattr(self, 'machine_list', []))
-            
-            # Build machine name -> index mapping (use machine_index if exists, else position in list)
-            mindex = getattr(self, 'machine_index', None)
-            if not mindex:
-                mindex = {mname: i for i, mname in enumerate(mlist)}
-            
-            for mname in mlist:
-                try:
-                    mreg = self.machine_registry.get(mname, {})
-                    caps = mreg.get('capabilities', [])
-                    if op_idx_local in caps:
-                        allowed_machines.append(mname)
-                        mi = int(mindex.get(mname, len(allowed_machine_indices)))
-                        allowed_machine_indices.append(mi)
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
-                    continue
-
-            # Use DEFAULT_PROCESSING_TIMES directly - no config dependency
-            op_name = f"Op{op_idx_local+1}"
-            for m in allowed_machines:
-                mi = int(mindex.get(m, 0))
-                if m in DEFAULT_PROCESSING_TIMES and op_name in DEFAULT_PROCESSING_TIMES[m]:
-                    per_machine_durations[mi] = float(DEFAULT_PROCESSING_TIMES[m][op_name])
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"[create_decision_item] Failed to populate per_machine_durations: {e}")
-            allowed_machines = []
-            allowed_machine_indices = []
-            per_machine_durations = {}
-
-        # In strict mode, we expect per_machine_durations to have been
-        # populated from processing_time_means. For compatibility expose a
-        # base_duration as the mean of per-machine durations when present.
-        if per_machine_durations:
+        # --------------------------------------------------
+        # 1) Normalize operation index
+        # --------------------------------------------------
+        if isinstance(op, (list, tuple)) and len(op) >= 1:
+            # canonical format (op_type, ..., ...)
+            op_type = op[0]
             try:
-                vals = [float(v) for v in per_machine_durations.values() if v is not None]
-                base_duration_val = sum(vals) / len(vals) if vals else 0.0
-            except Exception:
-                base_duration_val = 0.0
+                op_idx_local = int(op_type)
+            except:
+                op_idx_local = int(getattr(job, 'current_op_idx', 0))
         else:
-            base_duration_val = 0.0
+            op_idx_local = int(getattr(job, 'current_op_idx', 0))
 
-        # NOTE: Decision validation and resume Event completion is the
-        # responsibility of the environment/runner that owns the SimPy Event.
-        # This function builds the canonical per-operation metadata only.
+        # --------------------------------------------------
+        # 2) Determine capable machines
+        # --------------------------------------------------
+        mlist = list(self.machine_list)     # ["M0", "M1", "M2", "M3", "M4"]
+        allowed_machines = []
 
-        # Build eligible operator-groups mapping keyed by workcenter index for
-        # workcenters that own at least one allowed machine.
-        # D: Compute 3-step reasoning data for decision logging
-        
-        # Step 1: MachinesCanDo (machines with capability)
-        machines_can_do = list(allowed_machines)
-        
-        # Step 2: MachinesFree (capable machines that are free)
-        machines_free = []
-        if machine_free_status is not None:
-            mindex = getattr(self, 'machine_index', None)
-            mlist = getattr(self, 'machine_list', [])
-            for mname in machines_can_do:
-                # Get machine index - prefer machine_index dict, fallback to list position
-                if mindex:
-                    mi = int(mindex.get(mname, -1))
-                else:
-                    mi = mlist.index(mname) if mname in mlist else -1
-                if 0 <= mi < len(machine_free_status) and machine_free_status[mi]:
+        for mname in mlist:
+            mreg = self.machine_registry.get(mname, {})
+            caps = mreg.get('capabilities', [])
+            if op_idx_local in caps:
+                allowed_machines.append(mname)
+
+        # --------------------------------------------------
+        # 3) Convert capable machines → allowed_machine_indices
+        # Only using capability, NO op-tuple allowed list anymore
+        # --------------------------------------------------
+        allowed_machine_indices = []
+        for mname in allowed_machines:
+            mi = mlist.index(mname)  # stable index
+            allowed_machine_indices.append(mi)
+
+        # no duplicates
+        allowed_machine_indices = list(dict.fromkeys(allowed_machine_indices))
+
+        # --------------------------------------------------
+        # 4) Per-machine durations (canonical processing times)
+        # --------------------------------------------------
+        per_machine_durations = {}
+        op_name = f"Op{op_idx_local+1}"
+
+        for mname in allowed_machines:
+            mi = mlist.index(mname)
+            if mname in DEFAULT_PROCESSING_TIMES and op_name in DEFAULT_PROCESSING_TIMES[mname]:
+                per_machine_durations[mi] = float(DEFAULT_PROCESSING_TIMES[mname][op_name])
+
+        # average duration for logging
+        if per_machine_durations:
+            base_duration = sum(per_machine_durations.values()) / len(per_machine_durations)
+        else:
+            base_duration = 0.0
+
+        # --------------------------------------------------
+        # 5) MachinesFree
+        # --------------------------------------------------
+        if machine_free_status is None:
+            machines_free = list(allowed_machines)
+        else:
+            machines_free = []
+            for mname in allowed_machines:
+                mi = mlist.index(mname)
+                if machine_free_status[mi]:
                     machines_free.append(mname)
-        else:
-            # Fallback: assume all capable machines are free
-            machines_free = list(machines_can_do)
-        
-        # Step 3: Operator details per machine (only for free machines)
+
+        # --------------------------------------------------
+        # 6) Operator reasoning (unchanged logic)
+        # --------------------------------------------------
         operator_details_per_machine = {}
         if hasattr(env, 'operators') and env.operators is not None:
             for mname in machines_free:
-                wc_idx = int(self.machine_registry.get(mname, {}).get('workcenter', 0))
+                wc_idx = int(self.machine_registry[mname]["workcenter"])
                 qualified_ops = []
                 free_ops = []
                 busy_ops = []
-                
+
                 for op_obj in env.operators.operators_object_list:
-                    # Check if operator is qualified for this machine
                     if mname in op_obj.qualified_machines:
-                        # Check if operator can do this operation type
                         if op_obj.can_do_job(op_idx_local, wc_idx):
                             qualified_ops.append(str(op_obj.operator_id))
                             if not op_obj.is_busy:
                                 free_ops.append(str(op_obj.operator_id))
                             else:
                                 busy_ops.append(str(op_obj.operator_id))
-                
+
                 operator_details_per_machine[mname] = {
-                    'qualified': qualified_ops,
-                    'free': free_ops,
-                    'busy': busy_ops
+                    "qualified": qualified_ops,
+                    "free": free_ops,
+                    "busy": busy_ops,
                 }
 
-        # B: eligible_ops_by_wc removed - WorkCenter-based operator groups not used
-        # Decision item now only contains machine-level data
-        eligible_ops_by_wc = {}  # Empty for backward compatibility
-
+        # --------------------------------------------------
+        # 7) FINAL decision_item
+        # --------------------------------------------------
         decision_item = {
             "job_id": getattr(job, 'id', getattr(job, 'agent_id', None)),
             "obs": env._build_agent_obs(job),
             "avail_row": env._avail_row_for_job(job, machine_free=machine_free_status),
-            "allowed_machines": list(allowed_machines),
-            "allowed_machine_indices": list(dict.fromkeys(allowed_machine_indices)),
-            "per_machine_durations": dict(per_machine_durations),
-            "base_duration": float(base_duration_val),
-            "eligible_ops_by_wc": eligible_ops_by_wc,
-            # D: 3-step reasoning data
-            "machines_can_do": machines_can_do,
+
+            # FIXED:
+            "allowed_machines": allowed_machines,
+            "allowed_machine_indices": allowed_machine_indices,
+
+            "per_machine_durations": per_machine_durations,
+            "base_duration": float(base_duration),
+
+            # logging helpers
+            "machines_can_do": allowed_machines,
             "machines_free": machines_free,
             "operator_details_per_machine": operator_details_per_machine,
         }
 
         return decision_item
+

@@ -2902,6 +2902,8 @@ class Runner:
         win_rate = win_number / self.args.evaluate_epoch
         return win_rate, avg_reward, global_ep_idx, gantt_eval
 
+    # File: Runner.py (inside Runner class)
+
     def _select_actions_from_agents(self, batch, evaluate=False):
         """
         Best-effort wrapper to ask the agent stack for actions for a batch of decision items.
@@ -2909,11 +2911,11 @@ class Runner:
         Returns: list of chosen wc indices (or None)
         """
         obs_batch = [item.get("obs") for item in batch]
-    # Prefer per-machine 'avail_row' as the canonical mask. Operator-granular
-    # masks (historically named 'avail_mask') are deprecated and removed
-    # from runtime. When operator-granular actions are required, expand
-    # the canonical per-machine row deterministically using
-    # `np.repeat(avail_row, num_ops)`. (operator-level masks are deprecated since vX.Y)
+        # Prefer per-machine 'avail_row' as the canonical mask. Operator-granular
+        # masks (historically named 'avail_mask') are deprecated and removed
+        # from runtime. When operator-granular actions are required, expand
+        # the canonical per-machine row deterministically using
+        # `np.repeat(avail_row, num_ops)`. (operator-level masks are deprecated since vX.Y)
         avail_batch = []
         for item in batch:
             if item is None:
@@ -3019,23 +3021,19 @@ class Runner:
             logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
             pass
 
-    # last resort: simple deterministic / random pick from allowed_machine_indices
-        actions = []
-        for item in batch:
-            allowed = item.get("allowed_machine_indices", [])
-            if not allowed:
-                actions.append(None)
-            else:
-                # pick first available or random if evaluate==False
-                if evaluate:
-                    actions.append(int(allowed[0]))
-                else:
-                    try:
-                        actions.append(int(self.rolloutWorker.rng.choice(allowed)))
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(f"[C1] Exception in runner: {e}")
-                        actions.append(int(np.random.choice(allowed)))
-        return actions
+        # -------------------------------------------------------------
+        # !!! CRITICAL FIX 2: REMOVE UNSAFE FALLBACK AND RAISE ERROR !!!
+        # This block replaces the original "last resort: simple deterministic / random pick"
+        # to enforce a hard fail if no agent logic could produce an action.
+
+        error_msg = (
+            "[CRITICAL ERROR - RUNNER FALLBACK] All agent APIs and RolloutWorker.decide_batch() "
+            "failed to produce an action batch for the Runner's internal selector. "
+            "This indicates a severe policy or communication failure. Training must halt."
+        )
+        logging.getLogger(__name__).error(error_msg)
+        raise RuntimeError(error_msg)
+        # -------------------------------------------------------------
 
     def _run_event_driven_episode(self, global_ep_idx, evaluate=False):
         # Delegate event-driven execution to the RolloutWorker exclusively.

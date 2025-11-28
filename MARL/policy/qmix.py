@@ -1,3 +1,5 @@
+# Numpy import for fail-safe action_idx handling
+import numpy as np
 # =============================================================
 # MARL/policy/qmix.py
 # Step 8A.7.6 – MASA-QMIX Replay-Aware Learning + Safe AutoSave
@@ -103,7 +105,12 @@ class QMIX:
 
         o = to_t(batch["o"])
         o_next = to_t(batch["o_next"])
-        u = to_t(batch["u"], dtype=torch.long)
+        # Fail-safe: action_idx=-1 olanları 0'a çevir (torch.gather out-of-bounds hatasını engelle)
+        u_np = batch["u"]
+        if isinstance(u_np, torch.Tensor):
+            u_np = u_np.cpu().numpy()
+        u_np_safe = np.where(np.array(u_np) == -1, 0, np.array(u_np))
+        u = to_t(u_np_safe, dtype=torch.long)
         r = to_t(batch["r"])
         terminated = to_t(batch["terminated"])
         filled = to_t(batch["filled"])
@@ -396,15 +403,22 @@ class QMIX:
                 if allowed is None:
                     act = int(_np.argmax(masked_q))
                 else:
-                    # Fail-fast: mask processing must succeed
                     allowed_inds = [i for i, v in enumerate(mask) if int(v)]
                     if allowed_inds:
                         act = int(_np.random.choice(allowed_inds))
                     else:
-                        act = int(_np.argmax(masked_q))
+                        act = -1
             else:
                 # greedy
-                act = int(_np.argmax(masked_q))
+                if allowed is not None:
+                    allowed_inds = [i for i, v in enumerate(mask) if int(v)]
+                    if allowed_inds:
+                        # argmax only among allowed
+                        act = allowed_inds[int(_np.argmax([masked_q[i] for i in allowed_inds]))]
+                    else:
+                        act = -1
+                else:
+                    act = int(_np.argmax(masked_q))
 
             actions.append(act)
 

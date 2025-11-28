@@ -22,6 +22,7 @@ issues surface early.
 from __future__ import annotations 
 import numpy as np 
 from typing import Any 
+import ast
 
 
 def _require_positive (env :Any ,attr :str ):
@@ -37,45 +38,43 @@ def _require_positive (env :Any ,attr :str ):
     return f 
 
 
-def build_agent_obs (env :Any ,job :Any ,job_index :Any =None )->np .ndarray :
-    """Build and return the canonical 7-element per-agent observation.
-
-    All elements are integers (cast to float32 for numpy array).
-    No normalization is applied.
-    
-    Args:
-        env: Environment instance
-        job: Job object to build observation for
-        job_index: Optional job index in env.jobs list (needed for free_machine_count)
-    
-    Returns:
-        7-element numpy array (float32)
+def build_agent_obs(env: Any, job: Any, job_index: Any = None, allowed_machine_indices=None) -> np.ndarray:
     """
-    # No normalization needed, just extract raw integer values
-    
-    # Element 0: current_op_type (integer)
-    current_op_type = float(getattr(job, 'current_op_idx', 0))
-    
-    # Element 1: total_operations (integer)
+    Build and return the canonical 7-element per-agent observation.
+    Observation layout:
+      0. current_op_type
+      1. total_operations
+      2. remaining_operations
+      3. wait_time
+      4. theoretical_machine_count
+      5. free_machine_count
+      6. n_jobs_active
+    """
+
+    op = job.current_op()
+    if op is not None:
+        current_op_type = float(op[0])
+    else:
+        last_op = job.operations[-1]
+        current_op_type = float(last_op[0])
+
+    # allowed_machine_indices parametresi öncelikli
+    ami = allowed_machine_indices if allowed_machine_indices is not None else (op[1] if op is not None and len(op) > 1 else [])
+    if isinstance(ami, str):
+        import ast
+        ami = ast.literal_eval(ami)
+    if not isinstance(ami, (list, tuple)):
+        ami = []
+    theoretical_machine_count = float(len(ami))
+
     total_operations = float(len(job.operations))
-    
-    # Element 2: remaining_operations (integer)
-    remaining_operations = float(max(0, len(job.operations) - int(job.current_op_idx)))
-    
-    # Element 3: wait_time (integer)
+    idx = int(getattr(job, 'current_op_idx', 0))
+    remaining_operations = float(max(0, len(job.operations) - idx))
     wait_time = float(job.wait_time)
-    
-    # Element 4: theoretical_machine_count (integer, from avail_row)
-    avail_row = env._avail_row_for_job(job)
-    theoretical_machine_count = float(sum(avail_row))
-    
-    # Element 5: free_machine_count (integer, from build_avail_actions)
     avail_actions = env._build_avail_actions()
     free_machine_count = float(np.sum(avail_actions[job_index]))
-    
-    # Element 6: n_jobs_active (integer)
     n_jobs_active = float(env.active_jobs_count())
-    
+
     obs = np.array([
         current_op_type,
         total_operations,
@@ -85,10 +84,13 @@ def build_agent_obs (env :Any ,job :Any ,job_index :Any =None )->np .ndarray :
         free_machine_count,
         n_jobs_active,
     ], dtype=np.float32)
-    
+
     if obs.shape[0] != 7:
-        raise RuntimeError('Canonical observation must be length 7')
-    return obs 
+        raise RuntimeError("Canonical observation must be length 7")
+
+    return obs
+
+
 
 
 def _count_processing_ops(env: Any) -> int:
@@ -193,4 +195,4 @@ def build_state_vector(env: Any) -> np.ndarray:
     
     if state.shape[0] != 10:
         raise RuntimeError('Canonical state must be length 10')
-    return state 
+    return state
