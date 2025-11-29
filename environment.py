@@ -145,6 +145,9 @@ class MASAEnv:
             )
         self.args = args
 
+        # Ensure decision_operator_util is always defined
+        self.decision_operator_util = 0.0
+
         if hasattr(args, 'seed') and getattr(args, 'seed') is not None:
             self.seed = int(getattr(args, 'seed'))
             LOG.info("[Env Init] Using args.seed=%s", self.seed)
@@ -184,7 +187,7 @@ class MASAEnv:
         
         # Observation/state shapes defined by environment (not from args)
         # These values are derived from canonical observation/state builders in utils/env_obs.py
-        self.obs_dim_agent = 7  # fixed by canonical obs builder (see utils/env_obs.py)
+        self.obs_dim_agent = 8  # fixed by canonical obs builder (see utils/env_obs.py)
         self.state_dim = 10  # canonical state builder produces 10-element vector
         self.state_shape = self.state_dim  # alias for validation logic
         
@@ -939,12 +942,22 @@ class MASAEnv:
             os.makedirs(hist_dir, exist_ok=True)
             reward_log_path = os.path.join(hist_dir, 'reward_components.csv')
             
-            # Write header with formula explanation on first call
+            # Write dynamic header with formula explanation and current coefficients on first call
             if not self._reward_log_initialized:
+                w1 = float(getattr(self, 'reward_w1', 1.0))
+                w2 = float(getattr(self, 'reward_w2', 0.6))
+                w3 = float(getattr(self, 'reward_w3', 0.3))
+                w4 = float(getattr(self, 'reward_w4', 8.0))
+                w5 = float(getattr(self, 'reward_w5', 0.1))
+                reward_scale = float(getattr(self, 'reward_scale', 2.0))
+                lambda_m = float(getattr(self, 'lambda_m', 0.8))
+                lambda_o = float(getattr(self, 'lambda_o', 0.2))
                 with open(reward_log_path, 'w', encoding='utf-8') as f:
-                    f.write('# v4 Reward Formula: R_total = R_global\n')
-                    f.write('# R_global = w1*CompletedNorm - w2*AvgWaitNorm - w3*WIPNorm + w4*ThroughputDelta + w5*LoadBalance\n')
-                    f.write('# Coefficients: w1=1.0, w2=0.6, w3=0.3, w4=5.0 (scaled up!), w5=0.4\n')
+                    f.write(f'# Reward Formula: R_total = R_global / reward_scale\n')
+                    f.write(f'# R_global = w1*CompletedNorm - w2*AvgWaitNorm - w3*WIPNorm + w4*ThroughputDelta + w5*LoadBalance\n')
+                    f.write(f'# Coefficients: w1={w1}, w2={w2}, w3={w3}, w4={w4}, w5={w5}\n')
+                    f.write(f'# reward_scale={reward_scale}\n')
+                    f.write(f'# LoadBalance: lambda_m={lambda_m}, lambda_o={lambda_o}\n')
                     f.write('# CompletedNorm: fraction of jobs completed [0,1]\n')
                     f.write('# AvgWaitNorm: normalized average wait time [0,1]\n')
                     f.write('# WIPNorm: work-in-progress ratio [0,1]\n')
@@ -1000,22 +1013,29 @@ class MASAEnv:
                         self.active_agents.remove(job)
 
                     # Persist completion event in lifecycle trace
-                    hist_dir = getattr(self, 'history_dir', os.path.join('my_data_and_graph', 'historydata')) if hasattr(self, 'args') and self.args is not None else os.path.join('my_data_and_graph', 'historydata')
+                    hist_dir = self.history_dir if hasattr(self, 'history_dir') else os.path.join('my_data_and_graph', 'historydata')
                     os.makedirs(hist_dir, exist_ok=True)
                     timeline_path = os.path.join(hist_dir, 'scheduling_timeline.txt')
                     completed_count = len([j for j in self.jobs if j.finished])
                     with open(timeline_path, 'a', encoding='utf-8') as tf:
                         tf.write(f"[t={float(now_t):.2f}] Job {job.id} completed -> Active:{len(self.active_agents)} | Pending:{len(self.pending_jobs)} | Completed:{completed_count}\n")
 
-                    # Lifecycle snapshot after completion
-                    with open(timeline_path, 'a', encoding='utf-8') as tfs:
-                        active_jobs = [j for j in self.jobs if not j.finished]
-                        completed_jobs = [j for j in self.jobs if j.finished]
-                        pending_jobs = [j for j in self.jobs if not j.is_active and not j.finished]
-                        total_jobs = len(self.jobs)
-                        tfs.write(f"[Lifecycle] t={float(now_t):.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={total_jobs}\n")
-                        if len(active_jobs) > self.max_active_agents:
-                            print(f"[WARN] Max active agents exceeded: {len(active_jobs)} > {self.max_active_agents}")
+                    # --- JOB STATUS LOGGING ---
+                    job_status = "Completed"
+                    obs_vec = self._build_agent_obs(job)
+                    allowed_machine_indices_log = []
+                    avail_actions_log = []
+                    action_idx = -1
+                    print(f"[DEBUG] Job {job.id} completed, logging status: {job_status} to decision_observation_metrics.csv")
+                    self._write_observation_log(
+                        now_t,
+                        job.id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        action_idx,
+                        obs_vec,
+                        job_status
+                    )
                 break
 
             # normalize op formats: support legacy (allowed_machine_indices, dur) and
@@ -1098,13 +1118,15 @@ class MASAEnv:
                 action_idx = -1
                 obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
                 state_vec = self._build_global_state()
+                job_status = "Completed" if job.finished else "WIP"
                 self._write_observation_log(
                     decision_time,
                     job_id,
                     allowed_machine_indices_log,
                     avail_actions_log,
                     action_idx,
-                    obs_vec
+                    obs_vec,
+                    job_status
                 )
                 self._write_state_log(
                     decision_time,
@@ -1136,13 +1158,15 @@ class MASAEnv:
             if 'action_idx' in locals() and action_idx >= 0 and action_idx < len(avail_actions_log):
                 if avail_actions_log[action_idx] == 0:
                     print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={action_idx}) according to mask. Job will wait and retry.")
+                    job_status = "Completed" if job.finished else "WIP"
                     self._write_observation_log(
                         decision_time,
                         job_id,
                         allowed_machine_indices_log,
                         avail_actions_log,
                         action_idx,
-                        obs_vec
+                        obs_vec,
+                        job_status
                     )
                     self._write_state_log(
                         decision_time,
@@ -1181,7 +1205,7 @@ class MASAEnv:
                 # ----------------------------------------------
 
                 # Canonical allowed machine list (ONLY from decision_item)
-                allowed_machine_indices_log = list(decision_item.get("allowed_machine_indices", []))         
+                allowed_machine_indices_log = list(decision_item.get("allowed_machine_indices", []))
 
                 # Availability mask for this job
                 avail_actions_all = self._build_avail_actions()
@@ -1242,13 +1266,15 @@ class MASAEnv:
                 state_vec = self._build_global_state()
 
                 # Write logs
+                job_status = "Completed" if job.finished else "WIP"
                 self._write_observation_log(
                     decision_time,
                     job_id,
                     allowed_machine_indices_log,
                     avail_actions_log,
                     action_idx,
-                    obs_vec
+                    obs_vec,
+                    job_status
                 )
 
                 self._write_state_log(
@@ -1281,13 +1307,15 @@ class MASAEnv:
             if chosen_idx_int >= 0 and chosen_idx_int < len(avail_actions_log):
                 if avail_actions_log[chosen_idx_int] == 0:
                     print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={chosen_idx_int}) according to mask. Job will wait and retry.")
+                    job_status = "Completed" if job.finished else "WIP"
                     self._write_observation_log(
                         decision_time,
                         job_id,
                         allowed_machine_indices_log,
                         avail_actions_log,
                         chosen_idx_int,
-                        obs_vec
+                        obs_vec,
+                        job_status
                     )
                     self._write_state_log(
                         decision_time,
@@ -1510,7 +1538,7 @@ class MASAEnv:
             chosen_m_idx = int(chosen_idx)
             chosen_mid = chosen_m_idx
             # if chosen_idx indexes into allowed_list (legacy), map
-            #if allowed_list and chosen_m_idx < len(allowed_list) and int(allowed_list[chosen_m_idx]) != chosen_m_idx:
+            #if allowed_list and chosen_m_idx < len(allowed_list) and int(allowed_list[chosen_midx]) != chosen_midx:
             #    chosen_mid = int(allowed_list[chosen_midx])
             #else:
             #    chosen_mid = chosen_m_idx
@@ -1567,7 +1595,6 @@ class MASAEnv:
                 # Only append if valid label found
                 if op_label is not None and op_label != '':
                     self.recent_operator_choices.append(op_label)
-
             # [C1] Acquire machine resource - fail-fast if indexing fails
             # [PHASE5-FIX] Task 5.1: Validate machine_resources exists and is not empty
             if not hasattr(self, 'machine_resources') or not self.machine_resources:
@@ -1680,6 +1707,7 @@ class MASAEnv:
                 logging.getLogger(__name__).debug("Waiting -> starting job=%s on machine=%s by operator=%s time=%s", 
                                                  job.id, int(chosen_mid), available_operator.operator_id, float(self.env.now))
                 with available_operator.resource.request() as opres_req, mr.request() as mc_req:
+
                     yield opres_req; yield mc_req
                     # We now hold the operator and machine resources.
                     # Calculate ACTUAL queue wait time: time from operation ready to resource allocated
@@ -1696,7 +1724,6 @@ class MASAEnv:
                     job.remaining_time = dur
                     # assign and mark busy via Operator.assign_job()
                     available_operator.assign_job(job.id, wc_idx, start_time=op_start)
-                    
                     yield self.env.timeout(dur)
                     op_end = float(self.env.now)
                     
@@ -1743,8 +1770,27 @@ class MASAEnv:
                     # Capacity management: when a job finishes, free an active slot
                     if job in self.active_jobs:
                         self.active_jobs.remove(job)
-                    if job in getattr(self, 'active_agents', []):
+                    if job in self.active_agents:
                         self.active_agents.remove(job)
+                    # Completed status observation logu
+                    obs = self._build_agent_obs(job)
+                    allowed_machine_indices = []
+                    idx = job.current_op_idx - 1
+                    if len(job.operations) > 0 and idx >= 0 and idx < len(job.operations):
+                        op_tuple = job.operations[idx]
+                        if isinstance(op_tuple, (list, tuple)) and len(op_tuple) > 1:
+                            allowed_machine_indices = op_tuple[1]
+                    avail_actions = self._build_avail_actions()[self.jobs.index(job)] if hasattr(self, 'jobs') and job in self.jobs else []
+                    action_idx = -1
+                    self._write_observation_log(
+                        decision_time=now_t,
+                        job_id=job.id,
+                        allowed_machine_indices=allowed_machine_indices,
+                        avail_actions=avail_actions,
+                        action_idx=action_idx,
+                        obs=obs,
+                        job_status="Completed"
+                    )
                 
                 # If there are pending jobs, start pending jobs until capacity is reached
                 if getattr(self, 'pending_jobs', None) and len(self.pending_jobs) > 0:
@@ -1777,9 +1823,9 @@ class MASAEnv:
 
     def _write_observation_log(
         self, decision_time, job_id, allowed_machine_indices,
-        avail_actions, action_idx, obs
+        avail_actions, action_idx, obs, job_status
     ):
-        """Append to decision_observation_metrics.csv (7-element observation)."""
+        """Append to decision_observation_metrics.csv (observation + job_status)."""
         log_dir = os.path.join("my_data_and_graph", "historydata")
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "decision_observation_metrics.csv")
@@ -1797,21 +1843,46 @@ class MASAEnv:
             "obs_theoretical_machine_count",
             "obs_free_machine_count",
             "obs_n_jobs_active",
+            "finished_flag",
+            "job_status",
         ]
 
+        # Maskı her zaman string olarak yaz ve free_machine_count'u masktan hesapla
+        if isinstance(avail_actions, (np.ndarray, list)):
+            mask_list = list(avail_actions)
+        else:
+            try:
+                import ast
+                mask_list = ast.literal_eval(str(avail_actions))
+            except Exception:
+                mask_list = [int(x) for x in str(avail_actions).replace('[','').replace(']','').replace(',',' ').split() if x.isdigit()]
+
+        mask_str = str(mask_list)
+        free_machine_count = float(sum([1 for x in mask_list if x == 1]))
+
+        # Finished flag: 1 (bitmiş iş, action_idx=-1 ve job_status=Completed), 0 (diğer tüm durumlar)
+        finished_flag = 1 if (action_idx == -1 and job_status == "Completed") else 0
+        def to_native(val):
+            # Convert numpy types to native Python types
+            if hasattr(val, 'item'):
+                return val.item()
+            return val
+
         row = [
-            self._colorize(decision_time, "red"),
-            self._colorize(job_id, "blue"),
-            self._colorize(allowed_machine_indices, "green"),
-            self._colorize(avail_actions, "purple"),
-            self._colorize(action_idx, "orange"),
-            self._colorize(float(obs[0]) + 1, "cyan"),
-            self._colorize(float(obs[1]), "cyan"),
-            self._colorize(float(obs[2]), "cyan"),
-            self._colorize(float(obs[3]), "cyan"),
-            self._colorize(float(obs[4]), "cyan"),
-            self._colorize(float(obs[5]), "cyan"),
-            self._colorize(float(obs[6]), "cyan"),
+            to_native(self._colorize(decision_time, "red")),
+            to_native(self._colorize(job_id, "blue")),
+            to_native(self._colorize(allowed_machine_indices, "green")),
+            to_native(self._colorize(mask_str, "purple")),
+            to_native(self._colorize(action_idx, "orange")),
+            to_native(self._colorize(float(obs[0]) + 1, "cyan")),
+            to_native(self._colorize(float(obs[1]), "cyan")),
+            to_native(self._colorize(float(obs[2]), "cyan")),
+            to_native(self._colorize(float(obs[3]), "cyan")),
+            to_native(self._colorize(float(obs[4]), "cyan")),
+            to_native(self._colorize(free_machine_count, "cyan")),
+            to_native(self._colorize(float(obs[6]), "cyan")),
+            to_native(self._colorize(finished_flag, "yellow")),
+            to_native(job_status),
         ]
 
         write_header = not os.path.exists(log_path)
@@ -1848,6 +1919,16 @@ class MASAEnv:
             "state_global_avg_wait",
             "state_episode_time_fraction",
         ]
+
+        # Decision time operator utilization (global)
+        busy_count = 0
+        total_count = 0
+        if hasattr(self, 'operators') and hasattr(self.operators, 'operators_object_list'):
+            for op in self.operators.operators_object_list:
+                total_count += 1
+                if op.is_busy:
+                    busy_count += 1
+        self.decision_operator_util = busy_count / total_count if total_count > 0 else 0.0
 
         row = [
             self._colorize(decision_time, "red"),
@@ -2144,6 +2225,8 @@ class MASAEnv:
         # Append to master job list (arrival order) and advance counter
         self.jobs.append(job)
         self.total_jobs_cumulative += 1  # Track cumulative jobs for dynamic normalization
+        self.total_jobs_arrived += 1  # Track jobs for state vector
+        self.total_ops_arrived += len(job.operations)  # Track ops for state vector
         LOG.info("[Env] New job %s arrived at t=%.4f with %s ops", job.id, job.arrival_time, len(job.operations))
         self.job_counter = jid + 1
 
@@ -2270,9 +2353,9 @@ class MASAEnv:
                 ops = [(0, [0], {0: 1.0})]
             # Start initial jobs immediately at t=0
             self.add_job(ops, start_immediately=True, set_arrival_zero=True)
-            # Track arrived jobs and operations for global state
+            # Track arrived jobs for global state
             self.total_jobs_arrived += 1
-            self.total_ops_arrived += len(ops)
+            # self.total_ops_arrived += len(ops)  # Fazla sayımı engellemek için kaldırıldı
 
     # NOTE: dynamic arrivals and internal job generator loops removed.
     # Dynamic job arrival behavior should be provided by an external
@@ -2416,10 +2499,6 @@ class MASAEnv:
 
             oo_total = float(sum(total_operator_busy.values()))
             avg_operator_util = oo_total / (episode_length * max(1, int(total_operators)))
-
-            # clip between 0 and 1
-            avg_machine_util = float(np.clip(avg_machine_util, 0.0, 1.0))
-            avg_operator_util = float(np.clip(avg_operator_util, 0.0, 1.0))
 
             avg_makespan = float(episode_length)
 

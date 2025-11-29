@@ -75,6 +75,10 @@ def build_agent_obs(env: Any, job: Any, job_index: Any = None, allowed_machine_i
     free_machine_count = float(np.sum(avail_actions[job_index]))
     n_jobs_active = float(env.active_jobs_count())
 
+    # action_idx ve job_status parametreleri ile finished_flag'ı logdaki mantıkla üret
+    action_idx = getattr(job, 'action_idx', None)
+    job_status = getattr(job, 'job_status', None)
+    finished_flag = 1.0 if (action_idx == -1 and job_status == "Completed") else 0.0
     obs = np.array([
         current_op_type,
         total_operations,
@@ -83,10 +87,11 @@ def build_agent_obs(env: Any, job: Any, job_index: Any = None, allowed_machine_i
         theoretical_machine_count,
         free_machine_count,
         n_jobs_active,
+        finished_flag,
     ], dtype=np.float32)
 
-    if obs.shape[0] != 7:
-        raise RuntimeError("Canonical observation must be length 7")
+    if obs.shape[0] != 8:
+        raise RuntimeError("Canonical observation must be length 8")
 
     return obs
 
@@ -161,7 +166,7 @@ def build_state_vector(env: Any) -> np.ndarray:
     now = float(getattr(env.env, 'now', 0.0)) if hasattr(env, 'env') else 0.0
     
     # RAW COUNTS (0-5): No normalization
-    n_jobs_arrived = float(getattr(env, 'total_jobs_arrived', 0))
+    n_jobs_arrived = float(len(env.jobs))
     n_jobs_processing = float(env.active_jobs_count())
     n_jobs_waiting = float(max(0, n_jobs_arrived - n_jobs_processing))
     
@@ -171,7 +176,8 @@ def build_state_vector(env: Any) -> np.ndarray:
     
     # NORMALIZED UTILIZATIONS (6-7): Percentage [0-1]
     avg_machine_util = _calculate_machine_utilization(env)
-    avg_operator_util = _calculate_operator_utilization(env)
+    # Decision sonrası doğru operator utilization
+    avg_operator_util = float(env.decision_operator_util)
     
     # RAW TIME (8): Total cumulative wait time
     global_avg_wait = float(getattr(env, 'total_wait_time', 0.0))
