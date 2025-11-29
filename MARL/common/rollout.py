@@ -200,9 +200,11 @@ class RolloutWorker:
         """
         if not batch:
             return []
-        obs_list = [item.get("obs") for item in batch]
+        # Filter out completed jobs from batch for agent input
+        filtered_batch = [item for item in batch if not item.get('finished', False)]
+        obs_list = [item.get("obs") for item in filtered_batch]
         # [C1] Avail extraction is CRITICAL - fail-fast if batch access fails
-        avail = [item.get("avail_row") for item in batch]
+        avail = [item.get("avail_row") for item in filtered_batch]
 
         # [C1] Ensure every decision item has a machine-major availability row.
         # Prefer existing `item['avail_row']` populated by the environment; when

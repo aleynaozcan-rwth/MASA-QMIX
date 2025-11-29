@@ -1021,21 +1021,23 @@ class MASAEnv:
                         tf.write(f"[t={float(now_t):.2f}] Job {job.id} completed -> Active:{len(self.active_agents)} | Pending:{len(self.pending_jobs)} | Completed:{completed_count}\n")
 
                     # --- JOB STATUS LOGGING ---
-                    job_status = "Completed"
-                    obs_vec = self._build_agent_obs(job)
-                    allowed_machine_indices_log = []
-                    avail_actions_log = []
-                    action_idx = -1
-                    print(f"[DEBUG] Job {job.id} completed, logging status: {job_status} to decision_observation_metrics.csv")
-                    self._write_observation_log(
-                        now_t,
-                        job.id,
-                        allowed_machine_indices_log,
-                        avail_actions_log,
-                        action_idx,
-                        obs_vec,
-                        job_status
-                    )
+                    # Prevent logging completed jobs to observation log
+                    if not getattr(job, 'finished', False):
+                        job_status = "Completed"
+                        obs_vec = self._build_agent_obs(job)
+                        allowed_machine_indices_log = []
+                        avail_actions_log = []
+                        action_idx = -1
+                        print(f"[DEBUG] Job {job.id} completed, logging status: {job_status} to decision_observation_metrics.csv")
+                        self._write_observation_log(
+                            now_t,
+                            job.id,
+                            allowed_machine_indices_log,
+                            avail_actions_log,
+                            action_idx,
+                            obs_vec,
+                            job_status
+                        )
                 break
 
             # normalize op formats: support legacy (allowed_machine_indices, dur) and
@@ -1104,6 +1106,9 @@ class MASAEnv:
                 self.decisions_ready.succeed()
 
             chosen_idx = (yield resume_evt)
+            # Eğer iş tamamlandıysa, karar noktasına gelmesin ve log yazılmasın
+            if job.finished:
+                continue
             # Eğer agent aksiyon seçemedi (chosen_idx == -1), job beklesin ve bir sonraki decision pointte tekrar denesin
             if chosen_idx is None or int(chosen_idx) == -1:
                 # Log: No valid action, job waits
@@ -1119,15 +1124,16 @@ class MASAEnv:
                 obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
                 state_vec = self._build_global_state()
                 job_status = "Completed" if job.finished else "WIP"
-                self._write_observation_log(
-                    decision_time,
-                    job_id,
-                    allowed_machine_indices_log,
-                    avail_actions_log,
-                    action_idx,
-                    obs_vec,
-                    job_status
-                )
+                if not job.finished:
+                    self._write_observation_log(
+                        decision_time,
+                        job_id,
+                        allowed_machine_indices_log,
+                        avail_actions_log,
+                        action_idx,
+                        obs_vec,
+                        job_status
+                    )
                 self._write_state_log(
                     decision_time,
                     job_id,
@@ -1308,15 +1314,16 @@ class MASAEnv:
                 if avail_actions_log[chosen_idx_int] == 0:
                     print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={chosen_idx_int}) according to mask. Job will wait and retry.")
                     job_status = "Completed" if job.finished else "WIP"
-                    self._write_observation_log(
-                        decision_time,
-                        job_id,
-                        allowed_machine_indices_log,
-                        avail_actions_log,
-                        chosen_idx_int,
-                        obs_vec,
-                        job_status
-                    )
+                    if not job.finished:
+                        self._write_observation_log(
+                            decision_time,
+                            job_id,
+                            allowed_machine_indices_log,
+                            avail_actions_log,
+                            chosen_idx_int,
+                            obs_vec,
+                            job_status
+                        )
                     self._write_state_log(
                         decision_time,
                         job_id,
@@ -1826,6 +1833,9 @@ class MASAEnv:
         avail_actions, action_idx, obs, job_status
     ):
         """Append to decision_observation_metrics.csv (observation + job_status)."""
+        # Kesin koruma: Eğer iş tamamlandıysa logu atla
+        if job_status == "Completed":
+            return
         log_dir = os.path.join("my_data_and_graph", "historydata")
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "decision_observation_metrics.csv")
@@ -1967,9 +1977,9 @@ class MASAEnv:
     # ---------------- Observation / State / Avail -----------------
 
     def _build_all_agent_obs(self):
-        # Strict delegation to utils.env_obs.build_agent_obs. Missing helper
-        # will raise ImportError at module import time so errors are explicit.
-        return [build_agent_obs(self, j, job_index=idx) for idx, j in enumerate(self.jobs)]
+        # Only include jobs that are not finished
+        filtered_jobs = [(idx, j) for idx, j in enumerate(self.jobs) if not getattr(j, 'finished', False)]
+        return [build_agent_obs(self, j, job_index=idx) for idx, j in filtered_jobs]
 
     def _build_agent_obs(self, job: JobAgent, allowed_machine_indices=None):
         # Strict delegation to canonical helper. Let exceptions propagate for
