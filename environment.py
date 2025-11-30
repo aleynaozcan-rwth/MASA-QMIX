@@ -1027,7 +1027,6 @@ class MASAEnv:
                         obs_vec = self._build_agent_obs(job)
                         allowed_machine_indices_log = []
                         avail_actions_log = []
-                        action_idx = -1
                         print(f"[DEBUG] Job {job.id} completed, logging status: {job_status} to decision_observation_metrics.csv")
                         self._write_observation_log(
                             now_t,
@@ -1120,10 +1119,10 @@ class MASAEnv:
                 n_machines = len(avail_actions_all[j_index])
                 allowed_set = set(allowed_machine_indices_log)
                 avail_actions_log = [1 if i in allowed_set else 0 for i in range(n_machines)]
-                action_idx = -1
                 obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
                 state_vec = self._build_global_state()
                 job_status = "Completed" if job.finished else "WIP"
+                action_idx = -1  # Güvenli default
                 if not job.finished:
                     self._write_observation_log(
                         decision_time,

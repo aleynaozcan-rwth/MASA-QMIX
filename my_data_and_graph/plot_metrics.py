@@ -137,7 +137,7 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
         
         plt.savefig(out_path, dpi=100)
         plt.close()
-        print(f'[plot_reward_trend] Saved {out_path}')
+        print(f'[plot_reward_trend] Saved {out_path}', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_reward_trend] Error: {e}')
@@ -216,7 +216,7 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
         plt.tight_layout()
         plt.savefig(out_path)
         plt.close()
-        print(f'[plot_td_error_trend] Saved {out_path}')
+        print(f'[plot_td_error_trend] Saved {out_path}', flush=True)
     except Exception as e:
         warnings.warn(f'[plot_td_error_trend] Error: {e}')
         import traceback
@@ -309,7 +309,7 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
         try:
             plt.savefig(out_path)
             try:
-                print(f'[plot_kpi_summary] Saved {out_path}')
+                print(f'[plot_kpi_summary] Saved {out_path}', flush=True)
             except Exception:
                 pass
         except Exception as e:
@@ -428,7 +428,7 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
         out_path = os.path.join(plots_dir, 'utilization_summary_grid.png')
         plt.savefig(out_path)
         plt.close()
-        print(f"[utilization_summary_grid] Saved {out_path}")
+        print(f"[utilization_summary_grid] Saved {out_path}", flush=True)
     except Exception as e:
         print(f"[WARN] Could not save utilization_summary_grid.png: {e}")
 
@@ -502,7 +502,7 @@ def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> No
         
         plt.savefig(out_path, dpi=100)
         plt.close()
-        print(f'[plot_q_value_trend] Saved {out_path}')
+        print(f'[plot_q_value_trend] Saved {out_path}', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_q_value_trend] Error: {e}')
@@ -680,7 +680,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         plt.tight_layout()
         plt.savefig(out_path, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f'[plot_learning_analysis_comprehensive] Saved {out_path}')
+        print(f'[plot_learning_analysis_comprehensive] Saved {out_path}', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_learning_analysis_comprehensive] Error: {e}')
@@ -757,7 +757,7 @@ def plot_reward_components(history_dir: str = 'my_data_and_graph/historydata') -
         try:
             plt.savefig(out_path)
             try:
-                print(f'[plot_reward_components] Saved {out_path}')
+                print(f'[plot_reward_components] Saved {out_path}', flush=True)
             except Exception:
                 pass
         except Exception as e:
@@ -888,7 +888,7 @@ Decay rate: {decay_rate:.6f} per 1k steps"""
         plt.tight_layout()
         plt.savefig(out_path, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f'[plot_epsilon_decay] Saved {out_path}')
+        print(f'[plot_epsilon_decay] Saved {out_path}', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_epsilon_decay] Error: {e}')
@@ -1071,7 +1071,7 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata', overl
     except Exception:
         warnings.warn('[generate_all_plots] plot_batch_reward_csv failed; continuing')
     try:
-        print('[plot_metrics] All plots generated successfully.')
+        print('[plot_metrics] All plots generated successfully.', flush=True)
     except Exception:
         pass
 
