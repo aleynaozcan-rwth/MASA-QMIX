@@ -1155,7 +1155,15 @@ class MASAEnv:
                         'no_valid_action_job_waits'
                     )
                 # Job beklesin (ör: 1 simpy time unit)
-                yield self.env.timeout(1)
+                wait_duration = 1.0
+                yield self.env.timeout(wait_duration)
+                # Wait time biriktir: her bekletilen adımda wait_time ve total_wait_time'a ekle
+                job.wait_time += wait_duration
+                self.total_wait_time += wait_duration
+                # Track per-job wait time
+                job_id = int(getattr(job, 'id', getattr(job, 'job_id', -1)))
+                if job_id >= 0:
+                    self.wait_time_dict[job_id] = self.wait_time_dict.get(job_id, 0.0) + wait_duration
                 continue
             
             # ===================== DECISION LOGGING =====================
