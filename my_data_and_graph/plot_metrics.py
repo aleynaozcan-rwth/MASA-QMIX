@@ -250,12 +250,19 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
             max_bin_idx = np.argmax(hist)
             bin_low = bin_edges[max_bin_idx]
             bin_high = bin_edges[max_bin_idx + 1]
-            margin = 0.1 * (bin_high - bin_low)
+            margin = 4.0 * (bin_high - bin_low)
             ylim_low = bin_low - margin
             ylim_high = bin_high + margin
 
             plt.figure(figsize=(8, 4))
-            plt.plot(x_vals, y_vals, color='C2', linewidth=1)
+            plt.plot(x_vals, y_vals, color='C2', linewidth=1, alpha=0.5, label='TD Error')
+            # Moving average ekle
+            if len(y_vals) > 10:
+                window = min(20, len(y_vals) // 5)
+                td_series = pd.Series(y_vals)
+                td_rolling = td_series.rolling(window=window, center=True).mean()
+                plt.plot(x_vals, td_rolling, color='red', linewidth=1.2, label=f'{window}-step MA')
+            plt.legend(loc='best')
             plt.grid(True, alpha=0.3)
             plt.xlabel('Training Step')
             plt.ylabel('TD Error')
@@ -308,26 +315,54 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
 
     try:
         # Row 1: Wait Time, Machine Util, Operator Util
-        ax[0].plot(df['epoch'], df['avg_wait'], marker='o', linewidth=1, color='C0')
+        ax[0].plot(df['epoch'], df['avg_wait'], linewidth=1, color='C0', label='Avg Wait Time')
+        # Moving average ekle
+        if len(df['avg_wait']) > 10:
+            window = min(20, len(df['avg_wait']) // 5)
+            avg_wait_series = pd.Series(df['avg_wait'])
+            avg_wait_rolling = avg_wait_series.rolling(window=window, center=True).mean()
+            ax[0].plot(df['epoch'], avg_wait_rolling, color='magenta', linewidth=1.5, label=f'{window}-step MA')
+        ax[0].legend(loc='best')
         ax[0].set_title('Avg Wait Time Trend')
         ax[0].set_xlabel('Epoch')
         ax[0].set_ylabel('Avg Wait Time')
         ax[0].grid(True, alpha=0.3)
 
-        ax[1].plot(df['epoch'], df['util_m'], color='C1', linewidth=1)
+        ax[1].plot(df['epoch'], df['util_m'], color='C1', linewidth=1, label='Machine Utilization')
+        # Moving average ekle
+        if len(df['util_m']) > 10:
+            window = min(20, len(df['util_m']) // 5)
+            util_m_series = pd.Series(df['util_m'])
+            util_m_rolling = util_m_series.rolling(window=window, center=True).mean()
+            ax[1].plot(df['epoch'], util_m_rolling, color='blue', linewidth=1.5, label=f'{window}-step MA')
+        ax[1].legend(loc='best')
         ax[1].set_title('Machine Utilization Trend')
         ax[1].set_xlabel('Epoch')
         ax[1].set_ylabel('Machine Util')
         ax[1].grid(True, alpha=0.3)
 
-        ax[2].plot(df['epoch'], df['util_o'], color='C2', linewidth=1)
+        ax[2].plot(df['epoch'], df['util_o'], color='C2', linewidth=1, label='Operator Utilization')
+        # Moving average ekle
+        if len(df['util_o']) > 10:
+            window = min(20, len(df['util_o']) // 5)
+            util_o_series = pd.Series(df['util_o'])
+            util_o_rolling = util_o_series.rolling(window=window, center=True).mean()
+            ax[2].plot(df['epoch'], util_o_rolling, color='orange', linewidth=1.5, label=f'{window}-step MA')
+        ax[2].legend(loc='best')
         ax[2].set_title('Operator Utilization Trend')
         ax[2].set_xlabel('Epoch')
         ax[2].set_ylabel('Operator Util')
         ax[2].grid(True, alpha=0.3)
 
         # Row 2: Makespan, Loss, TD Error
-        ax[3].plot(df['epoch'], df['makespan'], color='C3', linewidth=1)
+        ax[3].plot(df['epoch'], df['makespan'], color='C3', linewidth=1, label='Makespan')
+        # Moving average ekle
+        if len(df['makespan']) > 10:
+            window = min(20, len(df['makespan']) // 5)
+            makespan_series = pd.Series(df['makespan'])
+            makespan_rolling = makespan_series.rolling(window=window, center=True).mean()
+            ax[3].plot(df['epoch'], makespan_rolling, color='green', linewidth=1.5, label=f'{window}-step MA')
+        ax[3].legend(loc='best')
         ax[3].set_title('Makespan Trend')
         ax[3].set_xlabel('Epoch')
         ax[3].set_ylabel('Makespan')
@@ -359,11 +394,18 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
             max_bin_idx = np.argmax(hist)
             bin_low = bin_edges[max_bin_idx]
             bin_high = bin_edges[max_bin_idx + 1]
-            margin = 0.1 * (bin_high - bin_low)
+            margin = 4.0 * (bin_high - bin_low)
             ylim_low = bin_low - margin
             ylim_high = bin_high + margin
 
-            ax[5].plot(x_vals, y_vals, color='C2', linewidth=1)
+            ax[5].plot(x_vals, y_vals, color='C2', linewidth=1, alpha=0.5, label='TD Error')
+            # Moving average ekle
+            if len(y_vals) > 10:
+                window = min(20, len(y_vals) // 5)
+                td_series_pd = pd.Series(y_vals)
+                td_rolling = td_series_pd.rolling(window=window, center=True).mean()
+                ax[5].plot(x_vals, td_rolling, color='red', linewidth=1.2, label=f'{window}-step MA')
+            ax[5].legend(loc='best')
             ax[5].grid(True, alpha=0.3)
             ax[5].set_xlabel('Training Step')
             ax[5].set_ylabel('TD Error')
@@ -437,7 +479,10 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
                 if v is None:
                     v = pm.get(str(mid), 0.0)
                 vals.append(float(v))
-            ax0.plot(x, vals, marker='o', label=f"M{mid}", color=cmap(i % 10))
+            # Her 50 epochta bir veri noktası al
+            x_sparse = x[::25]
+            vals_sparse = vals[::25]
+            ax0.plot(x_sparse, vals_sparse, label=f"M{mid}", color=cmap(i % 10))
         ax0.set_title('Per-Machine Utilization')
         ax0.set_xlabel('Epoch')
         ax0.set_ylabel('Utilization')
@@ -464,7 +509,10 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
                 if v is None:
                     v = 0.0
                 vals.append(float(v))
-            ax1.plot(x, vals, marker='o', label=f"O{oid}", color=cmap(i % 10))
+            # Her 50 epochta bir veri noktası al
+            x_sparse = x[::25]
+            vals_sparse = vals[::25]
+            ax1.plot(x_sparse, vals_sparse, label=f"O{oid}", color=cmap(i % 10))
         ax1.set_title('Per-Operator Utilization')
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Utilization')
@@ -473,7 +521,15 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
         ax1.legend(loc='best', fontsize='x-small')
 
         ax2 = axes[1,0]
-        ax2.plot(x, makespans, marker='o', color='tab:green')
+        ax2.plot(x, makespans, color='tab:green', label='Average Makespan')
+        # Moving average ekle
+        if len(makespans) > 10:
+            window = min(20, len(makespans) // 5)
+            import pandas as pd
+            makespan_series = pd.Series(makespans)
+            makespan_rolling = makespan_series.rolling(window=window, center=True).mean()
+            ax2.plot(x, makespan_rolling, color='magenta', linewidth=2, linestyle='--', label=f'{window}-epoch MA')
+        ax2.legend(loc='best')
         ax2.set_title('Average Makespan')
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('Makespan')
@@ -483,7 +539,15 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
         # plot avg rewards if present
         if any(v is not None for v in avg_rewards):
             rr = [v if v is not None else float('nan') for v in avg_rewards]
-            ax3.plot(x, rr, marker='o', color='tab:purple')
+            ax3.plot(x, rr, color='tab:purple', label='Average Reward')
+            # Moving average ekle
+            if len(rr) > 10:
+                window = min(20, len(rr) // 5)
+                import pandas as pd
+                reward_series = pd.Series(rr)
+                reward_rolling = reward_series.rolling(window=window, center=True).mean()
+                ax3.plot(x, reward_rolling, color='red', linewidth=2, linestyle='--', label=f'{window}-epoch MA')
+            ax3.legend(loc='best')
             ax3.set_title('Average Reward')
             ax3.set_xlabel('Epoch')
             ax3.set_ylabel('Reward')
@@ -580,7 +644,7 @@ def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> No
             max_bin_idx = np.argmax(hist)
             bin_low = bin_edges[max_bin_idx]
             bin_high = bin_edges[max_bin_idx + 1]
-            margin = 1.0 * (bin_high - bin_low)  # Increased margin for wider y-axis window
+            margin = 10.0 * (bin_high - bin_low)  # Maximum margin for ultra wide y-axis window
             ylim_low = bin_low - margin
             ylim_high = bin_high + margin
 
@@ -693,7 +757,7 @@ def plot_learning_analysis_comprehensive(history_dir: str = 'my_data_and_graph/h
         if kpi is not None and 'makespan' in kpi.columns:
             ax.plot(kpi['epoch'], kpi['makespan'], color='green', linewidth=1.5)
             rolling_makespan = kpi['makespan'].rolling(window=10).mean()
-            ax.plot(kpi['epoch'], rolling_makespan, color='darkgreen', linewidth=2, label='10-epoch MA')
+            ax.plot(kpi['epoch'], rolling_makespan, color='magenta', linewidth=2, label='10-epoch MA')
             ax.axhline(y=kpi['makespan'].min(), color='red', linestyle='--', alpha=0.5, 
                       label=f'Best: {kpi["makespan"].min():.1f}')
             ax.legend()
@@ -707,6 +771,16 @@ def plot_learning_analysis_comprehensive(history_dir: str = 'my_data_and_graph/h
         if kpi is not None:
             ax.plot(kpi['epoch'], kpi['machine_util']*100, label='Machine', color='blue', linewidth=1.5)
             ax.plot(kpi['epoch'], kpi['operator_util']*100, label='Operator', color='orange', linewidth=1.5)
+            # Machine MA
+            if len(kpi['machine_util']) > 10:
+                window = min(20, len(kpi['machine_util']) // 5)
+                machine_ma = kpi['machine_util'].rolling(window=window, center=True).mean()*100
+                ax.plot(kpi['epoch'], machine_ma, color='red', linewidth=2, linestyle='--', label=f'Machine MA ({window})')
+            # Operator MA
+            if len(kpi['operator_util']) > 10:
+                window = min(20, len(kpi['operator_util']) // 5)
+                operator_ma = kpi['operator_util'].rolling(window=window, center=True).mean()*100
+                ax.plot(kpi['epoch'], operator_ma, color='green', linewidth=2, linestyle='--', label=f'Operator MA ({window})')
             ax.legend()
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Utilization (%)')

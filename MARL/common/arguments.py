@@ -118,7 +118,7 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=100,
+    parser.add_argument('--episode_limit', type=int, default=50,
                         help='Max SimPy time steps per episode (fast run)')
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
@@ -137,7 +137,7 @@ def get_mutable_args():
                         help='Comma-separated probabilities for lottery choices (must sum to 1.0)')
     
     # Training loop sizes (production defaults, CLI overrideable)
-    parser.add_argument('--n_epoch', type=int, default=200,
+    parser.add_argument('--n_epoch', type=int, default=400,
                         help='Number of training epochs (fast run)')
     parser.add_argument('--n_episodes', type=int, default=4,
                         help='Episodes per epoch (default 4)')
