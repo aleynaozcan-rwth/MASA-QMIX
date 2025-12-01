@@ -1,5 +1,5 @@
 {
-  "n_epoch": 100,
+  "n_epoch": 200,
   "n_episodes": 4,
   "episode_limit": 100,
   "epsilon_start": 1.0,
