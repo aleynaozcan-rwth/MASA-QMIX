@@ -154,6 +154,22 @@ def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
     plots_dir = _ensure_plots_dir(history_dir)
     src = os.path.join(history_dir, 'loss.txt')
     out_path = os.path.join(plots_dir, 'loss_trend.png')
+    """Plot loss trend from loss.txt using real training steps.
+
+    Expects loss.txt with columns: episode train_step last_loss
+    Falls back to episode index if train_step not available.
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    src = os.path.join(history_dir, 'loss.txt')
+    out_path = os.path.join(plots_dir, 'loss_trend.png')
+    """Plot loss trend from loss.txt using real training steps.
+
+    Expects loss.txt with columns: episode train_step last_loss
+    Falls back to episode index if train_step not available.
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    src = os.path.join(history_dir, 'loss.txt')
+    out_path = os.path.join(plots_dir, 'loss_trend.png')
 
     if not os.path.exists(src):
         warnings.warn(f'[plot_loss_trend] Missing {src}; skipping plot')
@@ -167,12 +183,20 @@ def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
         y_vals = df['last_loss'].values
         
         plt.figure(figsize=(8, 4))
-        plt.plot(x_vals, y_vals, color='C1', linewidth=1)
+        plt.plot(x_vals, y_vals, color='C1', linewidth=1, alpha=0.5, label='Loss')
+        # Moving average ekle
+        if len(y_vals) > 10:
+            # pandas is already imported globally at the top
+            window = min(20, len(y_vals) // 5)
+            loss_series = pd.Series(y_vals)
+            loss_rolling = loss_series.rolling(window=window, center=True).mean()
+            plt.plot(x_vals, loss_rolling, color='red', linewidth=2.5, label=f'{window}-step MA')
         plt.yscale('log')
         plt.grid(True, alpha=0.3)
         plt.xlabel('Training Step')
         plt.ylabel('Loss (log scale)')
         plt.title('Loss Trend')
+        plt.legend(loc='best')
         plt.tight_layout()
         try:
             plt.savefig(out_path)
@@ -180,6 +204,7 @@ def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
             warnings.warn(f'[plot_loss_trend] Could not write {out_path}: {e}')
         finally:
             plt.close()
+
     except Exception as e:
         warnings.warn(f'[plot_loss_trend] Error: {e}')
         import traceback
@@ -217,6 +242,30 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
         plt.savefig(out_path)
         plt.close()
         print(f'[plot_td_error_trend] Saved {out_path}', flush=True)
+
+        # --- Zoomed TD Error Trend (y ekseni en yoğun aralığa zoom) ---
+        if len(y_vals) > 0:
+            import numpy as np
+            hist, bin_edges = np.histogram(y_vals, bins=30)
+            max_bin_idx = np.argmax(hist)
+            bin_low = bin_edges[max_bin_idx]
+            bin_high = bin_edges[max_bin_idx + 1]
+            margin = 0.1 * (bin_high - bin_low)
+            ylim_low = bin_low - margin
+            ylim_high = bin_high + margin
+
+            plt.figure(figsize=(8, 4))
+            plt.plot(x_vals, y_vals, color='C2', linewidth=1)
+            plt.grid(True, alpha=0.3)
+            plt.xlabel('Training Step')
+            plt.ylabel('TD Error')
+            plt.title('TD Error Trend (Zoomed to Most Frequent Range)')
+            plt.tight_layout()
+            plt.ylim(ylim_low, ylim_high)
+            zoomed_out_path = os.path.join(plots_dir, 'td_error_trend_zoomed.png')
+            plt.savefig(zoomed_out_path)
+            plt.close()
+            print(f'[plot_td_error_trend] Saved {zoomed_out_path} (zoomed to most frequent y-range)', flush=True)
     except Exception as e:
         warnings.warn(f'[plot_td_error_trend] Error: {e}')
         import traceback
@@ -285,22 +334,41 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
         ax[3].grid(True, alpha=0.3)
 
         if loss_series is not None and len(loss_series) > 0:
-            ax[4].plot(loss_series.index, loss_series.values, color='C4', linewidth=1)
+            ax[4].plot(loss_series.index, loss_series.values, color='C4', linewidth=1, alpha=0.5, label='Loss')
+            # Moving average ekle
+            if len(loss_series) > 10:
+                window = min(20, len(loss_series) // 5)
+                loss_rolling = loss_series.rolling(window=window, center=True).mean()
+                ax[4].plot(loss_rolling.index, loss_rolling.values, color='red', linewidth=2.5, label=f'{window}-step MA')
             ax[4].set_yscale('log')
             ax[4].set_title('Loss Trend (Training Steps)')
             ax[4].set_xlabel('Gradient Update Step')
             ax[4].set_ylabel('Loss (log scale)')
+            ax[4].legend(loc='best')
             ax[4].grid(True, alpha=0.3)
         else:
             ax[4].text(0.5, 0.5, 'Loss data not available', ha='center', va='center', transform=ax[4].transAxes)
             ax[4].set_title('Loss Trend')
 
+        # --- Zoomed TD Error Trend (y ekseni en yoğun aralığa zoom) ---
         if td_series is not None and len(td_series) > 0:
-            ax[5].plot(td_series.index, td_series.values, color='C5', linewidth=1)
-            ax[5].set_title('TD Error Trend (Training Steps)')
-            ax[5].set_xlabel('Gradient Update Step')
-            ax[5].set_ylabel('TD Error')
+            import numpy as np
+            y_vals = td_series.values
+            x_vals = td_series.index
+            hist, bin_edges = np.histogram(y_vals, bins=30)
+            max_bin_idx = np.argmax(hist)
+            bin_low = bin_edges[max_bin_idx]
+            bin_high = bin_edges[max_bin_idx + 1]
+            margin = 0.1 * (bin_high - bin_low)
+            ylim_low = bin_low - margin
+            ylim_high = bin_high + margin
+
+            ax[5].plot(x_vals, y_vals, color='C2', linewidth=1)
             ax[5].grid(True, alpha=0.3)
+            ax[5].set_xlabel('Training Step')
+            ax[5].set_ylabel('TD Error')
+            ax[5].set_title('TD Error Trend (Zoomed to Most Frequent Range)')
+            ax[5].set_ylim(ylim_low, ylim_high)
         else:
             ax[5].text(0.5, 0.5, 'TD Error data not available', ha='center', va='center', transform=ax[5].transAxes)
             ax[5].set_title('TD Error Trend')
@@ -503,6 +571,39 @@ def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> No
         plt.savefig(out_path, dpi=100)
         plt.close()
         print(f'[plot_q_value_trend] Saved {out_path}', flush=True)
+
+        # --- Zoomed Q-value trend (y ekseni en yoğun aralığa zoom) ---
+        if q_values:
+            import numpy as np
+            # Histogram ile en yoğun aralığı bul
+            hist, bin_edges = np.histogram(q_values, bins=30)
+            max_bin_idx = np.argmax(hist)
+            bin_low = bin_edges[max_bin_idx]
+            bin_high = bin_edges[max_bin_idx + 1]
+            margin = 1.0 * (bin_high - bin_low)  # Increased margin for wider y-axis window
+            ylim_low = bin_low - margin
+            ylim_high = bin_high + margin
+
+            plt.figure(figsize=(10, 6))
+            plt.plot(train_steps, q_values, color='darkgreen', linewidth=1.5, alpha=0.7)
+            if len(q_values) > 10:
+                q_series = pd.Series(q_values)
+                q_rolling = q_series.rolling(window=min(20, len(q_values)//5), center=True).mean()
+                plt.plot(train_steps, q_rolling, color='red', linewidth=2.5, label='MA')
+            plt.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+            plt.axhline(y=q_values[0], color='blue', linestyle=':', alpha=0.3, label=f'Initial: {q_values[0]:.0f}')
+            plt.axhline(y=q_values[-1], color='orange', linestyle=':', alpha=0.3, label=f'Final: {q_values[-1]:.0f}')
+            plt.xlabel('Training Step', fontsize=12)
+            plt.ylabel('Average Q-Value', fontsize=12)
+            plt.title('Q-Value Trend (Zoomed to Most Frequent Range)', fontsize=14, fontweight='bold')
+            plt.legend(loc='best')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.ylim(ylim_low, ylim_high)
+            zoomed_out_path = os.path.join(plots_dir, 'q_value_trend_zoomed.png')
+            plt.savefig(zoomed_out_path, dpi=100)
+            plt.close()
+            print(f'[plot_q_value_trend] Saved {zoomed_out_path} (zoomed to most frequent y-range)', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_q_value_trend] Error: {e}')
@@ -797,42 +898,11 @@ def plot_epsilon_decay(history_dir: str = 'my_data_and_graph/historydata', overl
         steps = df_csv['train_step'].astype(int).values
         epsilons = df_csv['epsilon'].astype(float).values
 
-        # If overlay requested, parse EPSILON_DECAY entries from debug_output.txt (decision-step based)
-        decay_steps = []
-        decay_eps = []
-        if overlay_debug:
-            if not os.path.exists(debug_file):
-                raise FileNotFoundError(f"overlay_debug=True but debug file not found: {debug_file}")
-            with open(debug_file, 'r') as f:
-                for line in f:
-                    m = re.search(r'\[EPSILON_DECAY\] step=(\d+), epsilon=([\d.]+)', line)
-                    if m:
-                        decay_steps.append(int(m.group(1)))
-                        decay_eps.append(float(m.group(2)))
-                        continue
-                    m = re.search(r'Epoch (\d+) start \| epsilon=([\d.]+)', line)
-                    if m:
-                        epoch = int(m.group(1))
-                        eps = float(m.group(2))
-                        decay_steps.append(epoch * 50)
-                        decay_eps.append(eps)
 
         # Create plot (step-style to show plateaus clearly)
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.step(steps, epsilons, where='post', linewidth=1.8, color='#2E86AB', label='Epsilon (training_metrics.csv)')
         ax.scatter(steps, epsilons, s=8, color='#2E86AB', alpha=0.7)
-
-        # Overlay decision-step decay trace if requested (this restores the earlier detailed shading)
-        if overlay_debug and decay_steps:
-            try:
-                ds = np.array(decay_steps)
-                de = np.array(decay_eps)
-                # plot as filled area on the same axis (semi-transparent) to mimic previous view
-                ax.plot(ds, de, linewidth=1.5, color='#1f77b4', alpha=0.9, label='Epsilon (debug logs)')
-                ax.fill_between(ds, de, alpha=0.25, color='#1f77b4')
-            except Exception:
-                # Let errors propagate in strict mode; do not silently continue
-                raise
 
         # Phase annotations (always draw the bands so the thresholds are visible regardless of data)
         ax.axhspan(0.5, 1.0, alpha=0.08, color='red', label='High Exploration (ε>0.5)')
@@ -884,6 +954,18 @@ Decay rate: {decay_rate:.6f} per 1k steps"""
         ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
                 fontsize=9, verticalalignment='top', fontfamily='monospace',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        # Try to read epsilon_anneal_fraction directly from arguments.py
+        anneal_fraction = None
+        try:
+            import sys
+            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../MARL/common')))
+            import arguments
+            args = arguments.get_mutable_args()
+            anneal_fraction = getattr(args, 'epsilon_anneal_fraction', None)
+        except Exception:
+            anneal_fraction = None
+        if anneal_fraction is not None:
+            stats_text += f"\nEpsilon Anneal Fraction: {anneal_fraction:.2f}"
 
         plt.tight_layout()
         plt.savefig(out_path, dpi=150, bbox_inches='tight')
@@ -919,8 +1001,14 @@ def plot_loss_trend_combined(history_dir='my_data_and_graph/historydata'):
             return
 
         plt.figure(figsize=(8, 4))
-        plt.plot(df_txt['train_step'], df_txt['last_loss'], label='Last Loss (txt)', color='C3')
-        plt.plot(df_csv['train_step'], df_csv['avg_loss'], label='Avg Loss (csv)', color='C1', linestyle='--')
+        # Ham değerler
+        plt.plot(df_txt['train_step'], df_txt['last_loss'], label='Last Loss (txt)', color='gray', alpha=0.4)
+        plt.plot(df_csv['train_step'], df_csv['avg_loss'], label='Avg Loss (csv)', color='orange', linestyle='--', alpha=0.7)
+        # Sadece CSV moving average (mavi)
+        if len(df_csv['avg_loss']) > 10:
+            window_csv = min(20, len(df_csv['avg_loss']) // 5)
+            rolling_csv = pd.Series(df_csv['avg_loss']).rolling(window=window_csv, center=True).mean()
+            plt.plot(df_csv['train_step'], rolling_csv, color='blue', linewidth=1.5, label=f'CSV MA ({window_csv})')
         plt.yscale('log')
         plt.grid(True, alpha=0.3)
         plt.xlabel('Training Step')
@@ -1012,11 +1100,16 @@ def plot_batch_reward_csv(history_dir='my_data_and_graph/historydata'):
             return
 
         plt.figure(figsize=(8, 4))
-        plt.plot(df['train_step'], df['avg_batch_reward'], color='C4')
+        plt.plot(df['train_step'], df['avg_batch_reward'], color='C4', alpha=0.5, label='Avg Batch Reward')
+        # Moving average (smoothing) line
+        window = 50  # You can adjust window size
+        ma = df['avg_batch_reward'].rolling(window).mean()
+        plt.plot(df['train_step'], ma, color='red', linewidth=2, label=f'Moving Average ({window})')
         plt.grid(True, alpha=0.3)
         plt.xlabel("Training Step")
         plt.ylabel("Avg Batch Reward")
         plt.title("Batch Reward Trend (training_metrics.csv)")
+        plt.legend()
         plt.tight_layout()
         plt.savefig(out)
         plt.close()

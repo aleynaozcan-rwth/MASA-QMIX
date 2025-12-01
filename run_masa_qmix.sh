@@ -39,16 +39,12 @@ echo "[CLEANUP] Removing old logs and outputs..."
 rm -f ./my_data_and_graph/historydata/*.{txt,csv,png} 2>/dev/null || true
 rm -f ./my_data_and_graph/pickles/*.pk 2>/dev/null || true
 
-# === ADAPTIVE FIXES TRAINING ===
-echo "[RUN] Launching main.py with adaptive fixes..."
-echo "[INFO] Expected improvements:"
-echo "  - Epsilon: stable decay to 0.05 by episode 240"
-echo "  - Loss: < 10^6 within 50 episodes"
-echo "  - LoadBalanceScore: active (non-zero values)"
-echo "------------------------------------------------------------"
-python main.py | tee training_${SLURM_JOB_ID}.txt
+
+# === LAUNCH TRAINING ===
+echo "[RUN] Launching main.py with GPU/CUDA support..."
+echo "[INFO] CUDA enabled: true (if available)"
+python main.py --cuda | tee training_${SLURM_JOB_ID}.txt
 echo "[RUN] Training finished at $(date)"
-echo "------------------------------------------------------------"
 
 echo "=========================================================="
 echo "JOB FINISHED at $(date)"

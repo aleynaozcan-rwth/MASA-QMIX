@@ -119,8 +119,8 @@ def get_mutable_args():
     # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
-    parser.add_argument('--episode_limit', type=int, default=100,
-                        help='Max SimPy time steps per episode (default 400 for longer scheduling episodes)')
+    parser.add_argument('--episode_limit', type=int, default=200,
+                        help='Max SimPy time steps per episode (default 2200 for longer scheduling episodes)')
     parser.add_argument('--n_agents', type=int, default=10)
     parser.add_argument('--initial_jobs', type=int, default=4,
                         help='Number of jobs created at the start of the simulation (default 4)')
@@ -138,9 +138,9 @@ def get_mutable_args():
                         help='Comma-separated probabilities for lottery choices (must sum to 1.0)')
     
     # Training loop sizes (production defaults, CLI overrideable)
-    parser.add_argument('--n_epoch', type=int, default=100,
+    parser.add_argument('--n_epoch', type=int, default=400,
                         help='Number of training epochs (default 400 for stable QMIX learning)')
-    parser.add_argument('--n_episodes', type=int, default=1,
+    parser.add_argument('--n_episodes', type=int, default=4,
                         help='Episodes per epoch (default 4)')
     parser.add_argument('--evaluate_cycle', type=int, default=2,
                         help='Evaluate every N epochs')
@@ -156,9 +156,9 @@ def get_mutable_args():
     # === Replay buffer & training settings ======================
     # ============================================================
     # Reduced defaults so warm-up completes faster but training stays stable
-    parser.add_argument('--buffer_size', type=int, default=2500)   # was 3000
+    parser.add_argument('--buffer_size', type=int, default=5000)   # was 3000
     parser.add_argument('--batch_size', type=int, default=32)      # was 32
-    parser.add_argument('--train_steps', type=int, default=10)     # increased for better convergence
+    parser.add_argument('--train_steps', type=int, default=20)     # increased for better convergence
     parser.add_argument('--min_warmup_size', type=int, default=800)  # new: minimum samples before strict warm-up
     parser.add_argument('--target_update_cycle', type=int, default=20)  # ✅ frequent sync
     parser.add_argument('--grad_norm_clip', type=float, default=10.0)
@@ -175,8 +175,8 @@ def get_mutable_args():
                         help='Initial epsilon value for exploration (SimPy-time-based decay)')
     parser.add_argument('--epsilon_end', type=float, default=0.05,
                         help='Final epsilon value for exploration (SimPy-time-based decay)')
-    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.1,
-                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.3 = first 30% - BALANCED decay). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
+    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.2,
+                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.2 = first 20% - BALANCED decay). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,

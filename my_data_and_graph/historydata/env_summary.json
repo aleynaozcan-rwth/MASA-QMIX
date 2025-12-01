@@ -1,9 +1,14 @@
 {
-  "episode_limit": 100,
-  "initial_jobs_created": 4,
-  "initial_jobs_requested": 4,
-  "job_max_ops": 4,
-  "job_min_ops": 2,
-  "n_agents_capacity": 10,
+  "n_epoch": 400,
+  "n_episodes": 4,
+  "episode_limit": 200,
+  "epsilon_start": 1.0,
+  "epsilon_end": 0.05,
+  "epsilon_anneal_fraction": 0.2,
+  "train_steps": 20,
+  "buffer_size": 5000,
+  "batch_size": 32,
+  "lr": 0.0002,
+  "gamma": 0.98,
   "seed": 123
 }

@@ -2,7 +2,7 @@
 #SBATCH --job-name=masa_cpu
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
-#SBATCH --time=03:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=c23m
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8

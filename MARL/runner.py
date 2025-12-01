@@ -1466,6 +1466,29 @@ class Runner:
         except Exception as e:
             print(f"[ACTIVE_ARGS] failed to log: {e}", flush=True)
 
+    def write_env_args_to_json(self, path="./my_data_and_graph/historydata/env_summary.json"):
+        import json
+        args = self.args
+        env_args = {
+            "n_epoch": getattr(args, "n_epoch", None),
+            "n_episodes": getattr(args, "n_episodes", None),
+            "episode_limit": getattr(args, "episode_limit", None),
+            "epsilon_start": getattr(args, "epsilon_start", None),
+            "epsilon_end": getattr(args, "epsilon_end", None),
+            "epsilon_anneal_fraction": getattr(args, "epsilon_anneal_fraction", None),
+            "train_steps": getattr(args, "train_steps", None),
+            "buffer_size": getattr(args, "buffer_size", None),
+            "batch_size": getattr(args, "batch_size", None),
+            "lr": getattr(args, "lr", None),
+            "gamma": getattr(args, "gamma", None),
+            "seed": getattr(args, "seed", None)
+        }
+        try:
+            with open(path, "w") as f:
+                json.dump(env_args, f, indent=2)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[C1] Failed to write env args to {path}: {e}")
+
     def run(self, num):
         train_steps = 0
         all_gantt_data = []
@@ -1473,6 +1496,9 @@ class Runner:
         global_ep_idx = 0
 
         print("[Runner] === Training loop started ===")
+
+        # Write key training arguments to env_summary.json at the start of each run
+        self.write_env_args_to_json()
 
         for epoch in range(self.args.n_epoch):
             print(f"[DEBUG] allow_history_writes: {getattr(self, 'allow_history_writes', None)} (epoch {epoch})")

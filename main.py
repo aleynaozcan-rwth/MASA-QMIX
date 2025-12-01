@@ -149,6 +149,13 @@ def random_agent_wrapper(args):
 # ============================================================
 
 if __name__ == "__main__":
+    # Automatically redirect stdout and stderr to terminal_output_log.txt
+    import sys
+    import os
+    log_path = os.path.join(os.path.dirname(__file__), "terminal_output_log.txt")
+    sys.stdout = open(log_path, "w")
+    sys.stderr = sys.stdout
+
     # Centralized argument parsing
     # Use a mutable args object here so we can override values for the
     # developer mini-run without hitting ReadOnlyArgs protections.
