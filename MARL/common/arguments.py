@@ -91,7 +91,7 @@ def get_mutable_args():
                         help='Weight for CompletedNorm (K1)')
     parser.add_argument('--reward_w2_avgwait', type=float, default=0.0,
                         help='Weight for AvgWait (K2)')
-    parser.add_argument('--reward_w3_wip', type=float, default=0.0,
+    parser.add_argument('--reward_w3_wip', type=float, default=0.5,
                         help='Weight for Work-in-Progress (K3)')
     parser.add_argument('--reward_w4_throughput_delta', type=float, default=0.0,
                         help='Weight for ThroughputDelta (K4)')
