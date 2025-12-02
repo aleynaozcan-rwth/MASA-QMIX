@@ -908,10 +908,10 @@ class MASAEnv:
         
         R_total = float(R_global)  # Simplified: no mixing needed
         
-        # [v6-FIX] Reward scaling for stable Q-learning
-        # QMIX loss explodes with large rewards (Loss was 3.8M!)
-        # Scale rewards to match SMAC range: episode ~45 → ~0.9
-        reward_scale = float(getattr(self, 'reward_scale', 2.0))
+        # [v7-FIX] Reward scaling removed (set to 1.0)
+        # Previous scaling (2.0) was weakening already small reward signal
+        # Now using raw reward for stronger learning signal
+        reward_scale = float(getattr(self, 'reward_scale', 1.0))
         R_total = R_total / reward_scale
         
         # Validate final R_total is finite

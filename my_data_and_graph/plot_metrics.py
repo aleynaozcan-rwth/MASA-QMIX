@@ -233,7 +233,14 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
         y_vals = df['last_td'].values
         
         plt.figure(figsize=(8, 4))
-        plt.plot(x_vals, y_vals, color='C2', linewidth=1)
+        plt.plot(x_vals, y_vals, color='C2', linewidth=1, label='TD Error')
+        # Moving average ekle
+        if len(y_vals) > 10:
+            window = min(20, len(y_vals) // 5)
+            td_series = pd.Series(y_vals)
+            td_rolling = td_series.rolling(window=window, center=True).mean()
+            plt.plot(x_vals, td_rolling, color='red', linewidth=1.2, label=f'{window}-step MA')
+        plt.legend(loc='best')
         plt.grid(True, alpha=0.3)
         plt.xlabel('Training Step')
         plt.ylabel('TD Error')
@@ -250,7 +257,7 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
             max_bin_idx = np.argmax(hist)
             bin_low = bin_edges[max_bin_idx]
             bin_high = bin_edges[max_bin_idx + 1]
-            margin = 4.0 * (bin_high - bin_low)
+            margin = 8.0 * (bin_high - bin_low)
             ylim_low = bin_low - margin
             ylim_high = bin_high + margin
 
