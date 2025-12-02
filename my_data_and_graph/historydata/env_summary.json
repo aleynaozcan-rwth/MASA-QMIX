@@ -4,7 +4,7 @@
   "episode_limit": 50,
   "epsilon_start": 1.0,
   "epsilon_end": 0.05,
-  "epsilon_anneal_fraction": 0.2,
+  "epsilon_anneal_fraction": 0.4,
   "train_steps": 10,
   "buffer_size": 5000,
   "batch_size": 32,

@@ -174,8 +174,8 @@ def get_mutable_args():
                         help='Initial epsilon value for exploration (SimPy-time-based decay)')
     parser.add_argument('--epsilon_end', type=float, default=0.05,
                         help='Final epsilon value for exploration (SimPy-time-based decay)')
-    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.2,
-                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.2 = first 20% - BALANCED decay). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
+    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.4,
+                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.4 = first 40% - EXTENDED decay for better exploration). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,
