@@ -87,15 +87,15 @@ def get_mutable_args():
                         help='Mean interarrival time for job arrivals (default 5.0)')
     # Reward shaping defaults (centralized single source-of-truth)
     # === Hybrid Reward Parameters ===
-    parser.add_argument('--reward_w1_completed', type=float, default=1.0,
+    parser.add_argument('--reward_w1_completed', type=float, default=2.0,
                         help='Weight for CompletedNorm (K1)')
-    parser.add_argument('--reward_w2_avgwait', type=float, default=1.0,
+    parser.add_argument('--reward_w2_avgwait', type=float, default=10.0,
                         help='Weight for AvgWait (K2)')
     parser.add_argument('--reward_w3_wip', type=float, default=0.0,
                         help='Weight for Work-in-Progress (K3)')
     parser.add_argument('--reward_w4_throughput_delta', type=float, default=0.0,
                         help='Weight for ThroughputDelta (K4)')
-    parser.add_argument('--reward_w5_load_variance', type=float, default=0.0,
+    parser.add_argument('--reward_w5_load_variance', type=float, default=1.0,
                         help='Weight for LoadVariance (K5)')
 
     parser.add_argument('--reward_a1_completion', type=float, default=1.0,
