@@ -1266,3 +1266,37 @@ def plot_per_operator_utilization(history_dir: str = 'my_data_and_graph/historyd
 def check_timeline_consistency(history_dir: str = 'my_data_and_graph/historydata', util_threshold: float = 0.6):
     """Deprecated: No-op stub."""
     pass
+
+def plot_lr_decay(history_dir: str = 'my_data_and_graph/historydata', base_lr: float = 0.0005) -> None:
+    """Plot learning rate decay (adaptive) from training_metrics.csv and save as lr_decay.png."""
+    plots_dir = _ensure_plots_dir(history_dir)
+    out_path = os.path.join(plots_dir, 'lr_decay.png')
+    metrics_path = os.path.join(history_dir, 'training_metrics.csv')
+    if not os.path.exists(metrics_path):
+        warnings.warn(f'[plot_lr_decay] Missing training_metrics.csv; skipping plot')
+        return
+    try:
+        df = pd.read_csv(metrics_path)
+        if 'train_step' not in df.columns or 'epsilon' not in df.columns:
+            warnings.warn(f'[plot_lr_decay] Missing required columns in {metrics_path}')
+            return
+        steps = df['train_step'].values
+        epsilons = df['epsilon'].values
+        lrs = [base_lr * max(0.5, eps) for eps in epsilons]
+        plt.figure(figsize=(10, 5))
+        plt.plot(steps, lrs, color='blue', linewidth=1.5, label='Learning Rate')
+        plt.plot(steps, [base_lr * eps for eps in epsilons], color='orange', linestyle='--', alpha=0.5, label='base_lr * epsilon')
+        plt.axhline(y=base_lr * 0.5, color='red', linestyle=':', alpha=0.7, label='Min LR (base_lr * 0.5)')
+        plt.xlabel('Train Step')
+        plt.ylabel('Learning Rate')
+        plt.title('Learning Rate Decay (Adaptive)')
+        plt.legend(loc='best')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=100)
+        plt.close()
+        print(f'[plot_lr_decay] Saved {out_path}', flush=True)
+    except Exception as e:
+        warnings.warn(f'[plot_lr_decay] Error: {e}')
+        import traceback
+        traceback.print_exc()
