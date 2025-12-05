@@ -1770,14 +1770,15 @@ class Runner:
                             mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.run_args.n_actions)
                             if mini_batch is None:
                                 break
-                            result = self.agents.train(mini_batch, train_steps)
+                            # [v8] Pass epsilon to train for adaptive LR scheduling
+                            epsilon_val = getattr(self.rolloutWorker, 'epsilon', None)
+                            result = self.agents.train(mini_batch, train_steps, epsilon=epsilon_val)
                             train_steps += 1
                             if isinstance(result, dict):
                                 loss = result.get("loss")
                                 td = result.get("td_error")
                                 q_val = result.get("q_value", result.get("mean_q", None))
                                 batch_reward = result.get("reward", None)
-                                epsilon_val = getattr(self.rolloutWorker, 'epsilon', None)
                                 
                                 # Store loss/td for legacy compatibility (backward compat)
                                 if not hasattr(self, '_train_loss_history'):
@@ -1900,7 +1901,9 @@ class Runner:
                         mini_batch = self.buffer.sample(self.args.batch_size, n_actions=self.run_args.n_actions)
                         if mini_batch is None:
                             break
-                        result = self.agents.train(mini_batch, train_steps)
+                        # [v8] Pass epsilon to train for adaptive LR scheduling
+                        epsilon_val = getattr(self.rolloutWorker, 'epsilon', None)
+                        result = self.agents.train(mini_batch, train_steps, epsilon=epsilon_val)
                         train_steps += 1
                         if isinstance(result, dict):
                             loss, td = result.get("loss"), result.get("td_error")

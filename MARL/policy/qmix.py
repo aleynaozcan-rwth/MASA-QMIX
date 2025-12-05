@@ -94,8 +94,14 @@ class QMIX:
     # ==========================================================
     # === Main Learning Function ===============================
     # ==========================================================
-    def learn(self, batch, train_step):
-        """Learn from a batch of replayed episodes."""
+    def learn(self, batch, train_step, epsilon=None):
+        """Learn from a batch of replayed episodes.
+        
+        Args:
+            batch: Replay buffer batch
+            train_step: Current training step
+            epsilon: Current exploration rate (for adaptive LR scheduling)
+        """
         required_keys = ["o", "o_next", "u", "r", "terminated", "filled", "state", "state_next"]
         for k in required_keys:
             if k not in batch:
@@ -147,6 +153,37 @@ class QMIX:
         # --- Backpropagation ---
         self.optimizer.zero_grad()
         loss.backward()
+
+        # =================================================================
+        # === Epsilon-Based Adaptive Learning Rate Scheduling =============
+        # =================================================================
+        # [v8] Dynamic LR adjustment based on exploration rate (epsilon)
+        # Rationale: High exploration → high LR (large updates), low exploration → low LR (fine-tuning)
+        # This approach is setting-agnostic and automatically adapts to different epsilon decay schedules
+        # 
+        # Benefits over fixed milestones:
+        #   - Works with any epsilon_anneal_time (1500, 3000, etc.)
+        #   - Smooth LR decay (no sudden loss spikes)
+        #   - Synchronized with exploration-exploitation transition
+        #   - Self-adapting (no manual episode-based milestones)
+        #
+        # Alternative (commented): Step-based schedule at fixed episodes
+        #   if epsilon > 0.5:
+        #       lr_scale = 1.0   # High exploration phase
+        #   elif epsilon > 0.2:
+        #       lr_scale = 0.5   # Medium exploration phase
+        #   elif epsilon > 0.1:
+        #       lr_scale = 0.25  # Low exploration phase
+        #   else:
+        #       lr_scale = 0.1   # Exploitation phase
+        #
+        if epsilon is not None:
+            # Smooth linear scaling: lr = base_lr * max(0.1, epsilon)
+            # This ensures LR never drops below 10% of base LR
+            lr_scale = max(0.1, epsilon)
+            current_lr = self.args.lr * lr_scale
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = current_lr
 
         # [PHASE6-FIX] Task 6.6: Use clip_grad_norm_ return value for grad norm computation
         # This is more efficient (computed internally) and avoids manual loops with .item() calls
