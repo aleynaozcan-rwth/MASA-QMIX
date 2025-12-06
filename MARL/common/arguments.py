@@ -165,7 +165,7 @@ def get_mutable_args():
     # ============================================================
     # === Learning & optimization ================================
     # ============================================================
-    parser.add_argument('--lr', type=float, default=2e-4)         # ✅ stable learning
+    parser.add_argument('--lr', type=float, default=1e-4)         # ✅ reduced for convergence stability
 
     # ============================================================
     # === Exploration (epsilon schedule) =========================
