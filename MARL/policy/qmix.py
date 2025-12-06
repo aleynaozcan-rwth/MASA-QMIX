@@ -178,10 +178,10 @@ class QMIX:
         #       lr_scale = 0.1   # Exploitation phase
         #
         if epsilon is not None:
-            # Smooth linear scaling: lr = base_lr * max(0.5, epsilon)
-            # This ensures LR never drops below 50% of base LR (balanced decay)
-            # Prevents divergence from overly aggressive LR reduction while maintaining adaptivity
-            lr_scale = max(0.5, epsilon)
+            # Smooth linear scaling: lr = base_lr * max(0.25, epsilon)
+            # This ensures LR never drops below 25% of base LR (balanced decay)
+            # Min 0.25 prevents divergence from overly aggressive updates while maintaining adaptivity
+            lr_scale = max(0.25, epsilon)
             current_lr = self.args.lr * lr_scale
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = current_lr
