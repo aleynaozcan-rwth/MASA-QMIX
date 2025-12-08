@@ -8,7 +8,7 @@
   "train_steps": 15,
   "buffer_size": 5000,
   "batch_size": 32,
-  "lr": 0.0001,
+  "lr": 0.0002,
   "gamma": 0.98,
   "seed": 123
 }
