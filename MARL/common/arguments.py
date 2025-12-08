@@ -157,15 +157,15 @@ def get_mutable_args():
     # Reduced defaults so warm-up completes faster but training stays stable
     parser.add_argument('--buffer_size', type=int, default=5000)   # was 3000
     parser.add_argument('--batch_size', type=int, default=32)      # was 32
-    parser.add_argument('--train_steps', type=int, default=10)     # fast run
+    parser.add_argument('--train_steps', type=int, default=15)     # increased for more training
     parser.add_argument('--min_warmup_size', type=int, default=800)  # new: minimum samples before strict warm-up
-    parser.add_argument('--target_update_cycle', type=int, default=20)  # ✅ frequent sync
+    parser.add_argument('--target_update_cycle', type=int, default=50)  # ✅ reduced frequency for stability
     parser.add_argument('--grad_norm_clip', type=float, default=10.0)
 
     # ============================================================
     # === Learning & optimization ================================
     # ============================================================
-    parser.add_argument('--lr', type=float, default=1e-4)         # ✅ reduced for convergence stability
+    parser.add_argument('--lr', type=float, default=2e-4)         # ✅ best historical value
 
     # ============================================================
     # === Exploration (epsilon schedule) =========================
