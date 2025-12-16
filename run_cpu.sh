@@ -34,9 +34,13 @@ echo "GIT BRANCH: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'n/a')"
 echo "=========================================================="
 
 # === CLEANUP OLD RUNS ===
-echo "[CLEANUP] Removing old logs and outputs..."
-rm -f ./my_data_and_graph/historydata/*.{txt,csv,png} 2>/dev/null || true
+echo "[CLEANUP] Removing old logs, checkpoints, and outputs..."
+rm -f ./my_data_and_graph/historydata/*.txt 2>/dev/null || true
+rm -f ./my_data_and_graph/historydata/*.csv 2>/dev/null || true
+rm -f ./my_data_and_graph/historydata/*.png 2>/dev/null || true
 rm -f ./my_data_and_graph/pickles/*.pk 2>/dev/null || true
+rm -rf ./result/qmix/masa_schedule/*/ 2>/dev/null || true
+echo "[CLEANUP] Checkpoint directory cleared (fresh training)"
 
 # === ADAPTIVE FIXES TRAINING ===
 echo "[RUN] Launching main.py with adaptive fixes..."

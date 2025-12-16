@@ -24,6 +24,50 @@ def _ensure_plots_dir(history_dir: str) -> str:
     return plots_dir
 
 
+def get_epsilon_min_step(history_dir: str = 'my_data_and_graph/historydata'):
+    """Detect when epsilon reaches minimum (exploitation phase starts).
+    
+    Returns:
+        dict with keys: 'epsilon_min_step', 'epsilon_min_value', 'epsilon_min_episode'
+        or None if not found
+    """
+    csv_path = os.path.join(history_dir, 'training_metrics.csv')
+    if not os.path.exists(csv_path):
+        return None
+    
+    try:
+        df = pd.read_csv(csv_path)
+        if 'train_step' not in df.columns or 'epsilon' not in df.columns:
+            return None
+        
+        steps = df['train_step'].values
+        epsilons = df['epsilon'].values
+        
+        # Find when epsilon reaches minimum (plateaus at epsilon_end)
+        # Use threshold 0.11 to catch epsilon_end=0.1 with some tolerance
+        mask = epsilons <= 0.11
+        if not mask.any():
+            return None
+        
+        min_step = int(steps[mask].min())
+        min_eps = float(epsilons[steps == min_step][0])
+        
+        # Get episode number if available
+        min_episode = None
+        if 'episode' in df.columns:
+            min_episode = int(df[df['train_step'] == min_step]['episode'].iloc[0])
+        
+        return {
+            'epsilon_min_step': min_step,
+            'epsilon_min_value': min_eps,
+            'epsilon_min_episode': min_episode
+        }
+    
+    except Exception as e:
+        warnings.warn(f'[get_epsilon_min_step] Error: {e}')
+        return None
+
+
 def _read_series_file(path: str) -> Optional[pd.Series]:
     """Try to load a simple one- or two-column numeric log into a Series.
 
@@ -110,6 +154,13 @@ def plot_reward_trend(history_dir: str = 'my_data_and_graph/historydata') -> Non
         plt.figure(figsize=(10, 6))
         plt.plot(episodes, rewards, color='blue', linewidth=1, alpha=0.5, label='Episode Reward')
         
+        # Add epsilon min marker (convert step to episode)
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info and eps_info['epsilon_min_episode']:
+            eps_ep = eps_info['epsilon_min_episode']
+            plt.axvline(x=eps_ep, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (ep {eps_ep})')
+        
         # Add moving average
         if len(rewards) > 10:
             window = min(20, len(rewards) // 5)
@@ -184,6 +235,14 @@ def plot_loss_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
         
         plt.figure(figsize=(8, 4))
         plt.plot(x_vals, y_vals, color='C1', linewidth=1, alpha=0.5, label='Loss')
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
         # Moving average ekle
         if len(y_vals) > 10:
             # pandas is already imported globally at the top
@@ -234,6 +293,14 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
         
         plt.figure(figsize=(8, 4))
         plt.plot(x_vals, y_vals, color='C2', linewidth=1, label='TD Error')
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
         # Moving average ekle
         if len(y_vals) > 10:
             window = min(20, len(y_vals) // 5)
@@ -250,36 +317,6 @@ def plot_td_error_trend(history_dir: str = 'my_data_and_graph/historydata') -> N
         plt.close()
         print(f'[plot_td_error_trend] Saved {out_path}', flush=True)
 
-        # --- Zoomed TD Error Trend (y ekseni en yoğun aralığa zoom) ---
-        if len(y_vals) > 0:
-            import numpy as np
-            hist, bin_edges = np.histogram(y_vals, bins=30)
-            max_bin_idx = np.argmax(hist)
-            bin_low = bin_edges[max_bin_idx]
-            bin_high = bin_edges[max_bin_idx + 1]
-            margin = 8.0 * (bin_high - bin_low)
-            ylim_low = bin_low - margin
-            ylim_high = bin_high + margin
-
-            plt.figure(figsize=(8, 4))
-            plt.plot(x_vals, y_vals, color='C2', linewidth=1, alpha=0.5, label='TD Error')
-            # Moving average ekle
-            if len(y_vals) > 10:
-                window = min(20, len(y_vals) // 5)
-                td_series = pd.Series(y_vals)
-                td_rolling = td_series.rolling(window=window, center=True).mean()
-                plt.plot(x_vals, td_rolling, color='red', linewidth=1.2, label=f'{window}-step MA')
-            plt.legend(loc='best')
-            plt.grid(True, alpha=0.3)
-            plt.xlabel('Training Step')
-            plt.ylabel('TD Error')
-            plt.title('TD Error Trend (Zoomed to Most Frequent Range)')
-            plt.tight_layout()
-            plt.ylim(ylim_low, ylim_high)
-            zoomed_out_path = os.path.join(plots_dir, 'td_error_trend_zoomed.png')
-            plt.savefig(zoomed_out_path)
-            plt.close()
-            print(f'[plot_td_error_trend] Saved {zoomed_out_path} (zoomed to most frequent y-range)', flush=True)
     except Exception as e:
         warnings.warn(f'[plot_td_error_trend] Error: {e}')
         import traceback
@@ -375,49 +412,75 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
         ax[3].set_ylabel('Makespan')
         ax[3].grid(True, alpha=0.3)
 
+        # Loss trend - same style as loss_trend.png
         if loss_series is not None and len(loss_series) > 0:
-            ax[4].plot(loss_series.index, loss_series.values, color='C4', linewidth=1, alpha=0.5, label='Loss')
-            # Moving average ekle
-            if len(loss_series) > 10:
-                window = min(20, len(loss_series) // 5)
-                loss_rolling = loss_series.rolling(window=window, center=True).mean()
-                ax[4].plot(loss_rolling.index, loss_rolling.values, color='red', linewidth=2.5, label=f'{window}-step MA')
+            # Read CSV data for combined plot
+            metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
+            if os.path.exists(metrics_csv):
+                df_csv = pd.read_csv(metrics_csv)
+                if 'train_step' in df_csv.columns and 'avg_loss' in df_csv.columns:
+                    # Plot txt data (gray, transparent)
+                    ax[4].plot(loss_series.index, loss_series.values, color='gray', linewidth=1, alpha=0.4, label='Last Loss (txt)')
+                    # Plot csv data (orange, dashed)
+                    ax[4].plot(df_csv['train_step'], df_csv['avg_loss'], color='orange', linestyle='--', linewidth=1, alpha=0.7, label='Avg Loss (csv)')
+                    # Moving average for CSV
+                    if len(df_csv['avg_loss']) > 10:
+                        window_csv = min(20, len(df_csv['avg_loss']) // 5)
+                        rolling_csv = pd.Series(df_csv['avg_loss']).rolling(window=window_csv, center=True).mean()
+                        ax[4].plot(df_csv['train_step'], rolling_csv, color='blue', linewidth=1.0, label=f'CSV MA ({window_csv})')
+                    
+                    # Add exploitation start marker
+                    eps_info = get_epsilon_min_step(history_dir)
+                    if eps_info:
+                        eps_step = eps_info['epsilon_min_step']
+                        ax[4].axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Exploitation start (step {eps_step})')
+                else:
+                    ax[4].plot(loss_series.index, loss_series.values, color='gray', linewidth=1, alpha=0.5, label='Loss')
+            else:
+                ax[4].plot(loss_series.index, loss_series.values, color='gray', linewidth=1, alpha=0.5, label='Loss')
+            
             ax[4].set_yscale('log')
-            ax[4].set_title('Loss Trend (Training Steps)')
-            ax[4].set_xlabel('Gradient Update Step')
+            ax[4].set_title('Loss Trend')
+            ax[4].set_xlabel('Training Step')
             ax[4].set_ylabel('Loss (log scale)')
-            ax[4].legend(loc='best')
+            ax[4].legend(loc='best', fontsize=7)
             ax[4].grid(True, alpha=0.3)
         else:
             ax[4].text(0.5, 0.5, 'Loss data not available', ha='center', va='center', transform=ax[4].transAxes)
             ax[4].set_title('Loss Trend')
 
-        # --- Zoomed TD Error Trend (y ekseni en yoğun aralığa zoom) ---
+        # TD Error trend - same style as td_error_trend.png
         if td_series is not None and len(td_series) > 0:
-            import numpy as np
-            y_vals = td_series.values
-            x_vals = td_series.index
-            hist, bin_edges = np.histogram(y_vals, bins=30)
-            max_bin_idx = np.argmax(hist)
-            bin_low = bin_edges[max_bin_idx]
-            bin_high = bin_edges[max_bin_idx + 1]
-            margin = 4.0 * (bin_high - bin_low)
-            ylim_low = bin_low - margin
-            ylim_high = bin_high + margin
-
-            ax[5].plot(x_vals, y_vals, color='C2', linewidth=1, alpha=0.5, label='TD Error')
-            # Moving average ekle
-            if len(y_vals) > 10:
-                window = min(20, len(y_vals) // 5)
-                td_series_pd = pd.Series(y_vals)
-                td_rolling = td_series_pd.rolling(window=window, center=True).mean()
-                ax[5].plot(x_vals, td_rolling, color='red', linewidth=1.2, label=f'{window}-step MA')
-            ax[5].legend(loc='best')
-            ax[5].grid(True, alpha=0.3)
+            # Read CSV data for combined plot
+            metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
+            if os.path.exists(metrics_csv):
+                df_csv = pd.read_csv(metrics_csv)
+                if 'train_step' in df_csv.columns and 'avg_td_error' in df_csv.columns:
+                    # Plot txt data (lightblue, transparent)
+                    ax[5].plot(td_series.index, td_series.values, color='lightblue', linewidth=1, alpha=0.4, label='Last TD (txt)')
+                    # Plot csv data (teal, dashed)
+                    ax[5].plot(df_csv['train_step'], df_csv['avg_td_error'], color='teal', linestyle='--', linewidth=1, alpha=0.7, label='Avg TD (csv)')
+                    # Moving average for CSV (magenta)
+                    if len(df_csv['avg_td_error']) > 10:
+                        window_csv = min(20, len(df_csv['avg_td_error']) // 5)
+                        rolling_csv = pd.Series(df_csv['avg_td_error']).rolling(window=window_csv, center=True).mean()
+                        ax[5].plot(df_csv['train_step'], rolling_csv, color='magenta', linewidth=1.0, label=f'CSV MA ({window_csv})')
+                    
+                    # Add exploitation start marker
+                    eps_info = get_epsilon_min_step(history_dir)
+                    if eps_info:
+                        eps_step = eps_info['epsilon_min_step']
+                        ax[5].axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Exploitation start (step {eps_step})')
+                else:
+                    ax[5].plot(td_series.index, td_series.values, color='lightblue', linewidth=1, alpha=0.5, label='TD Error')
+            else:
+                ax[5].plot(td_series.index, td_series.values, color='lightblue', linewidth=1, alpha=0.5, label='TD Error')
+            
+            ax[5].set_title('TD Error Trend')
             ax[5].set_xlabel('Training Step')
             ax[5].set_ylabel('TD Error')
-            ax[5].set_title('TD Error Trend (Zoomed to Most Frequent Range)')
-            ax[5].set_ylim(ylim_low, ylim_high)
+            ax[5].legend(loc='best', fontsize=7)
+            ax[5].grid(True, alpha=0.3)
         else:
             ax[5].text(0.5, 0.5, 'TD Error data not available', ha='center', va='center', transform=ax[5].transAxes)
             ax[5].set_title('TD Error Trend')
@@ -431,6 +494,163 @@ def plot_kpi_summary(history_dir: str = 'my_data_and_graph/historydata') -> None
                 pass
         except Exception as e:
             warnings.warn(f'[plot_kpi_summary] Could not write {out_path}: {e}')
+    finally:
+        plt.close(fig)
+
+
+def plot_convergence_summary(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Plot comprehensive convergence summary with 6 key metrics in 2x3 grid.
+    
+    Includes: Loss, TD Error, Q-Value, Reward, Batch Reward, Avg Wait Time
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    out_path = os.path.join(plots_dir, 'convergence_summary.png')
+    
+    # Read data files
+    loss_txt = os.path.join(history_dir, 'loss.txt')
+    td_txt = os.path.join(history_dir, 'td_error.txt')
+    metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
+    kpi_log = os.path.join(history_dir, 'kpi_log.txt')
+    episode_csv = os.path.join(history_dir, 'episode_metrics.csv')
+    
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle('Training Convergence Summary', fontsize=16, fontweight='bold')
+    
+    try:
+        # Get epsilon info for markers
+        eps_info = get_epsilon_min_step(history_dir)
+        
+        # 1. Loss Trend (top-left)
+        if os.path.exists(loss_txt) and os.path.exists(metrics_csv):
+            df_loss_txt = pd.read_csv(loss_txt, sep=r'\s+', header=0)
+            df_csv = pd.read_csv(metrics_csv)
+            if 'train_step' in df_loss_txt.columns and 'last_loss' in df_loss_txt.columns:
+                axes[0,0].plot(df_loss_txt['train_step'], df_loss_txt['last_loss'], color='gray', linewidth=1, alpha=0.4, label='Last Loss (txt)')
+                if 'train_step' in df_csv.columns and 'avg_loss' in df_csv.columns:
+                    axes[0,0].plot(df_csv['train_step'], df_csv['avg_loss'], color='orange', linestyle='--', linewidth=1, alpha=0.7, label='Avg Loss (csv)')
+                    if len(df_csv['avg_loss']) > 10:
+                        window = min(20, len(df_csv['avg_loss']) // 5)
+                        rolling = pd.Series(df_csv['avg_loss']).rolling(window=window, center=True).mean()
+                        axes[0,0].plot(df_csv['train_step'], rolling, color='blue', linewidth=1.0, label=f'MA ({window})')
+                if eps_info:
+                    axes[0,0].axvline(x=eps_info['epsilon_min_step'], color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                axes[0,0].set_yscale('log')
+                axes[0,0].set_title('Loss Trend', fontsize=11, fontweight='bold')
+                axes[0,0].set_xlabel('Training Step')
+                axes[0,0].set_ylabel('Loss (log)')
+                axes[0,0].legend(fontsize=7)
+                axes[0,0].grid(True, alpha=0.3)
+        
+        # 2. TD Error Trend (top-middle)
+        if os.path.exists(td_txt) and os.path.exists(metrics_csv):
+            df_td_txt = pd.read_csv(td_txt, sep=r'\s+', header=0)
+            if 'train_step' in df_td_txt.columns and 'last_td' in df_td_txt.columns:
+                axes[0,1].plot(df_td_txt['train_step'], df_td_txt['last_td'], color='lightblue', linewidth=1, alpha=0.4, label='Last TD (txt)')
+                if 'train_step' in df_csv.columns and 'avg_td_error' in df_csv.columns:
+                    axes[0,1].plot(df_csv['train_step'], df_csv['avg_td_error'], color='teal', linestyle='--', linewidth=1, alpha=0.7, label='Avg TD (csv)')
+                    if len(df_csv['avg_td_error']) > 10:
+                        window = min(20, len(df_csv['avg_td_error']) // 5)
+                        rolling = pd.Series(df_csv['avg_td_error']).rolling(window=window, center=True).mean()
+                        axes[0,1].plot(df_csv['train_step'], rolling, color='magenta', linewidth=1.0, label=f'MA ({window})')
+                if eps_info:
+                    axes[0,1].axvline(x=eps_info['epsilon_min_step'], color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                axes[0,1].set_title('TD Error Trend', fontsize=11, fontweight='bold')
+                axes[0,1].set_xlabel('Training Step')
+                axes[0,1].set_ylabel('TD Error')
+                axes[0,1].legend(fontsize=7)
+                axes[0,1].grid(True, alpha=0.3)
+        
+        # 3. Q-Value Trend (top-right)
+        diagnostics_path = os.path.join(history_dir, 'diagnostics_log.txt')
+        if os.path.exists(diagnostics_path):
+            train_steps, q_values = [], []
+            with open(diagnostics_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('[') or 'epoch_start' in line or 'epoch_end' in line:
+                        continue
+                    parts = line.split(',')
+                    if len(parts) >= 3:
+                        try:
+                            train_steps.append(int(parts[1]))
+                            q_values.append(float(parts[2]))
+                        except (ValueError, IndexError):
+                            continue
+            if train_steps:
+                import numpy as np
+                q_min, q_max = min(q_values), max(q_values)
+                margin = 0.05 * (q_max - q_min) if q_max > q_min else 1.0
+                axes[0,2].plot(train_steps, q_values, color='darkgreen', linewidth=1.5, alpha=0.7)
+                if len(q_values) > 10:
+                    q_series = pd.Series(q_values)
+                    q_rolling = q_series.rolling(window=min(20, len(q_values)//5), center=True).mean()
+                    axes[0,2].plot(train_steps, q_rolling, color='red', linewidth=2.5, label='MA')
+                if eps_info:
+                    axes[0,2].axvline(x=eps_info['epsilon_min_step'], color='purple', linestyle='--', linewidth=1.5, alpha=0.7)
+                axes[0,2].axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+                axes[0,2].set_ylim(q_min - margin, q_max + margin)
+                axes[0,2].set_title('Q-Value Trend', fontsize=11, fontweight='bold')
+                axes[0,2].set_xlabel('Training Step')
+                axes[0,2].set_ylabel('Avg Q-Value')
+                axes[0,2].legend(fontsize=7)
+                axes[0,2].grid(True, alpha=0.3)
+        
+        # 4. Reward Trend (bottom-left)
+        if os.path.exists(episode_csv):
+            df_ep = pd.read_csv(episode_csv)
+            if 'episode' in df_ep.columns and 'episode_reward' in df_ep.columns:
+                axes[1,0].plot(df_ep['episode'], df_ep['episode_reward'], color='C0', linewidth=1, alpha=0.6, label='Episode Reward')
+                if len(df_ep['episode_reward']) > 10:
+                    window = min(50, len(df_ep['episode_reward']) // 10)
+                    rolling = df_ep['episode_reward'].rolling(window=window, center=True).mean()
+                    axes[1,0].plot(df_ep['episode'], rolling, color='red', linewidth=2, label=f'MA ({window})')
+                if eps_info and 'epsilon_min_episode' in eps_info:
+                    axes[1,0].axvline(x=eps_info['epsilon_min_episode'], color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                axes[1,0].set_title('Reward Trend', fontsize=11, fontweight='bold')
+                axes[1,0].set_xlabel('Episode')
+                axes[1,0].set_ylabel('Reward')
+                axes[1,0].legend(fontsize=7)
+                axes[1,0].grid(True, alpha=0.3)
+        
+        # 5. Batch Reward Trend (bottom-middle)
+        if os.path.exists(metrics_csv):
+            if 'train_step' in df_csv.columns and 'avg_batch_reward' in df_csv.columns:
+                axes[1,1].plot(df_csv['train_step'], df_csv['avg_batch_reward'], color='C4', linewidth=1, alpha=0.5, label='Avg Batch Reward')
+                if len(df_csv['avg_batch_reward']) > 10:
+                    window = 50
+                    rolling = df_csv['avg_batch_reward'].rolling(window).mean()
+                    axes[1,1].plot(df_csv['train_step'], rolling, color='red', linewidth=2, label=f'MA ({window})')
+                if eps_info:
+                    axes[1,1].axvline(x=eps_info['epsilon_min_step'], color='green', linestyle='--', linewidth=1.5, alpha=0.7)
+                axes[1,1].set_title('Batch Reward Trend', fontsize=11, fontweight='bold')
+                axes[1,1].set_xlabel('Training Step')
+                axes[1,1].set_ylabel('Avg Batch Reward')
+                axes[1,1].legend(fontsize=7)
+                axes[1,1].grid(True, alpha=0.3)
+        
+        # 6. Avg Wait Time Trend (bottom-right)
+        if os.path.exists(kpi_log):
+            df_kpi = pd.read_csv(kpi_log, sep=',', comment='#', header=None)
+            if df_kpi.shape[1] >= 5:
+                df_kpi.columns = ['epoch', 'avg_wait', 'util_m', 'util_o', 'makespan']
+                axes[1,2].plot(df_kpi['epoch'], df_kpi['avg_wait'], color='C0', linewidth=1, label='Avg Wait Time')
+                if len(df_kpi['avg_wait']) > 10:
+                    window = min(20, len(df_kpi['avg_wait']) // 5)
+                    rolling = pd.Series(df_kpi['avg_wait']).rolling(window=window, center=True).mean()
+                    axes[1,2].plot(df_kpi['epoch'], rolling, color='magenta', linewidth=1.5, label=f'MA ({window})')
+                axes[1,2].set_title('Avg Wait Time Trend', fontsize=11, fontweight='bold')
+                axes[1,2].set_xlabel('Epoch')
+                axes[1,2].set_ylabel('Avg Wait Time')
+                axes[1,2].legend(fontsize=7)
+                axes[1,2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=100)
+        print(f'[plot_convergence_summary] Saved {out_path}', flush=True)
+    except Exception as e:
+        warnings.warn(f'[plot_convergence_summary] Error: {e}')
+        import traceback
+        traceback.print_exc()
     finally:
         plt.close(fig)
 
@@ -573,7 +793,7 @@ def utilization_summary_grid(history_dir: str = 'my_data_and_graph/historydata',
 
 
 def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> None:
-    """Plot Q-value evolution from diagnostics log.
+    """Plot Q-value evolution from diagnostics log with MA and exploitation start marker.
     
     Reads diagnostics_log.txt and extracts avg_q values over training steps.
     Shows how the network's Q-value estimates evolve during learning.
@@ -611,70 +831,46 @@ def plot_q_value_trend(history_dir: str = 'my_data_and_graph/historydata') -> No
             warnings.warn(f'[plot_q_value_trend] No Q-value data found in {diagnostics_path}')
             return
         
-        # Create plot
+        # --- Single Q-value trend plot with tight zoom ---
+        import numpy as np
+        # Min ve max değerlerini bul
+        q_min = min(q_values)
+        q_max = max(q_values)
+        q_range = q_max - q_min
+        
+        # Automatically calculate margin (5% of the range for tighter fit)
+        margin = 0.05 * q_range if q_range > 0 else 1.0
+        
+        ylim_low = q_min - margin
+        ylim_high = q_max + margin
+
         plt.figure(figsize=(10, 6))
         plt.plot(train_steps, q_values, color='darkgreen', linewidth=1.5, alpha=0.7)
-        
-        # Add moving average
         if len(q_values) > 10:
-            window = min(20, len(q_values) // 5)
             q_series = pd.Series(q_values)
-            q_rolling = q_series.rolling(window=window, center=True).mean()
-            plt.plot(train_steps, q_rolling, color='red', linewidth=2.5, label=f'{window}-step MA')
+            q_rolling = q_series.rolling(window=min(20, len(q_values)//5), center=True).mean()
+            plt.plot(train_steps, q_rolling, color='red', linewidth=2.5, label='MA')
         
-        # Add zero line
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='purple', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
         plt.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
-        
-        # Annotations
-        if q_values:
-            first_q = q_values[0]
-            last_q = q_values[-1]
-            plt.axhline(y=first_q, color='blue', linestyle=':', alpha=0.3, label=f'Initial: {first_q:.0f}')
-            plt.axhline(y=last_q, color='orange', linestyle=':', alpha=0.3, label=f'Final: {last_q:.0f}')
-        
+        plt.axhline(y=q_values[0], color='blue', linestyle=':', alpha=0.3, label=f'Initial: {q_values[0]:.0f}')
+        plt.axhline(y=q_values[-1], color='orange', linestyle=':', alpha=0.3, label=f'Final: {q_values[-1]:.0f}')
         plt.xlabel('Training Step', fontsize=12)
         plt.ylabel('Average Q-Value', fontsize=12)
-        plt.title('Q-Value Evolution During Training', fontsize=14, fontweight='bold')
-        plt.legend(loc='best')
+        plt.title('Q-Value Trend', fontsize=14, fontweight='bold')
+        plt.legend(loc='best', fontsize=8)
         plt.grid(True, alpha=0.3)
+        plt.ylim(ylim_low, ylim_high)
         plt.tight_layout()
-        
         plt.savefig(out_path, dpi=100)
         plt.close()
         print(f'[plot_q_value_trend] Saved {out_path}', flush=True)
-
-        # --- Zoomed Q-value trend (y ekseni en yoğun aralığa zoom) ---
-        if q_values:
-            import numpy as np
-            # Histogram ile en yoğun aralığı bul
-            hist, bin_edges = np.histogram(q_values, bins=30)
-            max_bin_idx = np.argmax(hist)
-            bin_low = bin_edges[max_bin_idx]
-            bin_high = bin_edges[max_bin_idx + 1]
-            margin = 10.0 * (bin_high - bin_low)  # Maximum margin for ultra wide y-axis window
-            ylim_low = bin_low - margin
-            ylim_high = bin_high + margin
-
-            plt.figure(figsize=(10, 6))
-            plt.plot(train_steps, q_values, color='darkgreen', linewidth=1.5, alpha=0.7)
-            if len(q_values) > 10:
-                q_series = pd.Series(q_values)
-                q_rolling = q_series.rolling(window=min(20, len(q_values)//5), center=True).mean()
-                plt.plot(train_steps, q_rolling, color='red', linewidth=2.5, label='MA')
-            plt.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
-            plt.axhline(y=q_values[0], color='blue', linestyle=':', alpha=0.3, label=f'Initial: {q_values[0]:.0f}')
-            plt.axhline(y=q_values[-1], color='orange', linestyle=':', alpha=0.3, label=f'Final: {q_values[-1]:.0f}')
-            plt.xlabel('Training Step', fontsize=12)
-            plt.ylabel('Average Q-Value', fontsize=12)
-            plt.title('Q-Value Trend (Zoomed to Most Frequent Range)', fontsize=14, fontweight='bold')
-            plt.legend(loc='best')
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.ylim(ylim_low, ylim_high)
-            zoomed_out_path = os.path.join(plots_dir, 'q_value_trend_zoomed.png')
-            plt.savefig(zoomed_out_path, dpi=100)
-            plt.close()
-            print(f'[plot_q_value_trend] Saved {zoomed_out_path} (zoomed to most frequent y-range)', flush=True)
         
     except Exception as e:
         warnings.warn(f'[plot_q_value_trend] Error: {e}')
@@ -923,18 +1119,52 @@ def plot_reward_components(history_dir: str = 'my_data_and_graph/historydata') -
     except Exception:
         pass
 
-    plt.figure(figsize=(10, 5))
+    # Read reward formula from CSV header
+    formula_text = ""
+    try:
+        with open(src, 'r') as f:
+            lines = [line.strip() for line in f.readlines() if line.startswith('#')]
+            if len(lines) >= 3:
+                # Extract formula lines
+                formula_line = lines[1].replace('# ', '')
+                coeff_line = lines[2].replace('# ', '')
+                formula_text = f"{formula_line}\n{coeff_line}"
+    except Exception:
+        pass
+    
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    if formula_text:
+        fig.suptitle(f'Reward Components over Time (Smoothed)\n{formula_text}', 
+                     fontsize=11, fontweight='bold', y=0.98)
+    else:
+        fig.suptitle('Reward Components over Time (Smoothed)', fontsize=14, fontweight='bold')
+    
     try:
         components = ['CompletedNorm', 'AvgWait', 'WIP', 'ThroughputDelta', 'LoadVariance', 'R_global']
-        for comp in components:
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+        
+        for idx, (comp, color) in enumerate(zip(components, colors)):
             if comp in df.columns:
-                plt.plot(df['env_time'].values, pd.to_numeric(df[comp], errors='coerce').fillna(0.0).values, label=comp, linewidth=1)
-
-        plt.grid(True, alpha=0.3)
-        plt.xlabel('Env time')
-        plt.ylabel('Value')
-        plt.title('Reward Components over Time')
-        plt.legend(loc='best')
+                ax = axes[idx // 3, idx % 3]
+                values = pd.to_numeric(df[comp], errors='coerce').fillna(0.0)
+                time_values = df['env_time'].values
+                
+                # Apply EWMA smoothing - only plot the smooth line, no scatter
+                if len(values) > 10:
+                    smoothed = values.ewm(span=100, adjust=False).mean()
+                    ax.plot(time_values, smoothed.values, color=color, linewidth=3.0, alpha=0.95)
+                else:
+                    ax.plot(time_values, values.values, color=color, linewidth=3.0, alpha=0.95)
+                
+                # Add subtle fill under the curve
+                if len(values) > 10:
+                    ax.fill_between(time_values, 0, smoothed.values, color=color, alpha=0.15)
+                
+                ax.set_title(comp, fontsize=11, fontweight='bold', color=color)
+                ax.grid(True, alpha=0.2, linestyle='--')
+                ax.set_xlabel('Env time', fontsize=10)
+                ax.set_ylabel('Value', fontsize=10)
+        
         plt.tight_layout()
         try:
             plt.savefig(out_path)
@@ -1061,7 +1291,7 @@ Decay rate: {decay_rate:.6f} per 1k steps"""
 def plot_loss_trend_combined(history_dir='my_data_and_graph/historydata'):
     """Plot both last_loss (txt) and avg_loss (csv) on same graph."""
     plots_dir = _ensure_plots_dir(history_dir)
-    out = os.path.join(plots_dir, 'loss_trend_combined.png')
+    out = os.path.join(plots_dir, 'loss_trend.png')
 
     loss_txt = os.path.join(history_dir, 'loss.txt')
     metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
@@ -1085,17 +1315,25 @@ def plot_loss_trend_combined(history_dir='my_data_and_graph/historydata'):
         # Ham değerler
         plt.plot(df_txt['train_step'], df_txt['last_loss'], label='Last Loss (txt)', color='gray', alpha=0.4)
         plt.plot(df_csv['train_step'], df_csv['avg_loss'], label='Avg Loss (csv)', color='orange', linestyle='--', alpha=0.7)
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
         # Sadece CSV moving average (mavi)
         if len(df_csv['avg_loss']) > 10:
             window_csv = min(20, len(df_csv['avg_loss']) // 5)
             rolling_csv = pd.Series(df_csv['avg_loss']).rolling(window=window_csv, center=True).mean()
-            plt.plot(df_csv['train_step'], rolling_csv, color='blue', linewidth=1.5, label=f'CSV MA ({window_csv})')
+            plt.plot(df_csv['train_step'], rolling_csv, color='blue', linewidth=1.0, label=f'CSV MA ({window_csv})')
         plt.yscale('log')
         plt.grid(True, alpha=0.3)
         plt.xlabel('Training Step')
         plt.ylabel('Loss')
         plt.title('Loss Trend (txt vs csv)')
-        plt.legend()
+        plt.legend(fontsize=8)
         plt.tight_layout()
         plt.savefig(out)
         plt.close()
@@ -1104,7 +1342,7 @@ def plot_loss_trend_combined(history_dir='my_data_and_graph/historydata'):
 def plot_td_error_trend_combined(history_dir='my_data_and_graph/historydata'):
     """Plot last_td (txt) + avg_td_error (csv) together."""
     plots_dir = _ensure_plots_dir(history_dir)
-    out = os.path.join(plots_dir, 'td_error_trend_combined.png')
+    out = os.path.join(plots_dir, 'td_error_trend.png')
 
     td_txt = os.path.join(history_dir, 'td_error.txt')
     metrics_csv = os.path.join(history_dir, 'training_metrics.csv')
@@ -1125,13 +1363,27 @@ def plot_td_error_trend_combined(history_dir='my_data_and_graph/historydata'):
             return
 
         plt.figure(figsize=(8, 4))
-        plt.plot(df_txt['train_step'], df_txt['last_td'], label='Last TD (txt)', color='C2')
-        plt.plot(df_csv['train_step'], df_csv['avg_td_error'], label='Avg TD (csv)', color='C0', linestyle='--')
+        plt.plot(df_txt['train_step'], df_txt['last_td'], label='Last TD (txt)', color='lightblue', alpha=0.4)
+        plt.plot(df_csv['train_step'], df_csv['avg_td_error'], label='Avg TD (csv)', color='teal', linestyle='--', alpha=0.7)
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
+        # Add moving average for CSV data
+        if len(df_csv['avg_td_error']) > 10:
+            window_csv = min(20, len(df_csv['avg_td_error']) // 5)
+            rolling_csv = pd.Series(df_csv['avg_td_error']).rolling(window=window_csv, center=True).mean()
+            plt.plot(df_csv['train_step'], rolling_csv, color='magenta', linewidth=1.0, label=f'CSV MA ({window_csv})')
+        
         plt.grid(True, alpha=0.3)
         plt.xlabel('Training Step')
         plt.ylabel('TD Error')
         plt.title('TD Error Trend (txt vs csv)')
-        plt.legend()
+        plt.legend(fontsize=8)
         plt.tight_layout()
         plt.savefig(out)
         plt.close()
@@ -1154,7 +1406,16 @@ def plot_q_value_csv(history_dir='my_data_and_graph/historydata'):
             return
 
         plt.figure(figsize=(8, 4))
-        plt.plot(df['train_step'], df['avg_q_value'], color='darkgreen', linewidth=1.5)
+        plt.plot(df['train_step'], df['avg_q_value'], color='darkgreen', linewidth=1.5, label='Avg Q-value')
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='red', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
+        plt.legend(loc='best', fontsize=8)
         plt.grid(True, alpha=0.3)
         plt.xlabel("Training Step")
         plt.ylabel("Avg Q-Value")
@@ -1186,11 +1447,19 @@ def plot_batch_reward_csv(history_dir='my_data_and_graph/historydata'):
         window = 50  # You can adjust window size
         ma = df['avg_batch_reward'].rolling(window).mean()
         plt.plot(df['train_step'], ma, color='red', linewidth=2, label=f'Moving Average ({window})')
+        
+        # Add epsilon min marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            plt.axvline(x=eps_step, color='green', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
         plt.grid(True, alpha=0.3)
         plt.xlabel("Training Step")
         plt.ylabel("Avg Batch Reward")
         plt.title("Batch Reward Trend (training_metrics.csv)")
-        plt.legend()
+        plt.legend(fontsize=8)
         plt.tight_layout()
         plt.savefig(out)
         plt.close()
@@ -1200,15 +1469,14 @@ def plot_batch_reward_csv(history_dir='my_data_and_graph/historydata'):
 # Convenience function to run all plots
 def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata', overlay_debug: bool = True) -> None:
     plot_reward_trend(history_dir)
-    plot_loss_trend(history_dir)
-    plot_td_error_trend(history_dir)
-    plot_q_value_trend(history_dir)  # New Q-value plot!
+    plot_q_value_trend(history_dir)  # Q-value plot with MA and exploitation start
     plot_epsilon_decay(history_dir, overlay_debug=overlay_debug)  # New epsilon decay plot!
     plot_kpi_summary(history_dir)
-    plot_loss_trend_combined(history_dir)
-    plot_td_error_trend_combined(history_dir)
-    plot_q_value_csv(history_dir)
+    plot_convergence_summary(history_dir)  # Comprehensive convergence summary (6 metrics)
+    plot_loss_trend_combined(history_dir)  # Combined loss plot (txt + csv)
+    plot_td_error_trend_combined(history_dir)  # Combined TD error plot (txt + csv)
     plot_batch_reward_csv(history_dir)
+    plot_gradient_norms(history_dir)  # NEW: Gradient norm monitoring (before/after clipping)
 
     # reward components plot (optional)
     try:
@@ -1236,11 +1504,6 @@ def generate_all_plots(history_dir: str = 'my_data_and_graph/historydata', overl
         warnings.warn('[generate_all_plots] plot_td_error_trend_combined failed; continuing')
 
     try:
-        plot_q_value_csv(history_dir)
-    except Exception:
-        warnings.warn('[generate_all_plots] plot_q_value_csv failed; continuing')
-
-    try:
         plot_batch_reward_csv(history_dir)
     except Exception:
         warnings.warn('[generate_all_plots] plot_batch_reward_csv failed; continuing')
@@ -1266,6 +1529,109 @@ def plot_per_operator_utilization(history_dir: str = 'my_data_and_graph/historyd
 def check_timeline_consistency(history_dir: str = 'my_data_and_graph/historydata', util_threshold: float = 0.6):
     """Deprecated: No-op stub."""
     pass
+
+def plot_gradient_norms(history_dir: str = 'my_data_and_graph/historydata') -> None:
+    """Plot gradient norms before and after clipping from diagnostics_log.txt.
+    
+    Shows both grad_before and grad_after on the same plot with different colors.
+    Helps diagnose gradient explosion issues.
+    """
+    plots_dir = _ensure_plots_dir(history_dir)
+    out_path = os.path.join(plots_dir, 'gradient_norms.png')
+    diagnostics_path = os.path.join(history_dir, 'diagnostics_log.txt')
+    
+    if not os.path.exists(diagnostics_path):
+        warnings.warn(f'[plot_gradient_norms] Missing {diagnostics_path}; skipping plot')
+        return
+    
+    try:
+        # Parse diagnostics file
+        # Format: timestamp,train_step,avg_q,grad_before,grad_after,target_updates,loss,td_error
+        train_steps = []
+        grad_before_vals = []
+        grad_after_vals = []
+        
+        with open(diagnostics_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('[') or 'epoch_start' in line or 'epoch_end' in line:
+                    continue
+                parts = line.split(',')
+                if len(parts) >= 5:
+                    try:
+                        step = int(parts[1])
+                        grad_before = float(parts[3])
+                        grad_after = float(parts[4])
+                        train_steps.append(step)
+                        grad_before_vals.append(grad_before)
+                        grad_after_vals.append(grad_after)
+                    except (ValueError, IndexError):
+                        continue
+        
+        if not train_steps:
+            warnings.warn(f'[plot_gradient_norms] No gradient norm data found in {diagnostics_path}')
+            return
+        
+        # Create figure with 2 subplots stacked vertically
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+        
+        # --- Top plot: Both grad_before and grad_after ---
+        ax1.plot(train_steps, grad_before_vals, color='darkorange', linewidth=1.0, alpha=0.6, label='Before clipping')
+        ax1.plot(train_steps, grad_after_vals, color='darkblue', linewidth=1.5, alpha=0.8, label='After clipping')
+        
+        # Add moving average
+        if len(grad_before_vals) > 10:
+            window = min(20, len(grad_before_vals)//5)
+            grad_before_ma = pd.Series(grad_before_vals).rolling(window=window, center=True).mean()
+            grad_after_ma = pd.Series(grad_after_vals).rolling(window=window, center=True).mean()
+            ax1.plot(train_steps, grad_before_ma, color='red', linewidth=2.0, linestyle='--', alpha=0.7, label='Before MA')
+            ax1.plot(train_steps, grad_after_ma, color='navy', linewidth=2.0, linestyle='--', alpha=0.7, label='After MA')
+        
+        # Add exploitation start marker
+        eps_info = get_epsilon_min_step(history_dir)
+        if eps_info:
+            eps_step = eps_info['epsilon_min_step']
+            ax1.axvline(x=eps_step, color='purple', linestyle='--', linewidth=1.5, alpha=0.7,
+                       label=f'Exploitation start (step {eps_step})')
+        
+        ax1.set_ylabel('Gradient Norm', fontsize=11)
+        ax1.set_title('Gradient Norms: Before vs After Clipping', fontsize=13, fontweight='bold')
+        ax1.legend(loc='best', fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_yscale('log')  # Log scale for better visibility
+        
+        # --- Bottom plot: Clipping effect (before - after) ---
+        clipping_effect = [b - a for b, a in zip(grad_before_vals, grad_after_vals)]
+        ax2.fill_between(train_steps, 0, clipping_effect, color='crimson', alpha=0.4, label='Clipping effect')
+        ax2.plot(train_steps, clipping_effect, color='darkred', linewidth=1.0, alpha=0.8)
+        
+        # Add moving average
+        if len(clipping_effect) > 10:
+            window = min(20, len(clipping_effect)//5)
+            clipping_ma = pd.Series(clipping_effect).rolling(window=window, center=True).mean()
+            ax2.plot(train_steps, clipping_ma, color='black', linewidth=2.0, linestyle='--', alpha=0.7, label='MA')
+        
+        # Add exploitation start marker
+        if eps_info:
+            ax2.axvline(x=eps_step, color='purple', linestyle='--', linewidth=1.5, alpha=0.7)
+        
+        ax2.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+        ax2.set_xlabel('Training Step', fontsize=11)
+        ax2.set_ylabel('Clipping Effect (before - after)', fontsize=11)
+        ax2.set_title('Gradient Clipping Effect', fontsize=13, fontweight='bold')
+        ax2.legend(loc='best', fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=120)
+        plt.close()
+        print(f'[plot_gradient_norms] Saved {out_path}', flush=True)
+        
+    except Exception as e:
+        warnings.warn(f'[plot_gradient_norms] Error: {e}')
+        import traceback
+        traceback.print_exc()
+
 
 def plot_lr_decay(history_dir: str = 'my_data_and_graph/historydata', base_lr: float = 0.0005) -> None:
     """Plot learning rate decay (adaptive) from training_metrics.csv and save as lr_decay.png."""

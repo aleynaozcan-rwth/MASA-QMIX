@@ -13,6 +13,10 @@ MARL/model/**/*.pkl
 *.log
 my_data_and_graph/historydata/scheduleresults.txt
 
+# Ignore büyük CSV dosyaları (100MB+ GitHub limiti)
+my_data_and_graph/historydata/decision_observation_metrics.csv
+my_data_and_graph/historydata/decision_state_metrics.csv
+
 # Ignore generated comparison tools and their outputs (local only)
 
 

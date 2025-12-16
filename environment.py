@@ -187,7 +187,7 @@ class MASAEnv:
         
         # Observation/state shapes defined by environment (not from args)
         # These values are derived from canonical observation/state builders in utils/env_obs.py
-        self.obs_dim_agent = 8  # fixed by canonical obs builder (see utils/env_obs.py)
+        self.obs_dim_agent = 7  # fixed by canonical obs builder (7 elements, finished_flag removed)
         self.state_dim = 10  # canonical state builder produces 10-element vector
         self.state_shape = self.state_dim  # alias for validation logic
         
@@ -908,10 +908,10 @@ class MASAEnv:
         
         R_total = float(R_global)  # Simplified: no mixing needed
         
-        # [v7-FIX] Reward scaling removed (set to 1.0)
-        # Previous scaling (2.0) was weakening already small reward signal
-        # Now using raw reward for stronger learning signal
-        reward_scale = float(getattr(self, 'reward_scale', 1.0))
+        # [v8-FIX] Reward scaling with configurable factor
+        # Scale down large rewards (R_global range [0, ~4.6]) to prevent Q-value explosion
+        # Default scale=5.0 -> R_total range [0, ~0.9] suitable for Q-learning
+        reward_scale = float(getattr(self.args, 'reward_scale', 5.0))
         R_total = R_total / reward_scale
         
         # Validate final R_total is finite

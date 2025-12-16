@@ -1481,6 +1481,13 @@ class Runner:
             "batch_size": getattr(args, "batch_size", None),
             "lr": getattr(args, "lr", None),
             "gamma": getattr(args, "gamma", None),
+            "target_update_cycle": getattr(args, "target_update_cycle", None),
+            "grad_norm_clip": getattr(args, "grad_norm_clip", None),
+            "rnn_hidden_dim": getattr(args, "rnn_hidden_dim", None),
+            "qmix_hidden_dim": getattr(args, "qmix_hidden_dim", None),
+            "two_hyper_layers": getattr(args, "two_hyper_layers", None),
+            "hyper_hidden_dim": getattr(args, "hyper_hidden_dim", None),
+            "save_cycle": getattr(args, "save_cycle", None),
             "seed": getattr(args, "seed", None)
         }
         try:
@@ -1873,12 +1880,10 @@ class Runner:
                                 # DON'T overwrite loss.txt/td_error.txt here - they are written by training loop
                                 # Just generate plots from existing files
                                 
-                                # Generate plots
-                                from my_data_and_graph.plot_metrics import plot_reward_trend, plot_loss_trend, plot_td_error_trend
-                                plot_reward_trend(history_dir=self.history_dir)
-                                plot_loss_trend(history_dir=self.history_dir)
-                                plot_td_error_trend(history_dir=self.history_dir)
-                                print(f"[Runner] Episode {global_ep_idx-1} plots updated: reward, loss, td_error")
+                                # Generate all available plots
+                                from my_data_and_graph.plot_metrics import generate_all_plots
+                                generate_all_plots(history_dir=self.history_dir)
+                                print(f"[Runner] Episode {global_ep_idx-1} all plots updated")
                             except Exception as e:
                                 logging.getLogger(__name__).debug(f"[Runner] Could not generate per-episode plots: {e}")
                 except Exception as e:

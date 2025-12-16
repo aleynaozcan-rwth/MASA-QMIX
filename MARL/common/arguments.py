@@ -58,7 +58,7 @@ def get_mutable_args():
     parser.add_argument('--seed', type=int, default=123)
     parser.add_argument('--mode', type=str, choices=['marl', 'random'], default='marl')
     parser.add_argument('--alg', type=str, default='qmix')
-    parser.add_argument('--gamma', type=float, default=0.98)
+    parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--optimizer', type=str, default='RMS')
     parser.add_argument('--evaluate_epoch', type=int, default=5)
     parser.add_argument('--model_dir', type=str, default='./MARL/model')
@@ -79,24 +79,26 @@ def get_mutable_args():
                         help='Maximum number of operations per job (default 4)')
     parser.add_argument('--n_operation_types', type=int, default=10,
                         help='Number of distinct operation types (default 10: Op0-Op9)')
-    parser.add_argument('--max_wait_time', type=float, default=100.0,
-                        help='Maximum wait time threshold for normalization (default 100.0)')
+    parser.add_argument('--max_wait_time', type=float, default=20.0,
+                        help='Maximum wait time threshold for AvgWaitNorm in reward (default 20.0, real max: ~15)')
     parser.add_argument('--avg_wait_scale', type=float, default=10.0,
                         help='Scale factor for average wait time in reward calculation (default 10.0)')
     parser.add_argument('--interarrival_time', type=float, default=5.0,
                         help='Mean interarrival time for job arrivals (default 5.0)')
     # Reward shaping defaults (centralized single source-of-truth)
     # === Hybrid Reward Parameters ===
-    parser.add_argument('--reward_w1_completed', type=float, default=2.0,
-                        help='Weight for CompletedNorm (K1)')
-    parser.add_argument('--reward_w2_avgwait', type=float, default=10.0,
-                        help='Weight for AvgWait (K2)')
+    parser.add_argument('--reward_w1_completed', type=float, default=3.0,
+                        help='Weight for CompletedNorm (K1) - primary long-term goal')
+    parser.add_argument('--reward_w2_avgwait', type=float, default=2.0,
+                        help='Weight for AvgWait (K2) - reduced from 10.0 due to 5x stronger penalty from max_wait_time=20')
     parser.add_argument('--reward_w3_wip', type=float, default=0.0,
                         help='Weight for Work-in-Progress (K3)')
-    parser.add_argument('--reward_w4_throughput_delta', type=float, default=0.0,
-                        help='Weight for ThroughputDelta (K4)')
-    parser.add_argument('--reward_w5_load_variance', type=float, default=1.0,
-                        help='Weight for LoadVariance (K5)')
+    parser.add_argument('--reward_w4_throughput_delta', type=float, default=4.0,
+                        help='Weight for ThroughputDelta (K4) - dense immediate feedback on job completion')
+    parser.add_argument('--reward_w5_load_variance', type=float, default=0.3,
+                        help='Weight for LoadVariance (K5) - reduced from 1.0 to prevent baseline dominance (mean=0.96, stddev=0.022)')
+    parser.add_argument('--reward_scale', type=float, default=2.0,
+                        help='Divisor for final reward scaling. R_total = R_global / reward_scale. Daha güçlü sinyal (default 2.0 -> R_total ~[0, 2] aralığı)')
 
     parser.add_argument('--reward_a1_completion', type=float, default=1.0,
                         help='Local reward weight for completed operation (a1)')
@@ -116,6 +118,35 @@ def get_mutable_args():
                         help='If set, logs detailed reward component breakdowns during rollout.')
 
     # ============================================================
+    # === Normalization Configuration ============================
+    # ============================================================
+    # State vector normalization factors (parametric, adapts to problem size)
+    parser.add_argument('--norm_jobs_multiplier', type=float, default=4.0,
+                        help='State normalization: max_jobs * multiplier for jobs_arrived/waiting (conservative: 4.0)')
+    parser.add_argument('--norm_ops_per_job', type=float, default=12.0,
+                        help='State normalization: assumed max ops per job for ops_arrived/waiting (default: 12.0)')
+    parser.add_argument('--norm_wait_multiplier', type=float, default=1.2,
+                        help='State normalization: episode_limit * max_jobs * multiplier for cumulative wait (default: 1.2)')
+    parser.add_argument('--norm_active_multiplier', type=float, default=1.5,
+                        help='State normalization: max_jobs * multiplier for active jobs/ops (default: 1.5)')
+    
+    # Observation vector normalization factors (per-agent specific)
+    parser.add_argument('--norm_job_wait_max', type=float, default=80.0,
+                        help='Observation normalization: max individual job wait time (real observed max: ~55, default: 80.0)')
+    parser.add_argument('--norm_ops_per_job_obs', type=float, default=8.0,
+                        help='Observation normalization: max operations per job in obs (real max: 5, default: 8.0)')
+    parser.add_argument('--norm_op_type_max', type=float, default=10.0,
+                        help='Observation normalization: max operation type index (default: 10.0 for Op0-Op9)')
+    parser.add_argument('--norm_machines_max', type=float, default=5.0,
+                        help='Observation normalization: max machine count (default: 5.0)')
+    
+    # Normalization validation/logging
+    parser.add_argument('--norm_log_overflow', action='store_true', default=True,
+                        help='If set, logs warnings when normalized values exceed 0.95 (near overflow)')
+    parser.add_argument('--norm_log_weak_signal', action='store_true', default=True,
+                        help='If set, logs info when normalized values are < 0.05 (weak signal)')
+
+    # ============================================================
     # === Episode / agent configuration ==========================
     # ============================================================
     parser.add_argument('--episode_limit', type=int, default=50,
@@ -124,7 +155,7 @@ def get_mutable_args():
     parser.add_argument('--initial_jobs', type=int, default=4,
                         help='Number of jobs created at the start of the simulation (default 4)')
     
-    # [STOCHASTIC_ARRIVAL] Lottery-based job arrival system (DEFAULT)
+    # [STOCHASTIC_ARRIVAL] Lottery-based job arrival system 
     parser.add_argument('--use_lottery_arrival', action='store_true', default=False,
                         help='Use lottery-based arrival (check intervals + discrete choices). This is the default system')
     parser.add_argument('--use_exponential_arrival', action='store_true', default=True,
@@ -137,8 +168,8 @@ def get_mutable_args():
                         help='Comma-separated probabilities for lottery choices (must sum to 1.0)')
     
     # Training loop sizes (production defaults, CLI overrideable)
-    parser.add_argument('--n_epoch', type=int, default=400,
-                        help='Number of training epochs (fast run)')
+    parser.add_argument('--n_epoch', type=int, default=200,
+                        help='Number of training epochs')
     parser.add_argument('--n_episodes', type=int, default=4,
                         help='Episodes per epoch (default 4)')
     parser.add_argument('--evaluate_cycle', type=int, default=2,
@@ -147,7 +178,7 @@ def get_mutable_args():
                         help='(fallback) number of actions/workcenters when machine_list is not provided')
     parser.add_argument('--state_shape', type=int, default=10,
                         help='Global state dimension (will be overridden by env.get_env_info())')
-    parser.add_argument('--obs_shape', type=int, default=8,
+    parser.add_argument('--obs_shape', type=int, default=7,
                         help='Agent observation dimension (will be overridden by env.get_env_info())')
     
 
@@ -155,27 +186,27 @@ def get_mutable_args():
     # === Replay buffer & training settings ======================
     # ============================================================
     # Reduced defaults so warm-up completes faster but training stays stable
-    parser.add_argument('--buffer_size', type=int, default=5000)   # was 3000
-    parser.add_argument('--batch_size', type=int, default=32)      # was 32
-    parser.add_argument('--train_steps', type=int, default=15)     # increased for more training
-    parser.add_argument('--min_warmup_size', type=int, default=800)  # new: minimum samples before strict warm-up
-    parser.add_argument('--target_update_cycle', type=int, default=50)  # ✅ reduced frequency for stability
+    parser.add_argument('--buffer_size', type=int, default=5000)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--train_steps', type=int, default=30)
+    parser.add_argument('--min_warmup_size', type=int, default=800)
+    parser.add_argument('--target_update_cycle', type=int, default=200)
     parser.add_argument('--grad_norm_clip', type=float, default=10.0)
 
     # ============================================================
     # === Learning & optimization ================================
     # ============================================================
-    parser.add_argument('--lr', type=float, default=2e-4)         # ✅ best historical value
+    parser.add_argument('--lr', type=float, default=5e-4)
 
     # ============================================================
     # === Exploration (epsilon schedule) =========================
     # ============================================================
     parser.add_argument('--epsilon_start', type=float, default=1.0,
                         help='Initial epsilon value for exploration (SimPy-time-based decay)')
-    parser.add_argument('--epsilon_end', type=float, default=0.05,
-                        help='Final epsilon value for exploration (SimPy-time-based decay)')
-    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.4,
-                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.4 = first 40% - EXTENDED decay for better exploration). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
+    parser.add_argument('--epsilon_end', type=float, default=0.1,
+                        help='Final epsilon value for exploration (SimPy-time-based decay) - FIXED: increased from 0.05 to 0.1 for more exploration')
+    parser.add_argument('--epsilon_anneal_fraction', type=float, default=0.6,
+                        help='Fraction of total SimPy training time over which to anneal epsilon (default: 0.6 = first 60% - EXTENDED from 0.4 for slower decay). Uses cumulative SimPy time deltas across all episodes. Adaptive to n_epochs, n_episodes, episode_limit changes.')
     
     # [PHASE9-FIX] Task 9.1: Moving average window configuration
     parser.add_argument('--mavg_window', type=int, default=50,

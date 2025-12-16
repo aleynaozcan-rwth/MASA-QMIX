@@ -97,10 +97,11 @@ class RolloutWorker:
         self.last_env_now = 0.0  # Last observed env.env.now (for delta calculation)
         
         # Precompute total training time and epsilon annealing horizon
-        n_epochs = int(getattr(self.args, 'n_epochs', 400))
-        n_episodes = int(getattr(self.args, 'n_episodes', 4))
+        # Pull directly from args - these are guaranteed to exist from arguments.py
+        n_epochs = self.args.n_epoch
+        n_episodes = self.args.n_episodes
         self.total_training_time = n_epochs * n_episodes * self.episode_limit
-        epsilon_anneal_fraction = float(getattr(self.args, 'epsilon_anneal_fraction', 0.15))
+        epsilon_anneal_fraction = self.args.epsilon_anneal_fraction
         self.epsilon_anneal_time = self.total_training_time * epsilon_anneal_fraction
 
         # log
