@@ -10,7 +10,7 @@
   "batch_size": 32,
   "lr": 0.0005,
   "gamma": 0.99,
-  "target_update_cycle": 200,
+  "target_update_cycle": 50,
   "grad_norm_clip": 10.0,
   "rnn_hidden_dim": 64,
   "qmix_hidden_dim": 32,
