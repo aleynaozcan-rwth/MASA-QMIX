@@ -25,11 +25,30 @@ from MARL.common.arguments import (
 def marl_agent_wrapper(args):
     """Standard MARL training loop (supports QMIX, COMA, etc.)."""
     
-    # [PHASE9-FIX] Task 9.4: Set NumPy random seed for reproducibility
+    # [PHASE9-FIX] Task 9.4: Set all random seeds for full reproducibility
     if hasattr(args, 'seed'):
-        np.random.seed(args.seed)
+        import torch
         import logging
-        logging.getLogger(__name__).info(f"[PHASE9] NumPy random seed set to {args.seed}")
+        logger = logging.getLogger(__name__)
+        
+        # NumPy seed
+        np.random.seed(args.seed)
+        logger.info(f"[PHASE9] NumPy random seed set to {args.seed}")
+        
+        # PyTorch seed (CPU)
+        torch.manual_seed(args.seed)
+        logger.info(f"[PHASE9] PyTorch CPU seed set to {args.seed}")
+        
+        # PyTorch seed (GPU) if available
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
+            torch.cuda.manual_seed_all(args.seed)
+            logger.info(f"[PHASE9] PyTorch CUDA seed set to {args.seed}")
+            
+            # Deterministic mode for CUDA (may reduce performance but ensures reproducibility)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            logger.info(f"[PHASE9] PyTorch CUDNN deterministic mode enabled")
 
     # --- Environment (MASAEnv) ---
     # Construct environment without config - all parameters come from args

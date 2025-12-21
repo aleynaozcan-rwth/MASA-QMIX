@@ -1,0 +1,505 @@
+\chapter{Methodology: MASA-QMIX Based Job-Centric MARL Framework}
+\label{chap:methodology}
+
+Section~\ref{sec:gap} systematically filtered existing approaches to Dynamic Flexible Job-Shop Scheduling Problems (FJSP) through the requirement lens, ultimately identifying dynamic end-to-end multi-agent reinforcement learning (E2E MARL) as the most requirement-aligned approach class. However, the analysis revealed that current dynamic E2E MARL implementations introduce severe limitations that prevent them from addressing realistic dynamic FJSP characteristics under genuine stochastic disturbances.
+
+This chapter presents a job-centric MARL framework that adapts MASA-QMIX (Chapter~\ref{chap:theoretical_background}) to enable operation in dynamic scheduling environments. Section~\ref{sec:algorithm_selection} justifies MASA-QMIX selection based on algorithmic requirements and identifies necessary adaptations. Section~\ref{sec:adaptations} presents the architectural modifications that address literature limitations. Section~\ref{sec:algorithm} provides the complete algorithm integrating all adaptations.
+
+
+\section{Algorithm Selection: Why MASA-QMIX?}
+\label{sec:algorithm_selection}
+
+Chapter~\ref{chap:theoretical_background} reviewed MARL paradigms for cooperative multi-agent problems, categorizing algorithms into actor-critic methods (MADDPG, COMA, MAPPO) and value-based methods (VDN, QMIX, QTRAN). For dynamic FJSP, the problem characteristics impose several algorithmic requirements:
+
+\begin{enumerate}
+\item \textbf{Centralized Training with Decentralized Execution (CTDE):} Jobs must coordinate cooperatively to optimize system-wide objectives (minimize makespan, maximize throughput) while making independent resource selection decisions during execution without inter-agent communication.
+
+\item \textbf{Discrete Action Spaces:} Resource selection is inherently discrete—agents choose from \( M \) machines. Value-based methods naturally handle discrete actions through Q-value maximization; actor-critic methods require categorical action distributions with additional complexity.
+
+\item \textbf{Off-Policy Learning:} Stochastic arrivals create highly variable episode structures. Off-policy algorithms can learn from stored experience replay, reusing diverse episodes to improve sample efficiency.
+
+\item \textbf{Computational Efficiency:} FJSP is NP-hard with exponential state-action spaces. The algorithm must achieve coordination through efficient value decomposition rather than expensive architectural additions (graph embeddings, attention mechanisms).
+
+\item \textbf{Sufficient Cooperative Expressiveness:} The algorithm must capture coordination patterns beyond simple additive utility (VDN's limitation), requiring non-linear agent interaction modeling.
+
+\item \textbf{Proven FJSP Applicability:} Algorithmic choices benefit from prior validation in scheduling domains.
+\end{enumerate}
+
+\textbf{MASA-QMIX Selection Rationale:}
+
+QMIX satisfies all requirements through its core design (Section~\ref{sec:masa_qmix}):
+
+\begin{itemize}
+\item \textbf{CTDE via Monotonic Value Decomposition:} QMIX's mixing network (Section~\ref{sec:value_decomposition}) enforces monotonicity (\( \partial Q_{\text{tot}} / \partial Q_i \geq 0 \)), guaranteeing the Individual-Global-Max (IGM) property: \( \arg\max_{\mathbf{a}} Q_{\text{tot}} = (\arg\max_{a^1} Q_1, \ldots, \arg\max_{a^n} Q_n) \). Each job independently selects its best action (decentralized execution) while the joint action remains globally optimal (centralized training objective).
+
+\item \textbf{Discrete Action Spaces:} Q-learning foundation (Section~\ref{sec:learning_credit}) natively handles discrete actions through \( \varepsilon \)-greedy exploration and \( \arg\max \) action selection.
+
+\item \textbf{Off-Policy Training:} Experience replay (Section~\ref{sec:training_mechanism}) enables sample reuse across episodes with different stochastic arrival patterns.
+
+\item \textbf{Computational Efficiency:} Simple feedforward networks (agent Q-networks, hypernetwork-generated mixer weights) without graph convolutions, attention layers, or communication protocols (Section~\ref{sec:masa_architecture}).
+
+\item \textbf{Sufficient Expressiveness:} Non-linear mixing enables complex agent interactions while maintaining IGM guarantees (Section~\ref{sec:value_decomposition}).
+
+\item \textbf{Scheduling Domain Validation:} Successfully applied to various scheduling problems, demonstrating effectiveness in discrete resource allocation tasks.
+\end{itemize}
+
+Additionally, QMIX's \textbf{parameter sharing} mechanism is critical: all agents use a single Q-network with shared parameters \( \theta \), enabling zero-shot generalization when new jobs arrive stochastically. A newly instantiated agent with \( h_0 = \mathbf{0} \) immediately uses the current policy without retraining—essential for continuous operation under dynamic arrivals.
+
+\textbf{Required Adaptations for Dynamic FJSP:}
+
+However, standard MASA-QMIX implementations impose structural assumptions incompatible with dynamic FJSP characteristics. The framework requires adaptations to address:
+
+\begin{itemize}
+\item \textbf{Agent Architecture:} Machine-centric designs create scalability bottlenecks as workload increases. \textit{Solution: Job-centric agent architecture enabling dynamic population scaling.}
+
+\item \textbf{Job Arrival Modeling:} Controlled stochasticity with predefined job templates limits generalization. \textit{Solution: True stochastic arrivals with runtime heterogeneous job generation.}
+
+\item \textbf{Temporal Discretization:} Fixed timesteps \( t = 1, 2, 3, \ldots \) introduce artificial delays and redundant decisions. \textit{Solution: Event-driven decision architecture via discrete-event simulation.}
+
+\item \textbf{Resource Conflict Handling:} Sequential action execution creates order bias in resource allocation. \textit{Solution: Parallel decision-making with explicit conflict resolution mechanisms.}
+
+\item \textbf{Action Space Constraints:} Infeasible actions due to machine-operator qualification constraints destabilize training. \textit{Solution: Action masking to enforce feasibility constraints.}
+\end{itemize}
+
+The following section details these architectural modifications.
+
+
+\section{Adaptation of MASA-QMIX Framework to Flexible Job-Shop Scheduling}
+\label{sec:adaptations}
+
+This section presents five key adaptations that enable MASA-QMIX to operate in dynamic scheduling environments. Each adaptation addresses a specific literature limitation through targeted architectural modifications. For each adaptation, we present: (1) the observed limitation pattern in existing implementations, (2) root cause analysis explaining why the limitation emerges, and (3) the proposed solution mechanism.
+
+
+\subsection{Job-Centric Agent Design for Scalability}
+\label{sec:scalability_adaptation}
+
+\textbf{Observed Limitation in Literature}
+
+Existing MARL-FJSP implementations exhibit severe scalability degradation as system workload increases. When workload grows (more concurrent jobs, higher arrival rates, longer operation sequences), system performance deteriorates: training becomes unstable, policies fail to generalize, and computational costs explode. Researchers respond by constraining problem sizes (e.g., maximum 10-15 concurrent jobs), simplifying action spaces (ignoring operator constraints, reducing machine options), or limiting job complexity (short operation sequences, homogeneous job types).
+
+\textbf{Root Cause Analysis}
+
+The scalability bottleneck stems from fixed agent populations in machine-centric architectures. When machines act as agents, the number of agents \( n \) remains constant regardless of workload—5 machines yield 5 agents whether the system processes 3 jobs or 30 jobs. As workload increases, each machine-agent must track exponentially more jobs in its observation space, reason about increasingly complex global states, and coordinate with other machines over growing action spaces. Furthermore, machine-agents exhibit low system awareness: machines observe all jobs but lack inherent knowledge of job-specific constraints (operation sequences, precedence requirements, due dates), forcing them to learn these relationships indirectly through trial and error.
+
+\textbf{Proposed Solution: Job-Centric Agent Architecture}
+
+This work adopts a job-centric architecture where \textbf{each job acts as an autonomous agent}. In the Dec-POMDP formulation (Section~\ref{sec:problem_formulation}), agent set \( \mathcal{N} = \{1, 2, \ldots, n(t)\} \) now corresponds to active jobs at decision time \( t \), not machines. This design choice addresses scalability through three mechanisms:
+
+\begin{enumerate}
+\item \textbf{Dynamic Agent Population:} Agent count \( n(t) \) varies with workload—when a job arrives stochastically at \( t_{\text{sim}} = 5.2 \), a new agent instantiates; when a job completes all operations, its agent exits. This direct coupling between workload and agent population eliminates fixed-size bottlenecks: the system naturally scales from 3 agents (low workload) to 30 agents (high workload) without architectural modification.
+
+\item \textbf{High System Awareness:} Each job-agent maintains complete knowledge of its own state (current operation type, remaining operation sequence, accumulated wait time, resource requirements, precedence constraints). This role alignment—agents represent entities making scheduling decisions rather than passive resources being scheduled—simplifies observation construction and improves decision quality. Jobs inherently know what they need; machines must learn to infer it.
+
+\item \textbf{Reduced Per-Agent Complexity:} Job-agents possess inherent self-knowledge—each job already knows its operation sequence, current operation requirements, precedence constraints, and processing characteristics without needing to learn or track them. This self-awareness means job-agents only need to observe system-wide resource states (which machines/operators are available, system workload snapshot) to make informed decisions. In contrast, machine-agents lack job-specific context: a machine observes that jobs exist but cannot inherently know each job's operation sequence length, which operation index it is on, which machines can perform its current operation, or its precedence dependencies. This information must either be explicitly provided (expanding observation dimensionality) or learned indirectly through experience (increasing learning complexity). The job-centric design eliminates this overhead—agents track only external system state rather than relearning their own characteristics, keeping per-agent observation complexity bounded by resource availability \( M + K \) instead of scaling with dynamic job population \( n(t) \).
+\end{enumerate}
+
+\textbf{Mathematical Implementation: Variable Agent Population Handling}
+
+The job-centric architecture requires handling variable agent counts \( n(t) \) across decision times. At decision time \( t_d \), the active agent set is:
+\[
+\mathcal{N}_{t_d} = \{j \in \mathcal{J} : t_{\text{arrival}}^j \leq t_d \land t_{\text{completion}}^j > t_d\}
+\]
+where \( \mathcal{J} \) denotes all jobs (past, present, future), and \( |\mathcal{N}_{t_d}| = n(t_d) \) varies dynamically.
+
+\textit{Agent Instantiation:} When job \( j_{\text{new}} \) arrives at \( t_{\text{sim}} \), a new agent instantiates with initial hidden state \( h_0^{j_{\text{new}}} = \mathbf{0} \in \mathbb{R}^{d_h} \) and immediately uses the shared Q-network \( Q_{\theta}(o^{j_{\text{new}}}, a; h_0^{j_{\text{new}}}) \) without retraining:
+\[
+\mathcal{N}_{t_{d+1}} = \mathcal{N}_{t_d} \cup \{j_{\text{new}}\}, \quad n(t_{d+1}) = n(t_d) + 1
+\]
+
+\textit{Agent Removal:} When job \( j_{\text{done}} \) completes its final operation at \( t_{\text{sim}} \), its agent exits:
+\[
+\mathcal{N}_{t_{d+1}} = \mathcal{N}_{t_d} \setminus \{j_{\text{done}}\}, \quad n(t_{d+1}) = n(t_d) - 1
+\]
+
+\textit{Mixer Network Handling via Monotonicity Constraint:} The mixing network aggregates per-agent Q-values using standard neural network operations (matrix multiplications), which inherently operate on fixed-dimensional tensors. This architectural requirement presents no practical limitation due to QMIX's monotonicity constraint (Section~\ref{sec:value_decomposition}): since \( \partial Q_{\text{tot}}/\partial Q_i \geq 0 \) is enforced through non-negative mixing weights \( \mathbf{W}(s) \geq 0 \), any agent position with \( Q_i = 0 \) naturally contributes zero to the output.
+
+When \( n(t_d) \) agents are active at decision time \( t_d \), the system constructs the agent Q-value representation as \( \mathbf{Q}(t_d) = [Q_1, Q_2, \ldots, Q_{n(t_d)}, 0, \ldots, 0] \in \mathbb{R}^{n_{\max}} \), where remaining positions contain zeros. The joint action-value is computed via the mixing network:
+\[
+Q_{\text{tot}}(s, \mathbf{a}) = \sum_{i=1}^{n_{\max}} w_i(s) \cdot Q_i = \sum_{i=1}^{n(t_d)} w_i(s) \cdot Q_i + \sum_{i=n(t_d)+1}^{n_{\max}} w_i(s) \cdot 0
+\]
+The monotonicity property ensures these zero entries are functionally invisible—mathematically equivalent to processing exactly \( n(t_d) \) inputs. The system thus achieves true dynamic population handling while maintaining efficient GPU-accelerated tensor operations.
+
+
+\subsection{Stochastic Job Arrivals}
+\label{sec:stochastic_adaptation}
+
+\textbf{Observed Limitation in Literature}
+
+While recent work enables stochastic job arrivals in dynamic FJSP, implementations introduce severe simplifications that undermine real-world applicability. Four limitation patterns emerge:
+
+\textbf{Pattern 1 — Controlled Stochasticity:} Studies enable Poisson arrivals but impose hard constraints on concurrent job counts (e.g., "maximum 10 jobs"). This transforms genuinely stochastic problems into static, controlled scenarios where policies learn to operate within predefined boundaries rather than adapting to uncontrolled, variable workloads.
+
+\textbf{Pattern 2 — Homogenized Job Types:} Job diversity is severely restricted through single job types or small predefined template libraries (3-5 types). Agents optimize for template recognition ("when Job Type A arrives, allocate Machine 3 first") instead of learning generalizable decision heuristics based on system conditions.
+
+\textbf{Pattern 3 — Processing Time Uniformity:} When job type diversity increases, processing time variability is systematically eliminated—all machines process operations in identical times. This neutralizes the routing optimization challenge central to FJSP, collapsing decisions from "which machine optimizes processing time?" to merely "which machine is available?"
+
+\textbf{Pattern 4 — Action Space Coarsening:} Implementations apply aggressive filtering (availability-based, heuristic pre-selection, binary abstraction), reducing decision options to 2-3 discrete choices. Agents learn simplified dispatch rules instead of developing policies that reason over machine capabilities and coordination trade-offs.
+
+\textbf{Root Cause Analysis}
+
+The simplification stems from two interdependent factors: (1) \textbf{fixed agent architectures} cannot accommodate arbitrary agent counts (machine-agents require knowing maximum job count for observation sizing), and (2) \textbf{predefined job libraries} simplify training by limiting state-space exploration (agents encounter only familiar job types during training and deployment). Researchers constrain arrival rates, homogenize job characteristics, and coarsen action spaces to maintain training stability within these architectural limitations.
+
+\textbf{Proposed Solution: Unconstrained Stochastic Arrivals with Runtime Job Generation}
+
+This framework eliminates predefined job templates and arrival constraints through true stochastic arrivals:
+
+\begin{enumerate}
+\item \textbf{Unconstrained Poisson Arrivals:} Jobs arrive following Poisson process with rate \( \lambda \), with inter-arrival times sampled from \( \text{Exp}(1/\lambda) \). No episode-level constraints on concurrent job counts—system handles arbitrary arrival rates through job-centric scalability.
+
+\item \textbf{Runtime Job Generation:} Each arriving job is constructed at arrival time by randomly sampling: operation types from operation pool (e.g., Op0--Op8), operation sequence length \( n_{\text{ops}} \sim \text{Uniform}(3, 8) \), and processing times from operation-machine lookup tables with stochastic variability reflecting machine capability differences. Jobs are runtime-generated entities with heterogeneous characteristics, not predefined templates.
+
+\item \textbf{Heterogeneous Processing Times:} Processing time tables encode machine capability differences: newer equipment processes faster, high-precision machines handle complex operations more efficiently. This variability forces agents to learn \textit{capability-aware routing}—selecting machines that minimize processing time while balancing system-wide coordination.
+
+\item \textbf{Full Action Space Exploration:} No action space coarsening or heuristic filtering. Agents explore full machine selection space \( \mathcal{A}^i \subseteq \{1, \ldots, M\} \) through \( \varepsilon \)-greedy policy (Section~\ref{sec:training_mechanism}), discovering nuanced routing strategies ("prefer Machine X for Operation Type Y under high utilization") through unconstrained exploration.
+
+\item \textbf{Pattern-Neutral Learning:} Without predefined job templates, agents cannot memorize job-type-specific patterns. They must extract transferable situational patterns based on \textit{system conditions} (high workload \( \rightarrow \) defer; scarce machine \( \rightarrow \) anticipate conflicts) that generalize across arbitrary job types.
+\end{enumerate}
+
+\textbf{Mathematical Implementation: Stochastic Arrival Process and Job Generation}
+
+\textit{Poisson Arrival Process:} Jobs arrive according to Poisson process with rate \( \lambda \) (jobs per time unit). The probability of \( k \) arrivals in time interval \( \Delta t \) is:
+\[
+P(N(\Delta t) = k) = \frac{(\lambda \Delta t)^k e^{-\lambda \Delta t}}{k!}
+\]
+Inter-arrival times \( \Delta t \) between consecutive jobs follow exponential distribution:
+\[
+\Delta t \sim \text{Exp}(\lambda), \quad f(\Delta t) = \lambda e^{-\lambda \Delta t}, \quad \mathbb{E}[\Delta t] = \frac{1}{\lambda}
+\]
+
+\textit{Runtime Job Generation:} Upon arrival at \( t_{\text{arrival}}^j \), job \( j \) is constructed by sampling:
+\begin{itemize}
+\item \textbf{Operation sequence:} \( \mathbf{O}^j = [o_1^j, o_2^j, \ldots, o_{n_{\text{ops}}^j}^j] \) where \( o_\ell^j \sim \text{Uniform}(\mathcal{O}) \), operation pool \( \mathcal{O} = \{\text{Op0}, \text{Op1}, \ldots, \text{Op8}\} \)
+\item \textbf{Sequence length:} \( n_{\text{ops}}^j \sim \text{DiscreteUniform}(3, 8) \)
+\item \textbf{Processing times:} \( p_{\ell,m}^j \leftarrow \mathcal{P}(o_\ell^j, m) \) from lookup table \( \mathcal{P}: \mathcal{O} \times \mathcal{M} \rightarrow \mathbb{R}^+ \)
+\end{itemize}
+
+\textit{Heterogeneous Processing Time Table:} Processing times encode machine capability differences. For operation type \( o \) on machine \( m \):
+\[
+\mathcal{P}(o, m) = p_{\text{base}}(o) \cdot c_m \cdot (1 + \xi), \quad \xi \sim \mathcal{N}(0, \sigma^2)
+\]
+where \( p_{\text{base}}(o) \) is base processing time for operation \( o \), \( c_m \in [0.7, 1.3] \) is machine capability coefficient (lower = faster), and \( \xi \) introduces stochastic variability.
+
+\begin{table}[h]
+\centering
+\caption{Example Processing Time Table (time units)}
+\label{tab:processing_times}
+\small
+\begin{tabular}{lccccc}
+\hline
+\textbf{Operation} & \textbf{M1} & \textbf{M2} & \textbf{M3} & \textbf{M4} & \textbf{M5} \\
+\hline
+Op0 (Milling) & 3.2 & 4.1 & 3.5 & — & 3.8 \\
+Op1 (Drilling) & 2.1 & 2.3 & — & 2.5 & 2.0 \\
+Op2 (Grinding) & — & 5.2 & 4.8 & 5.0 & — \\
+Op3 (Turning) & 3.8 & — & 4.2 & 3.5 & 4.0 \\
+\hline
+\end{tabular}
+\end{table}
+
+Empty cells (—) indicate machine cannot perform operation type. This heterogeneity forces agents to learn capability-aware routing: selecting Machine M5 for Op1 (fastest at 2.0 units) versus Machine M2 (slowest at 2.3 units) impacts system-wide performance.
+
+
+\subsection{Event-Driven Decision Architecture}
+\label{sec:temporal_adaptation}
+
+\textbf{Observed Limitation in Literature}
+
+MARL training environments for FJSP predominantly employ fixed timesteps (\( t = 1, 2, 3, \ldots \)) where all agents make decisions synchronously at regular intervals. This temporal discretization creates three artifacts: (1) operations completing at irregular real times (e.g., \( t_{\text{sim}} = 2.37 \)) must wait until the next timestep (e.g., \( t = 3 \)) to request new resource allocations, introducing artificial delays; (2) agents forced to act at timesteps when no meaningful state changes occurred waste computation on redundant decisions; (3) policies learn coordination based on discretized time rather than true event-driven dynamics, degrading real-world transferability.
+
+\textbf{Root Cause Analysis}
+
+Fixed timesteps originate from episodic RL training paradigms designed for turn-based or uniformly-timed environments (e.g., Atari games, robotic control at fixed control frequencies). Researchers adopt this structure for FJSP implementations because: (1) \textbf{computational simplicity}—synchronous timesteps align with standard RL frameworks (Gym API, batch processing), avoiding the implementation complexity of asynchronous event handling and variable-length decision sequences, and (2) \textbf{compatibility with controlled scenarios}—when job arrivals are predetermined and processing times are uniform, event timing becomes predictable, allowing timestep intervals to be experimentally tuned to approximate event occurrence (e.g., setting \( \Delta t = 1.0 \) to align with average operation completion times).
+
+However, this alignment collapses under true stochasticity with variable processing times: when jobs arrive following Poisson processes (unpredictable timing) and processing durations vary by machine capability (Operation A takes 3.2 time units on Machine 1 but 5.7 units on Machine 2), event occurrence times become impossible to predict or align with fixed intervals. Synchronous timesteps then force artificial delays (events at \( t_{\text{sim}} = 4.73 \) wait until \( t = 5 \)) and redundant decisions (agents act at \( t = 3 \) despite no state changes since \( t = 2 \)), distorting learning dynamics. FJSP is fundamentally event-driven—scheduling decisions arise when \textit{events} occur (job arrivals, operation completions), not at regular intervals.
+
+\textbf{Proposed Solution: Discrete-Event Simulation with Asynchronous Agent Activation}
+
+This work integrates MASA-QMIX with SimPy, a discrete-event simulation framework, enabling event-driven decision times:
+
+\begin{enumerate}
+\item \textbf{Continuous Simulation Time:} Time advances as \( t_{\text{sim}} \in \mathbb{R}^+ \) in continuous values (e.g., \( t_{\text{sim}} = 2.37, 5.91, 8.03, \ldots \)) corresponding to actual event occurrence times, not discretized steps.
+
+\item \textbf{Event-Triggered Decision Times:} Agents make decisions only when events require them: \textit{job arrivals} (require initial resource allocation) or \textit{operation completions} (require next operation allocation). Between events, simulation advances without agent interaction, eliminating wasted computation.
+
+\item \textbf{Asynchronous Agent Activation:} At each decision time \( t_d \) (e.g., \( t_d = 5.73 \)), only agents requiring decisions participate—jobs that just arrived (JOB\_ARRIVAL event) or completed operations (OPERATION\_COMPLETION event). Jobs currently processing operations remain inactive. Decision batch size \( |\mathcal{B}_{t_d}| \) varies dynamically (e.g., 2 agents at \( t_{d_1} \), 5 agents at \( t_{d_2} \)) based on event timing, reflecting true system asynchrony. This selective activation improves computational efficiency: Q-network forward passes are limited to \( |\mathcal{B}_{t_d}| \) agents instead of full population \( n(t_d) \), eliminating redundant computation for jobs with no decision requirements.
+\end{enumerate}
+
+\textbf{Mathematical Implementation: SimPy Integration and Decision Time Formulation}
+
+\textit{Decision Time Definition:} Unlike fixed-timestep RL where decisions occur at \( t = 0, 1, 2, \ldots \), event-driven decision times \( t_d \in \mathbb{R}^+ \) occur at irregular continuous moments when triggering events happen. Two event types trigger decision times:
+\[
+\mathcal{E} = \{\text{JOB\_ARRIVAL}, \text{OPERATION\_COMPLETION}\}
+\]
+Decision time \( t_d \) occurs if and only if:
+\[
+t_d \in \mathcal{T}_{\text{decision}} \iff \exists \text{ event} \in \mathcal{E} \text{ occurring at } t_d
+\]
+
+\textit{Event Type Specification:}
+\begin{itemize}
+\item \textbf{JOB\_ARRIVAL:} New job \( j \) arrives at \( t_{\text{arrival}}^j \) following Poisson process, requires initial resource allocation decision
+\item \textbf{OPERATION\_COMPLETION:} Job \( j \) completes operation \( \ell \) at \( t_{\text{completion}}^{j,\ell} = t_{\text{start}}^{j,\ell} + p_{\ell,m}^j \), requires next operation allocation decision (or terminates if final operation)
+\end{itemize}
+
+Decision time sequence \( \{t_{d_1}, t_{d_2}, \ldots\} \) is irregular: inter-decision intervals \( \Delta t_i = t_{d_{i+1}} - t_{d_i} \) vary based on stochastic arrivals and heterogeneous processing times.
+
+\textit{Decision Batch Formation:} At decision time \( t_d \), decision batch contains only agents requiring decisions:
+\[
+\mathcal{B}_{t_d} = \{j \in \mathcal{N}_{\text{active}} : \text{trigger}(j, t_d)\}
+\]
+where \( \text{trigger}(j, t_d) = \text{True} \) if job \( j \) just arrived (JOB\_ARRIVAL event) or completed previous operation (OPERATION\_COMPLETION event) at \( t_d \). Batch size \( |\mathcal{B}_{t_d}| \leq n(t_d) \) varies: simultaneous events create larger batches.
+
+\textit{SimPy Resource Modeling:} Resources (machines, operators) are modeled as SimPy \texttt{Resource} objects with capacity:
+\[
+\mathcal{M} = \{R_1, R_2, \ldots, R_M\}, \quad \mathcal{K} = \{W_1, W_2, \ldots, W_K\}
+\]
+Each resource \( R_m \) has:
+\begin{itemize}
+\item \textbf{Capacity:} \( \text{cap}(R_m) = 1 \) (single-unit resources)
+\item \textbf{Request queue:} Jobs request \( R_m \) via \texttt{env.request(R\_m)}
+\item \textbf{Release mechanism:} After processing duration \( p_{\ell,m}^j \), job \( j \) releases \( R_m \) via \texttt{R\_m.release()}
+\end{itemize}
+
+\textit{Process-Based Job Lifecycle:} Each job \( j \) runs as SimPy process:
+\begin{verbatim}
+def job_process(env, job_j):
+    for op in job_j.operations:
+        # Decision time: request allocation from RL agent
+        action = yield env.process(rl_decision(job_j, op))
+        machine, operator = action
+        
+        # Acquire resources
+        with machine.request() as m_req, operator.request() as o_req:
+            yield m_req & o_req  # Wait until both available
+            
+            # Process operation
+            yield env.timeout(processing_time[op, machine])
+        
+        # Resources auto-release, trigger completion event
+\end{verbatim}
+
+\textit{SimPy-Time-Based Exploration Decay:} Epsilon decays with cumulative simulation time \( t_{\text{sim}} \), not episodes:
+\[
+\epsilon(t_{\text{sim}}) = \max\left( \epsilon_{\text{end}}, \epsilon_{\text{start}} - \frac{t_{\text{sim}}}{T_{\text{anneal}}} (\epsilon_{\text{start}} - \epsilon_{\text{end}}) \right)
+\]
+This accounts for variable episode lengths and decision densities: episodes with higher arrival rates \( \lambda \) or shorter processing times generate more decision times per unit simulation time, contributing proportionally more to exploration progress than sparse episodes.
+
+
+\subsection{Parallel Decision-Making with Conflict Resolution}
+\label{sec:conflict_adaptation}
+
+\textbf{Observed Limitation in Literature}
+
+Standard MARL implementations assume independent action spaces—each agent's action affects only its own state without direct interference. FJSP, however, involves explicit resource conflicts: multiple jobs can simultaneously require the same machine-operator pair. Existing work handles this implicitly through sequential action execution (Agent\textsubscript{1} selects first, state updates, Agent\textsubscript{2} observes updated state), creating order bias and first-come advantages that do not reflect true parallel decision-making.
+
+\textbf{Root Cause Analysis}
+
+The conflict resolution gap stems from misalignment between Dec-POMDP theory (assumes simultaneous joint actions, Section~\ref{sec:problem_formulation}) and implementation reality (actions execute sequentially in software). This sequential execution is not a design choice but a technical constraint: Python and PyTorch execute code statements sequentially—when multiple agents call \texttt{env.step(action)}, these calls must occur in some order (Agent\textsubscript{1} then Agent\textsubscript{2} then Agent\textsubscript{3}...). Each \texttt{step()} call updates environment state before the next agent observes, creating order bias. Standard MASA-QMIX implementations do not address this because benchmark environments (e.g., StarCraft micromanagement) feature spatially separated agents with non-overlapping action targets—each unit controls different game entities, so sequential execution does not create resource conflicts.
+
+\textbf{Proposed Solution: State Freezing with Explicit Conflict Resolution}
+
+This framework implements true parallel decisions through state freezing and conflict detection mechanisms:
+
+\begin{enumerate}
+\item \textbf{State Freezing:} All agents in decision batch \( \mathcal{B}_{t_d} \) observe identical frozen state \( s_{t_d} \) (state at decision time \( t_d \), capturing system configuration at that specific simulation time \( t_{\text{sim}} = t_d \)), select actions independently without observing others' choices.
+
+\item \textbf{Conflict Detection:} After all agents in decision batch select actions, environment detects resource conflicts (multiple jobs requesting same machine-operator pair).
+
+\item \textbf{Learned Conflict Resolution:} Conflicts are resolved via \( \varepsilon \)-greedy strategy: (1) during exploration (\( \varepsilon \) probability), random winner selected; (2) during exploitation, agent with highest Q-value wins. Losing agents re-queue for next decision time, storing conflict experience for learning.
+
+\item \textbf{Proactive Conflict Avoidance:} Through experience replay (Section~\ref{sec:training_mechanism}), agents learn to estimate conflict probability for contested resources, developing strategies to defer or select alternative machines proactively.
+\end{enumerate}
+
+\textbf{Mathematical Implementation: Parallel Decision-Making with Conflict Detection}
+
+\textit{State Freezing:} At decision time \( t_d \), state \( s_{t_d} \) is frozen before agents select actions. All agents \( j \in \mathcal{B}_{t_d} \) observe identical state snapshot:
+\[
+\forall j \in \mathcal{B}_{t_d}: \quad o^j = f_{\text{obs}}(j, s_{t_d})
+\]
+where \( f_{\text{obs}} \) extracts job-specific observation from frozen state. Agents select actions independently:
+\[
+a^j = \pi_{\theta}(o^j; h^j), \quad \forall j \in \mathcal{B}_{t_d}
+\]
+without observing others' choices, maintaining Dec-POMDP assumption of simultaneous joint action \( \mathbf{a}_{t_d} = (a^1, a^2, \ldots, a^{|\mathcal{B}_{t_d}|}) \).
+
+\textit{Conflict Detection:} After action selection, environment checks for resource conflicts. For FJSP with machine-operator pairs, action \( a^j = (m^j, k^j) \) specifies machine \( m^j \in \mathcal{M} \) and operator \( k^j \in \mathcal{K} \). Conflict between jobs \( i, j \) occurs if:
+\[
+\text{Conflict}(i, j) \iff (m^i = m^j) \land (k^i = k^j)
+\]
+Conflict set at decision time \( t_d \) contains all conflicting job pairs:
+\[
+\mathcal{C}_{t_d} = \{(i, j) \in \mathcal{B}_{t_d} \times \mathcal{B}_{t_d} : i < j \land \text{Conflict}(i, j)\}
+\]
+
+\textit{Conflict Resolution Mechanism:} For each conflict group \( G \subseteq \mathcal{B}_{t_d} \) (jobs requesting same resource pair), select winner \( j^* \) via \( \varepsilon \)-greedy strategy:
+\[
+j^* = \begin{cases}
+\text{Random}(G) & \text{with probability } \epsilon \\
+\arg\max_{j \in G} Q^j(o^j, a^j; h^j) & \text{with probability } 1 - \epsilon
+\end{cases}
+\]
+Winner \( j^* \) executes action immediately. Losers \( G \setminus \{j^*\} \) requeue for next decision time:
+\[
+\mathcal{B}_{t_{d+1}} \leftarrow \mathcal{B}_{t_{d+1}} \cup (G \setminus \{j^*\})
+\]
+Conflict experience \( (s_{t_d}, a^j, r_{\text{conflict}}, s_{t_{d+1}}) \) stored in replay buffer \( \mathcal{D} \) with negative reward \( r_{\text{conflict}} < 0 \) for losers, enabling proactive conflict avoidance learning.
+
+\textit{Proactive Avoidance Learning:} Through repeated conflict experiences, agents learn to estimate conflict probability:
+\[
+P(\text{conflict} | s, a^j = (m, k)) \approx \frac{\sum_{s' \in \mathcal{D}} \mathbb{1}[\text{conflict at } (s', m, k)]}{\sum_{s' \in \mathcal{D}} \mathbb{1}[\text{selected } (m, k) \text{ at } s']}
+\]
+Q-network learns to assign lower values to high-conflict actions, developing coordination strategies: defer if resource contested, select alternative machines with similar processing times.
+
+
+\subsection{Action Masking}
+\label{sec:action_masking}
+
+\textbf{Observed Limitation in Literature}
+
+As problem complexity increases—particularly when multiple resource types (machines, operators) introduce qualification constraints—existing MARL-FJSP implementations exhibit severe scalability degradation. Researchers respond by constraining problem sizes, simplifying resource constraints (ignoring operator qualifications, assuming universal machine capabilities), or reducing action spaces through aggressive heuristic filtering. These simplifications limit practical applicability and prevent agents from exploring the full solution space.
+
+\textbf{Root Cause Analysis}
+
+The scalability challenge stems from exponential action space growth without feasibility enforcement. When agents can select any machine from \( M \) options without considering capability constraints or operator availability, they waste exploration on infeasible actions that environment must reject. This creates two problems: (1) training instability as agents receive negative rewards for invalid selections, and (2) computational waste as agents repeatedly explore the same infeasible regions. Standard MASA-QMIX does not address this because benchmark environments typically feature homogeneous agents with uniform action spaces (all units can perform all actions), making feasibility constraints unnecessary.
+
+\textbf{Proposed Solution: Three-Condition Action Masking}
+
+Action masking enforces feasibility constraints before action selection, eliminating invalid exploration:
+
+\begin{enumerate}
+\item \textbf{Feasibility Constraint Computation:} For agent \( i \)'s current operation, compute feasible action set \( \mathcal{A}_{\text{feasible}}^i \) by checking three conditions:
+\begin{itemize}
+    \item \textbf{Condition 1 (Machine Capability):} \( m \in \mathcal{M}_{\text{capable}}(o_i) \) — machine can perform operation type
+    \item \textbf{Condition 2 (Operator Qualification):} \( \exists k \in \mathcal{K}_{\text{qualified}}(o_i) \) — at least one qualified operator exists for the operation
+    \item \textbf{Condition 3 (Availability):} machine \( m \) and operator \( k \) both idle at decision time
+\end{itemize}
+
+\item \textbf{Q-Value Masking:} Mask infeasible actions by setting Q-values to \( -\infty \): \( Q_i(o^i, a; h^i) \leftarrow -\infty \) for \( a \notin \mathcal{A}_{\text{feasible}}^i \).
+
+\item \textbf{Guaranteed Feasible Selection:} Apply \( \arg\max \) over masked Q-values (or \( \varepsilon \)-greedy sampling from feasible subset), ensuring selected action always satisfies all three conditions.
+\end{enumerate}
+
+\textbf{Mathematical Implementation: Three-Condition Feasibility Enforcement}
+
+\textit{Feasible Action Set Construction:} For job \( j \) requiring operation \( o^j \), feasible machine-operator pairs must satisfy three constraints. Define indicator functions:
+\[
+C_1(m, o^j) = \mathbb{1}[m \in \mathcal{M}_{\text{capable}}(o^j)] \quad \text{(Machine capability)}
+\]
+\[
+C_2(m, o^j) = \mathbb{1}\left[\exists k \in \mathcal{K}: Q(k, o^j) = 1\right] \quad \text{(Operator qualification)}
+\]
+\[
+C_3(m, k, t_d) = \mathbb{1}[\text{idle}(m, t_d) \land \text{idle}(k, t_d)] \quad \text{(Availability)}
+\]
+where \( Q(k, o) \in \{0, 1\} \) is qualification matrix (\( Q(k,o) = 1 \) if operator \( k \) qualified for operation \( o \)).
+
+Feasible action set at decision time \( t_d \):
+\[
+\mathcal{A}_{\text{feasible}}^j(t_d) = \{(m, k) \in \mathcal{M} \times \mathcal{K} : C_1(m, o^j) \land C_2(m, o^j) \land C_3(m, k, t_d)\}
+\]
+
+\textit{Masking Operation:} Q-network outputs raw Q-values \( \mathbf{Q}^j = [Q^j(a_1), Q^j(a_2), \ldots, Q^j(a_{|\mathcal{A}|}) ] \) for all possible actions. Apply masking:
+\[
+\tilde{Q}^j(a) = \begin{cases}
+Q^j(a) & \text{if } a \in \mathcal{A}_{\text{feasible}}^j(t_d) \\
+-\infty & \text{otherwise}
+\end{cases}
+\]
+
+\textit{Feasible Action Selection:} Exploitation selects maximum Q-value over feasible actions only:
+\[
+a^{j*} = \arg\max_{a \in \mathcal{A}_{\text{feasible}}^j(t_d)} \tilde{Q}^j(a) = \arg\max_{a \in \mathcal{A}_{\text{feasible}}^j(t_d)} Q^j(a)
+\]
+Exploration samples uniformly from feasible subset:
+\[
+a^j \sim \text{Uniform}(\mathcal{A}_{\text{feasible}}^j(t_d))
+\]
+Guarantees: \( a^j \in \mathcal{A}_{\text{feasible}}^j(t_d) \) always, eliminating infeasible action selection.
+
+\begin{table}[h]
+\centering
+\caption{Example Qualification Matrix \( Q(k, o) \) for Operator-Operation Constraints}
+\label{tab:qualification_matrix}
+\small
+\begin{tabular}{lccccc}
+\hline
+ & \textbf{Op0} & \textbf{Op1} & \textbf{Op2} & \textbf{Op3} & \textbf{Op4} \\
+\hline
+\textbf{Operator 1} & 1 & 1 & 0 & 1 & 0 \\
+\textbf{Operator 2} & 1 & 0 & 1 & 1 & 1 \\
+\textbf{Operator 3} & 0 & 1 & 1 & 0 & 1 \\
+\hline
+\end{tabular}
+\end{table}
+
+For job \( j \) with operation \( o^j = \text{Op2} \), only Operators 2 and 3 satisfy \( C_2 \). If Machine M1 is capable but only Operator 2 is idle, feasible set reduces to \( \mathcal{A}_{\text{feasible}}^j = \{(\text{M1}, \text{Op2})\} \).
+
+
+\section{Algorithm: Job-Centric MASA-QMIX for Dynamic FJSP}
+\label{sec:algorithm}
+
+Section~\ref{sec:masa_qmix} presented the standard MASA-QMIX algorithm for cooperative multi-agent reinforcement learning with value decomposition. Algorithm~\ref{alg:standard_masaqmix} (reproduced from Section~\ref{sec:training_mechanism}) shows the conventional training procedure with fixed timesteps, static agent populations, and synchronous decision-making.
+
+The adaptations presented in Section~\ref{sec:adaptations} transform this standard framework to address dynamic FJSP requirements. Algorithm~\ref{alg:jobcentric_masaqmix} presents the complete adapted training and execution procedure, integrating: (1) job-centric agent architecture with dynamic population (Section~\ref{sec:scalability_adaptation}), (2) stochastic job arrivals with runtime generation (Section~\ref{sec:stochastic_adaptation}), (3) event-driven decision times with asynchronous activation (Section~\ref{sec:temporal_adaptation}), (4) parallel decision-making with conflict resolution (Section~\ref{sec:conflict_adaptation}), and (5) action masking for feasibility enforcement (Section~\ref{sec:action_masking}).
+
+These modifications enable MASA-QMIX to operate in continuous, stochastic scheduling environments while maintaining the theoretical guarantees of value decomposition (monotonicity and IGM property, Section~\ref{sec:value_decomposition}) and credit assignment through gradient backpropagation (Section~\ref{sec:learning_credit}).
+
+\begin{algorithm}[htbp]
+\footnotesize
+\caption{Job-Centric MASA-QMIX for Dynamic FJSP}
+\label{alg:jobcentric_masaqmix}
+
+\KwIn{SimPy DES environment $E$, arrival rate $\lambda$, training epochs $M$}
+\KwOut{Trained policy $\theta$ (agent network + mixer network)}
+
+\textbf{Initialize:} Networks $\theta_{\text{agent}}$, $\theta_{\text{mix}}$, target networks $\theta^-$, replay buffer $\mathcal{D}$, optimizer, exploration $\epsilon$\;
+
+\For{$epoch = 1$ \KwTo $M$}{
+    Reset $E$, $\mathcal{N}_{\text{active}} \leftarrow \emptyset$, start \texttt{TaskGenerator}($\lambda$)\;
+    
+    \While{not episode\_done}{
+        \If{new job arrives $\sim$ Poisson($\lambda$)}{
+            Create agent $i_{\text{new}}$ with $h_0 = \mathbf{0}$, add to $\mathcal{N}_{\text{active}}$, push to \texttt{pending\_decisions}\;
+        }
+        
+        Wait for \texttt{pending\_decisions} $\neq \emptyset$ (SimPy event loop)\;
+        $\mathcal{B}_t \leftarrow$ \texttt{pending\_decisions}.pop\_all(), freeze state $s_t \leftarrow$ get\_state($E$)\;
+        
+        \tcp{Parallel Action Selection with Masking}
+        \ForEach{agent $i \in \mathcal{B}_t$}{
+            $o^i \leftarrow$ get\_observation($i$), $\mathcal{M}^i \leftarrow$ compute\_mask($i, s_t$)\;
+            $Q^i \leftarrow$ AgentNetwork$(o^i, h_{t-1}^i; \theta_{\text{agent}})$, $Q^i[\neg \mathcal{M}^i] \leftarrow -\infty$\;
+            $a^i \leftarrow \epsilon$-greedy$(Q^i, \epsilon(t_{\text{sim}}))$\;
+        }
+        
+        \tcp{Conflict Resolution}
+        Conflicts $\leftarrow$ detect\_conflicts($\{a^i : i \in \mathcal{B}_t\}$)\;
+        Winners, Losers $\leftarrow$ resolve\_conflict(Conflicts, mode=$\epsilon$-greedy)\;
+        Re-queue Losers to \texttt{pending\_decisions}\;
+        
+        $(s', r) \leftarrow E$.execute\_actions(Winners), store $(s_t, \{o^i, a^i\}, r, s')$ to $\mathcal{D}$\;
+        Remove completed jobs from $\mathcal{N}_{\text{active}}$\;
+    }
+    
+    \tcp{Centralized Training}
+    \If{$|\mathcal{D}| \geq$ batch\_size}{
+        Sample batch from $\mathcal{D}$\;
+        \ForEach{transition $(s, \{o^i, a^i\}, r, s')$ in batch}{
+            $Q^i_{\text{eval}} \leftarrow$ AgentNetwork$(o^i, a^i; \theta_{\text{agent}})$, $Q^i_{\text{target}} \leftarrow$ TargetNetwork$(o'^i; \theta^-)$ for all $i$\;
+            $Q^i_{\text{target}}[\neg \mathcal{M}'^i] \leftarrow -\infty$\;
+            $Q_{\text{tot}} \leftarrow$ MixingNetwork$([Q^1_{\text{eval}}, \ldots, Q^{n(t)}_{\text{eval}}], s; \theta_{\text{mix}})$\;
+            $Q_{\text{target}} \leftarrow$ MixingNetwork$(\max_a Q^i_{\text{target}}, s'; \theta^-_{\text{mix}})$\;
+            $y \leftarrow r + \gamma \cdot Q_{\text{target}}$, $\mathcal{L} \leftarrow (Q_{\text{tot}} - y)^2$\;
+            $\theta \leftarrow \theta - \alpha \cdot$ clip\_grad$(\nabla_\theta \mathcal{L})$\;
+        }
+        \If{train\_step $\mod C = 0$}{
+            $\theta^- \leftarrow \theta$\;
+        }
+    }
+}
+
+\Return{$\theta = (\theta_{\text{agent}}, \theta_{\text{mix}})$}\;
+
+\end{algorithm}
+
+This adapted algorithm enables MASA-QMIX to handle dynamic FJSP's continuous stochastic job arrivals, heterogeneous job characteristics, variable agent populations, event-driven decision timing, resource conflicts, and complex feasibility constraints—capabilities absent in standard implementations. Network architecture details (agent Q-network with GRU for partial observability, mixing network with hypernetwork-generated weights) follow the standard MASA-QMIX design (Section~\ref{sec:masa_architecture}). Training hyperparameters (learning rates, buffer sizes, batch sizes, update frequencies, exploration schedule) are detailed in experimental setup (Chapter~\ref{chap:experiments}).
