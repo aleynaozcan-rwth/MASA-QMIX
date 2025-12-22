@@ -188,7 +188,7 @@ def get_mutable_args():
     # Reduced defaults so warm-up completes faster but training stays stable
     parser.add_argument('--buffer_size', type=int, default=5000)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--train_steps', type=int, default=30)
+    parser.add_argument('--train_steps', type=int, default=50)
     parser.add_argument('--min_warmup_size', type=int, default=800)
     parser.add_argument('--target_update_cycle', type=int, default=50)
     parser.add_argument('--grad_norm_clip', type=float, default=10.0)
