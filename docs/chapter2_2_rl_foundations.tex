@@ -1,0 +1,375 @@
+\section{Reinforcement Learning Foundations}
+\label{sec:rl_foundations}
+
+Reinforcement Learning (RL) can be viewed simultaneously as a computational problem, a class of solution methods, and a field of scientific study. As a problem formulation, it addresses how an autonomous agent can learn to make optimal decisions through direct interaction with its environment. As a methodological framework, RL encompasses algorithms that enable learning from trial-and-error experience rather than explicit instruction. As a research field, it investigates the theoretical foundations and practical techniques required for learning goal-directed behaviour in sequential decision-making problems.
+
+To position reinforcement learning within the broader landscape of machine learning, it is useful to contrast it with other learning paradigms based on the type of feedback available to the learning system. In supervised learning, an agent is provided with labelled examples, where a teacher explicitly specifies the correct output for each input (e.g., image classification or spam detection). In unsupervised learning, no such labels are available; instead, the agent aims to uncover underlying structure or patterns in the data, such as clusters or low-dimensional representations. Reinforcement learning differs fundamentally from both paradigms. There is no dataset of correct input-output pairs and no external supervisor indicating the correct action. Instead, an RL agent learns by actively interacting with an environment, taking actions and observing their consequences. The feedback signal is evaluative rather than instructive, typically in the form of scalar rewards indicating how favourable an outcome is. Moreover, rewards are often delayed: the effect of an action may only become apparent after a sequence of subsequent decisions. This combination of interaction-based learning, evaluative feedback, and delayed consequences necessitates algorithmic approaches distinct from those used in supervised or unsupervised learning.
+
+These differences can be summarized more systematically by highlighting three core characteristics that distinguish reinforcement learning from other machine learning approaches. First, RL systems are inherently closed-loop (i.e., the agent's actions influence the environment, which in turn determines the agent's future observations and decision options), creating a feedback loop between decision-making and environment state. Second, the agent must discover effective strategies through exploration and experimentation, rather than learning from labelled examples provided by a supervisor. Third, actions have long-term consequences: decisions made at the current time step influence not only immediate rewards but also future states, available actions, and cumulative returns. These temporal dependencies make reinforcement learning particularly well suited for sequential decision problems where planning and foresight are essential.
+
+This chapter establishes the theoretical foundations of reinforcement learning, progressing from classical formulations to modern extensions. Section~\ref{sec:classical_rl} introduces classical reinforcement learning through the Markov Decision Process formalism and fundamental learning algorithms. Section~\ref{sec:deep_rl} extends these concepts to high-dimensional state and action spaces by incorporating deep neural networks as function approximators. Section~\ref{sec:marl_intro} generalizes single-agent reinforcement learning to multi-agent systems by examining different types of agent interactions (e.g., cooperative, competitive, and mixed-sum settings), contrasting representative learning paradigms (e.g., centralized training with decentralized execution), and reviewing major classes of cooperative multi-agent algorithms, including value-based and actor-critic approaches.
+
+The concepts introduced in this chapter provide the theoretical foundation required for the problem formulation and solution approaches presented in the subsequent chapters. In particular, the progression from classical reinforcement learning to deep and multi-agent settings reflects the increasing complexity of the decision-making environments considered in this thesis. As the focus shifts toward systems involving multiple interacting decision-makers, understanding multi-agent reinforcement learning paradigms and algorithmic families becomes essential.
+
+\subsection{Classical Reinforcement Learning}
+\label{sec:classical_rl}
+
+Classical reinforcement learning addresses the fundamental problem of how an autonomous agent learns to make decisions by interacting with its environment in order to maximize cumulative rewards~\cite{sutton2018reinforcement}. It provides the mathematical foundations for sequential decision-making under uncertainty.
+
+\textbf{The Markov Decision Process Framework:}  
+The mathematical formalism that underpins classical reinforcement learning is the \textbf{Markov Decision Process (MDP)}, which provides a formal model for sequential decision-making problems. An MDP is defined as a tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$, where:
+\begin{itemize}
+    \item $\mathcal{S}$ is a finite set of states representing possible configurations of the environment,
+    \item $\mathcal{A}$ is a finite set of actions available to the agent,
+    \item $\mathcal{P}(s'|s,a) : \mathcal{S} \times \mathcal{A} \rightarrow \Delta(\mathcal{S})$ is the state transition probability function, where $\Delta(\mathcal{S})$ denotes the set of probability distributions over $\mathcal{S}$,
+    \item $\mathcal{R}(s,a,s') : \mathcal{S} \times \mathcal{A} \times \mathcal{S} \rightarrow \mathbb{R}$ is the reward function providing scalar feedback,
+    \item $\gamma \in [0,1]$ is the discount factor that determines the relative importance of future rewards.
+\end{itemize}
+
+The fundamental assumption underlying the MDP framework is the \textbf{Markov property}: the next state and reward depend only on the current state and action and are conditionally independent of all preceding states and actions. Formally,
+\begin{equation}
+P(s_{t+1}, r_{t+1} \mid s_t, a_t, s_{t-1}, a_{t-1}, \ldots, s_0, a_0)
+=
+P(s_{t+1}, r_{t+1} \mid s_t, a_t).
+\label{eq:markov_property}
+\end{equation}
+
+At each discrete time step $t$, the agent observes the current state $s_t$, selects an action $a_t$ according to a policy, and executes it in the environment. The environment then transitions to a successor state $s_{t+1}$ and emits a scalar reward $r_{t+1}$. Repeating this interaction generates trajectories of states, actions, and rewards.
+
+\textbf{Policies and Value Functions:}  
+A \textbf{policy} $\pi$ defines the agent’s behavior by mapping states to probability distributions over actions, $\pi(a|s)$. For deterministic policies, all probability mass is assigned to a single action, while stochastic policies assign non-zero probability to multiple actions.
+
+The objective of reinforcement learning is to identify a policy that maximizes long-term cumulative reward. This objective is formalized through \textbf{value functions}, which quantify the expected return associated with states or state–action pairs.
+
+The \textbf{state-value function} under policy $\pi$ is defined as
+\begin{equation}
+V^{\pi}(s) = \mathbb{E}_{\pi}\left[\sum_{k=0}^{\infty} \gamma^k r_{t+k+1} \mid s_t = s\right].
+\label{eq:value_function}
+\end{equation}
+
+Similarly, the \textbf{action-value function} is
+\begin{equation}
+Q^{\pi}(s,a) = \mathbb{E}_{\pi}\left[\sum_{k=0}^{\infty} \gamma^k r_{t+k+1} \mid s_t = s, a_t = a\right].
+\label{eq:q_function}
+\end{equation}
+
+Value functions satisfy the \textbf{Bellman expectation equation}:
+\begin{equation}
+V^{\pi}(s) = \sum_a \pi(a|s) \sum_{s'} \mathcal{P}(s'|s,a)\big[\mathcal{R}(s,a,s') + \gamma V^{\pi}(s')\big].
+\label{eq:bellman_expectation}
+\end{equation}
+
+An \textbf{optimal policy} $\pi^*$ achieves the maximal expected return in every state, inducing the optimal value functions
+\begin{equation}
+V^*(s) = \max_{\pi} V^{\pi}(s),
+\qquad
+Q^*(s,a) = \max_{\pi} Q^{\pi}(s,a).
+\label{eq:optimal_values}
+\end{equation}
+
+These satisfy the \textbf{Bellman optimality equations}:
+\begin{equation}
+V^*(s) = \max_a \sum_{s'} \mathcal{P}(s'|s,a)\big[\mathcal{R}(s,a,s') + \gamma V^*(s')\big],
+\label{eq:bellman_optimal_v}
+\end{equation}
+
+\begin{equation}
+Q^*(s,a) = \sum_{s'} \mathcal{P}(s'|s,a)\big[\mathcal{R}(s,a,s') + \gamma \max_{a'} Q^*(s',a')\big].
+\label{eq:bellman_optimal_q}
+\end{equation}
+
+Once $Q^*$ is known, an optimal policy can be obtained by selecting the action with the highest Q-value in each state.
+
+\textbf{Classical Solution Methods:}  
+Classical reinforcement learning algorithms can be grouped into three main families, differing in their assumptions about environment knowledge and data availability.
+
+\textbf{Dynamic Programming (DP):}  
+Dynamic programming methods assume full knowledge of the MDP model and compute optimal policies through iterative application of the Bellman equations. Policy iteration alternates between policy evaluation and policy improvement, while value iteration directly updates value estimates toward optimality. For finite MDPs, these methods converge to optimal solutions but are computationally demanding and impractical for large state spaces.
+
+\textbf{Monte Carlo Methods:}  
+Monte Carlo methods estimate value functions using empirical returns from complete episodes. By averaging observed returns, they produce unbiased value estimates without requiring a model of the environment. However, updates can only be performed after episode termination, limiting their applicability to continuing or real-time tasks.
+
+\textbf{Temporal-Difference (TD) Learning:}  
+Temporal-difference methods combine ideas from DP and Monte Carlo by updating value estimates incrementally using bootstrapped targets. The TD(0) update rule is given by
+\begin{equation}
+V(s_t) \leftarrow V(s_t) + \alpha\big[r_{t+1} + \gamma V(s_{t+1}) - V(s_t)\big],
+\label{eq:td0_update}
+\end{equation}
+where the temporal-difference error quantifies the discrepancy between predicted and observed returns.
+
+\textbf{Key Classical Algorithms:}
+
+\textbf{Q-Learning}~\cite{watkins1992q} updates action-value estimates according to
+\begin{equation}
+Q(s_t,a_t) \leftarrow Q(s_t,a_t) + \alpha\big[r_{t+1} + \gamma \max_{a'} Q(s_{t+1},a') - Q(s_t,a_t)\big].
+\label{eq:q_learning_update}
+\end{equation}
+
+\textbf{SARSA}~\cite{rummery1994line} is an on-policy alternative that evaluates the policy being followed, including exploration.
+
+\textbf{Policy Gradient Methods} directly parameterize policies and optimize expected return through gradient ascent~\cite{sutton1999policy,williams1992simple}.
+
+\textbf{The Exploration–Exploitation Dilemma:}  
+A fundamental challenge in reinforcement learning is balancing exploration with exploitation. Common strategies include $\varepsilon$-greedy exploration, Boltzmann exploration, and optimistic approaches such as Upper Confidence Bound.
+
+\textbf{Limitations:}  
+Classical reinforcement learning provides a rigorous theoretical foundation for discrete, finite state–action spaces but faces inherent limitations. These challenges are addressed by function approximation techniques (Section~\ref{sec:deep_rl}) and extensions to multi-agent settings (Section~\ref{sec:marl_intro}).
+
+
+
+\subsection{Deep Reinforcement Learning}
+\label{sec:deep_rl}
+
+Deep Reinforcement Learning (Deep RL) extends classical reinforcement learning to high-dimensional state spaces by approximating value functions or policies with deep neural networks~\cite{mnih2015human}. While classical RL relies on tabular representations that require explicit storage of values for each state–action pair, Deep RL employs function approximation to enable generalization across states. This allows reinforcement learning to scale to problems involving high-dimensional observations, such as raw visual inputs, continuous control, and large combinatorial decision spaces.
+
+Importantly, Deep RL retains the core learning principles of classical reinforcement learning—such as temporal-difference learning and reward-based optimization—while replacing tabular representations with parametric models trained via gradient-based optimization.
+
+\textbf{Function Approximation with Neural Networks:}  
+In Deep RL, value functions are represented by parametric function approximators rather than lookup tables. For instance, the action-value function is approximated as
+\begin{equation}
+Q(s,a;\theta),
+\label{eq:deep_q_function}
+\end{equation}
+where $\theta$ denotes the parameters (weights and biases) of a deep neural network. The network processes state representations through multiple non-linear layers to produce Q-value estimates.
+
+Two common architectural choices are employed in practice:
+\begin{itemize}
+    \item \textbf{State–action input}: both the state $s$ and action $a$ are provided as input, and the network outputs a scalar value $Q(s,a;\theta)$,
+    \item \textbf{State-only input}: the network receives only the state $s$ and outputs Q-values for all actions simultaneously, $[Q(s,a_1;\theta), \ldots, Q(s,a_{|\mathcal{A}|};\theta)]$, which is computationally efficient for discrete action spaces.
+\end{itemize}
+
+Learning proceeds by minimizing the discrepancy between predicted Q-values and temporal-difference targets. This is typically achieved by minimizing the mean squared TD error
+\begin{equation}
+\mathcal{L}(\theta)
+=
+\mathbb{E}_{(s,a,r,s') \sim \mathcal{D}}
+\left[
+\big(
+r + \gamma \max_{a'} Q(s',a';\theta^{-}) - Q(s,a;\theta)
+\big)^2
+\right],
+\label{eq:dqn_loss}
+\end{equation}
+where $\mathcal{D}$ denotes a replay buffer containing past transitions, and $\theta^{-}$ represents the parameters of a separate target network used to stabilize training. This loss corresponds to the classical temporal-difference error, with the key distinction that value estimates are produced by a neural network.
+
+\textbf{Deep Q-Network (DQN):}  
+The Deep Q-Network (DQN) framework~\cite{mnih2015human} introduced two key mechanisms that enable stable learning with non-linear function approximators.
+
+\textbf{Experience Replay:}  
+Rather than learning from consecutive transitions, DQN stores experience tuples $(s_t, a_t, r_t, s_{t+1})$ in a replay buffer and performs updates using randomly sampled mini-batches. This mechanism reduces temporal correlations between samples, improves data efficiency through experience reuse, and stabilizes gradient-based learning.
+
+\textbf{Target Network:}  
+DQN employs a separate target network with parameters $\theta^{-}$ to compute TD targets, while the online network with parameters $\theta$ is updated via gradient descent. Periodically synchronizing the target network with the online network prevents the learning target from changing too rapidly, mitigating instability caused by moving targets.
+
+Together, these mechanisms allow deep neural networks to approximate action-value functions without the divergence issues observed in naive function approximation approaches.
+
+\textbf{DQN Extensions and Improvements:}  
+A variety of extensions have been proposed to address specific limitations of the original DQN formulation, including overestimation bias, inefficient exploration, and suboptimal sample usage.
+
+\begin{itemize}
+    \item \textbf{Double DQN}~\cite{van2016deep}: reduces overestimation by decoupling action selection and evaluation, using the online network to select actions and the target network to evaluate them:
+    \begin{equation}
+    y = r + \gamma Q\big(s', \arg\max_{a'} Q(s',a';\theta);\theta^{-}\big).
+    \label{eq:double_dqn_target}
+    \end{equation}
+
+    \item \textbf{Dueling DQN}~\cite{wang2016dueling}: decomposes the Q-function into a state-value and an advantage component,
+    \begin{equation}
+    Q(s,a) = V(s) + A(s,a) - \frac{1}{|\mathcal{A}|} \sum_{a'} A(s,a'),
+    \label{eq:dueling_dqn}
+    \end{equation}
+    enabling more efficient learning of state values independent of action choice.
+
+    \item \textbf{Prioritized Experience Replay}~\cite{schaul2015prioritized}: biases sampling toward transitions with high TD error, focusing updates on informative experiences.
+
+    \item \textbf{Noisy Networks}~\cite{fortunato2017noisy}: replace heuristic exploration strategies with learnable stochasticity in network parameters, enabling state-dependent exploration.
+
+    \item \textbf{Rainbow DQN}~\cite{hessel2018rainbow}: integrates multiple improvements, combining enhanced stability, exploration, and sample efficiency in a unified framework.
+\end{itemize}
+
+While Deep RL has demonstrated strong performance in single-agent domains, the presence of multiple learning agents introduces non-stationarity and breaks key assumptions underlying single-agent learning. These challenges motivate the extension to multi-agent reinforcement learning, discussed in the following section.
+
+
+\subsection{Multi-Agent Reinforcement Learning}
+\label{sec:marl_intro}
+
+Multi-Agent Reinforcement Learning (MARL) extends single-agent RL to environments with multiple autonomous agents that simultaneously learn and adapt their policies[busoniu2008comprehensive, zhang2021multi]. Unlike single-agent RL where the environment can be assumed stationary (transition dynamics remain constant), MARL introduces fundamental new challenges:
+
+\begin{itemize}
+    \item \textbf{Non-stationarity}: From each agent's perspective, the environment appears non-stationary because other agents are simultaneously learning and changing their policies, violating the Markov assumption that underpins classical RL convergence guarantees.
+    
+    \item \textbf{Credit assignment}: When multiple agents receive a shared team reward, it becomes difficult to determine which individual actions contributed to success or failure.
+    
+    \item \textbf{Scalability}: The joint action space grows exponentially with the number of agents ($|\mathcal{A}|^n$ for $n$ agents), making direct application of single-agent methods computationally intractable.
+    
+    \item \textbf{Partial observability}: Individual agents typically observe only local information, requiring decentralized decision-making under uncertainty.
+\end{itemize}
+
+This section provides a structured taxonomy of MARL approaches organized by three fundamental dimensions: agent interaction types (Section~\ref{sec:marl_interaction}), learning paradigms (Section~\ref{sec:marl_paradigms}), and algorithm families (Section~\ref{sec:marl_algorithms}).
+
+\subsubsection{MARL Agent Interaction Types}
+\label{sec:marl_interaction}
+
+Multi-agent systems are categorized based on how agents' objectives relate to each other, determining the nature of agent interactions and the appropriate learning approaches[busoniu2008comprehensive].
+
+\textbf{1. Fully Cooperative:} All agents share a common objective and aim to maximize a global reward signal. Agents must coordinate their actions to achieve optimal team performance. Examples include:
+\begin{itemize}
+    \item Multi-robot coordination for warehouse logistics and manufacturing,
+    \item Autonomous vehicle platoon formation,
+    \item Distributed sensor networks and communication systems,
+    \item Cooperative navigation and exploration tasks,
+    \item Team-based strategy games (e.g., StarCraft micromanagement).
+\end{itemize}
+
+Cooperative MARL often employs credit assignment mechanisms to distribute global rewards among individual agents, enabling each agent to learn its contribution to team success.
+
+\textbf{2. Fully Competitive:} Agents have opposing objectives where one agent's gain represents another agent's loss (zero-sum games). Learning involves discovering strategies robust to adversarial opponents. Examples include:
+\begin{itemize}
+    \item Two-player board games (Chess, Go, Poker),
+    \item Competitive autonomous racing,
+    \item Cybersecurity attack-defense scenarios,
+    \item Adversarial training for robustness.
+\end{itemize}
+
+\textbf{3. Mixed (General-Sum):} Agents have partially aligned objectives, creating opportunities for both cooperation and competition. Nash equilibria characterize stable strategy profiles where no agent benefits from unilateral deviation. Examples include:
+\begin{itemize}
+    \item Autonomous driving in shared traffic environments,
+    \item Economic market simulations and trading,
+    \item Multi-party negotiations and resource allocation,
+    \item Social dilemma scenarios (e.g., tragedy of the commons).
+\end{itemize}
+
+The choice of interaction type fundamentally shapes algorithm design: cooperative settings require coordination mechanisms and shared rewards, competitive settings employ minimax optimization and self-play, while mixed settings may use equilibrium concepts from game theory.
+
+\subsubsection{MARL Learning Paradigms}
+\label{sec:marl_paradigms}
+
+MARL algorithms differ in their architectural approach to learning cooperative policies, particularly in how they balance centralized coordination during training with decentralized execution requirements[oliehoek2016concise]. Learning paradigms are distinguished by two dimensions: whether \textbf{training} uses centralized information and whether \textbf{execution} requires centralized control. This yields three primary paradigms of practical interest.
+
+\textbf{1. Decentralized Training with Decentralized Execution (DTDE / Independent Learning):} Each agent learns its policy independently, treating other agents as part of the environment. Agents apply single-agent RL algorithms (e.g., DQN, A3C) without explicit coordination.
+
+\textit{Advantages:}
+\begin{itemize}
+    \item Simple to implement—directly applies single-agent algorithms,
+    \item Scalable—no communication overhead between agents,
+    \item Decentralized execution—agents operate autonomously.
+\end{itemize}
+
+\textit{Limitations:}
+\begin{itemize}
+    \item Non-stationarity: From each agent's perspective, the environment appears non-stationary because other agents are simultaneously learning and changing their policies, violating the Markov assumption,
+    \item Coordination failure: Without explicit coordination mechanisms, agents may converge to suboptimal equilibria,
+    \item Credit assignment: Difficult to determine individual agent contributions to global outcomes.
+\end{itemize}
+
+\textbf{2. Centralized Training with Decentralized Execution (CTDE):} This paradigm addresses IL's limitations by leveraging global information during training while maintaining decentralized execution[kraemer2016multi].
+
+\textit{Key principle:} During training, agents access additional coordination information (e.g., other agents' observations, global state, or centralized critics) that is unavailable during execution. This enables effective coordination learning while preserving decentralized deployment.
+
+\textit{Architecture:}
+\begin{itemize}
+    \item \textbf{Training phase}: A centralized component (e.g., mixer network, centralized critic) uses global information to compute learning signals for individual agents,
+    \item \textbf{Execution phase}: Each agent selects actions independently based only on its local observations, enabling decentralized deployment.
+\end{itemize}
+
+\textit{Advantages:}
+\begin{itemize}
+    \item Coordination learning: Agents learn to cooperate effectively by leveraging global information during training,
+    \item Stable learning: Centralized coordination reduces non-stationarity,
+    \item Practical deployment: Decentralized execution requires no inter-agent communication,
+    \item Credit assignment: Global coordination enables proper attribution of individual contributions.
+\end{itemize}
+
+\textit{Examples:}
+\begin{itemize}
+    \item Value decomposition methods (VDN, QMIX)—decompose global Q-function into individual agent utilities,
+    \item Actor-critic methods (COMA, MADDPG)—use centralized critics to evaluate joint actions while maintaining decentralized actors.
+\end{itemize}
+
+\textbf{3. Centralized Training with Centralized Execution (CTCE / Fully Centralized):} A single centralized controller observes the global state and computes joint actions for all agents. This approach provides optimal coordination but requires continuous communication and is impractical for large-scale distributed systems.
+
+This thesis adopts the \textbf{CTDE paradigm}, which aligns with production scheduling requirements: agents must coordinate globally during training to learn efficient scheduling policies, but execute independently at deployment when real-time communication may be infeasible or costly.
+
+\subsubsection{MARL Algorithm Families}
+\label{sec:marl_algorithms}
+
+While MARL encompasses diverse interaction types (cooperative, competitive, mixed-sum) and learning paradigms (DTDE, CTDE, CTCE), this section focuses specifically on \textbf{cooperative algorithms under the CTDE paradigm}, as these are most relevant for coordinated multi-agent scheduling problems. Within this scope, cooperative MARL algorithms can be categorized into two primary families based on their learning approach: \textbf{value-based methods} and \textbf{actor-critic methods}[zhang2021multi].
+
+\paragraph{Value-Based Methods}
+\label{sec:marl_value_based}
+
+Value-based MARL extends single-agent Q-learning to multi-agent settings by learning a joint action-value function $Q_{\text{tot}}(\mathbf{s}, \mathbf{a})$ that evaluates the utility of joint actions $\mathbf{a} = (a^1, \ldots, a^n)$ in global state $\mathbf{s}$. The key challenge is addressing the exponential growth of the joint action space: with $n$ agents and $|\mathcal{A}|$ actions per agent, the joint action space contains $|\mathcal{A}|^n$ combinations, making direct Q-learning intractable for large agent populations.
+
+\textbf{Value Decomposition Networks (VDN)}[sunehag2018value] addresses this scalability challenge by decomposing the joint Q-function into a sum of individual agent utilities:
+\[
+Q_{\text{tot}}(\mathbf{s}, \mathbf{a}) = \sum_{i=1}^{n} Q_i(o^i, a^i)
+\]
+where $Q_i(o^i, a^i)$ is agent $i$'s utility network that takes only local observation $o^i$ and action $a^i$ as input. This additive decomposition enables:
+\begin{itemize}
+    \item \textbf{Decentralized execution}: Each agent independently selects $a^i = \arg\max_{a} Q_i(o^i, a)$,
+    \item \textbf{Individual-Global-Max (IGM) property}: $\arg\max_{\mathbf{a}} Q_{\text{tot}}(\mathbf{s}, \mathbf{a}) = (\arg\max_{a^1} Q_1(o^1, a^1), \ldots, \arg\max_{a^n} Q_n(o^n, a^n))$, guaranteeing that individual greedy action selections yield the globally optimal joint action.
+\end{itemize}
+
+\textit{Limitations:} VDN's linear additive structure cannot represent complex agent interactions involving synergies, redundancies, or conditional dependencies between agents' contributions.
+
+\textbf{QMIX}[rashid2018qmix] extends VDN by introducing a \textbf{mixing network} that combines individual agent utilities through a non-linear monotonic function:
+\[
+Q_{\text{tot}}(\mathbf{s}, \mathbf{a}) = f_{\text{mix}}(Q_1(o^1, a^1), \ldots, Q_n(o^n, a^n); \mathbf{s})
+\]
+where $f_{\text{mix}}$ is a feedforward neural network that enforces monotonicity: $\frac{\partial Q_{\text{tot}}}{\partial Q_i} \geq 0$ for all $i$. Monotonicity is guaranteed by constraining all mixing network weights to be non-negative.
+
+\textit{Key properties:}
+\begin{itemize}
+    \item \textbf{Non-linear value decomposition}: The mixing network can represent complex agent interactions beyond additive utilities,
+    \item \textbf{IGM property preservation}: Monotonicity ensures that maximizing individual $Q_i$ values also maximizes $Q_{\text{tot}}$,
+    \item \textbf{State-dependent mixing}: The mixing network takes global state $\mathbf{s}$ as input (via hypernetworks that generate layer weights), enabling context-dependent coordination patterns,
+    \item \textbf{CTDE architecture}: Individual Q-networks observe only local information, while the mixer uses global state during training but is not needed during execution.
+\end{itemize}
+
+\textbf{QTRAN}[son2019qtran] relaxes QMIX's monotonicity constraint by learning a more expressive value decomposition that satisfies IGM through explicit factorization consistency constraints rather than architectural restrictions. This enables representing a broader class of coordination patterns but introduces additional training complexity.
+
+\textbf{Weighted QMIX (WQMIX)}[rashid2020weighted] and \textbf{QPLEX}[wang2020qplex] further extend value decomposition by introducing weighted projection and duplex dueling architectures, respectively, to address QMIX's limitations in representing certain coordination structures.
+
+\paragraph{Actor-Critic Methods}
+\label{sec:marl_actor_critic}
+
+Actor-critic MARL algorithms maintain separate policy networks (actors) and value estimation networks (critics). These methods can handle both continuous and discrete action spaces and naturally incorporate policy gradient optimization.
+
+\textbf{Multi-Agent Deep Deterministic Policy Gradient (MADDPG)}[lowe2017multi] extends DDPG to multi-agent settings by training centralized critics for each agent that observe the joint action space during training:
+\begin{itemize}
+    \item Each agent $i$ maintains:
+    \begin{itemize}
+        \item Actor $\mu_i(o^i; \theta_i)$ that outputs deterministic actions based on local observations,
+        \item Critic $Q_i(\mathbf{o}, \mathbf{a}; \phi_i)$ that evaluates actions using all agents' observations and actions during training,
+    \end{itemize}
+    \item Policy gradients: $\nabla_{\theta_i} J(\theta_i) = \mathbb{E} \left[ \nabla_{a^i} Q_i(\mathbf{o}, \mathbf{a}; \phi_i) \nabla_{\theta_i} \mu_i(o^i; \theta_i) \right]$,
+    \item Execution: Each agent uses only its local actor $\mu_i(o^i)$ for decentralized action selection.
+\end{itemize}
+
+\textbf{Counterfactual Multi-Agent Policy Gradients (COMA)}[foerster2018counterfactual] addresses credit assignment in cooperative settings by computing \textbf{counterfactual baselines} that isolate individual agent contributions:
+\[
+A^i(s, \mathbf{a}) = Q(s, \mathbf{a}) - \sum_{a^i} \pi^i(a^i | o^i) Q(s, (\mathbf{a}^{-i}, a^i))
+\]
+where $A^i$ represents agent $i$'s advantage by comparing the actual joint action's value against the expected value of alternative actions $a^i$ while keeping other agents' actions $\mathbf{a}^{-i}$ fixed. This counterfactual comparison provides an agent-specific credit assignment signal.
+
+\textbf{Multi-Agent Proximal Policy Optimization (MAPPO)}[yu2022surprising] adapts PPO to multi-agent settings using centralized value functions and has demonstrated strong empirical performance across diverse cooperative tasks.
+
+\paragraph{Key Distinctions}
+
+Value-based methods (VDN, QMIX, QTRAN) are particularly suitable for:
+\begin{itemize}
+    \item Discrete action spaces with efficient Q-value maximization,
+    \item Off-policy learning with experience replay for sample efficiency,
+    \item Environments requiring stable monotonic coordination guarantees (VDN, QMIX),
+    \item Problems where decentralized execution is critical.
+\end{itemize}
+
+Actor-critic methods (MADDPG, COMA, MAPPO) excel in:
+\begin{itemize}
+    \item Continuous action spaces requiring policy gradient optimization,
+    \item Stochastic policy learning for exploration,
+    \item Environments with complex credit assignment requirements,
+    \item Problems where centralized critics can leverage global information effectively.
+\end{itemize}
+
+The choice between value-based and actor-critic approaches depends on the specific characteristics of the multi-agent problem: action space type (discrete vs. continuous), observability constraints, coordination requirements, and computational resources. Recent research continues to explore hybrid approaches and novel architectures that combine advantages of both paradigms.
