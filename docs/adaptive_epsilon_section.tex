@@ -1,0 +1,109 @@
+\subsection{Adaptive Exploration Mechanism}
+\label{sec:adaptive_epsilon_decay}
+
+The preceding subsections have established that the proposed framework operates through event-driven decision making (Section~\ref{sec:discerete_event}), asynchronous agent participation (Section~\ref{sec:asynchron_decision_variable}), and explicit conflict resolution (Section~\ref{sec:aparallel_conflict}). A critical component that remains to be addressed is the exploration strategy through which agents balance exploitation of learned policies with discovery of improved resource allocation patterns. This subsection describes how exploration is adapted to the event-driven structure of the proposed system and why conventional step-based exploration schedules are incompatible with dynamic job shop scheduling under stochastic arrivals.
+
+\textbf{Limitations of Step-Based Exploration in Event-Driven Environments}
+
+In standard reinforcement learning formulations operating on discrete time steps, exploration is typically controlled through an $\epsilon$-greedy policy with scheduled decay. The exploration parameter $\epsilon$ determines the probability of selecting a random action instead of the greedy choice and is gradually reduced according to a predefined schedule. In time-stepped environments, such schedules are commonly defined over the step index $k$, for instance through exponential decay,
+\begin{equation}
+\epsilon_k = \max\!\left(\epsilon_{\min}, \epsilon_{\mathrm{init}} \cdot \gamma_{\epsilon}^{k}\right),
+\label{eq:step_based_epsilon_decay_generic}
+\end{equation}
+where $\epsilon_{\mathrm{init}}$ denotes the initial exploration rate, $\epsilon_{\min}$ the minimum exploration rate, and $\gamma_{\epsilon} < 1$ a decay factor applied at each step.
+
+This formulation implicitly assumes that decision opportunities occur at regular intervals and that each step represents a comparable quantum of experience. However, as demonstrated in Section~\ref{sec:discerete_event}, the proposed framework does not operate on a fixed time grid. Instead, decision points are triggered by execution events occurring at irregular intervals in continuous time. The elapsed time between consecutive decision points is therefore non-uniform and depends on system dynamics:
+\begin{equation}
+\Delta t_e = t_{e+1} - t_e,
+\label{eq:variable_interarrival_time_recap}
+\end{equation}
+where $t_e$ denotes the occurrence time of execution event $e$. Moreover, due to asynchronous decision making (Section~\ref{sec:asynchron_decision_variable}), different numbers of agents may participate at each decision point. At time $t_d$, only the subset
+\begin{equation}
+\mathcal{N}^{\mathrm{DP}}(t_d) \subseteq \mathcal{N}(t_d)
+\label{eq:decision_participation_recap}
+\end{equation}
+of decision-relevant agents contributes actions, with cardinality
+\begin{equation}
+\big|\mathcal{N}^{\mathrm{DP}}(t_d)\big| \in \{1, 2, \ldots, n(t_d)\}.
+\label{eq:variable_decision_participation_size}
+\end{equation}
+
+As a consequence, \textit{the amount of experience collected per decision point is not constant}. A decision point at which multiple agents act simultaneously generates more transition tuples than one at which only a single agent participates. Furthermore, the frequency of decision points itself varies stochastically with the arrival rate $\lambda$ and the distribution of processing times. During periods of high workload, operation completions and job arrivals occur more frequently, resulting in a higher density of decision points. Conversely, during idle periods, decision points become sparse.
+
+Applying a step-based decay schedule in such an environment introduces systematic distortions. Formally, let $\mathcal{K}_{\text{episode}}$ denote the set of decision point indices within a single episode. Under a step-indexed decay rule such as Eq.~\eqref{eq:step_based_epsilon_decay_generic}, the exploration rate at decision point $k$ depends solely on the ordinal position $k$ within the episode, regardless of how much physical time has elapsed or how many agents have acted. This creates two fundamental problems:
+
+\textit{(i) Temporal inconsistency:} Two episodes with different arrival rates may reach the same decision point index $k$ at vastly different physical times. An episode with high arrival rate $\lambda_{\text{high}}$ experiences frequent job arrivals and operation completions, leading to many closely spaced decision points. Consequently, decision point index $k$ is reached early in physical time. In contrast, an episode with low arrival rate $\lambda_{\text{low}}$ has sparse decision points, and the same index $k$ corresponds to a much later physical time. Yet under step-based decay (Eq.~\eqref{eq:step_based_epsilon_decay_generic}), both episodes apply the same exploration rate $\epsilon_k$ at decision point $k$, despite representing different stages of system evolution.
+
+\textit{(ii) Experience volume mismatch:} Consider two decision points $k_1$ and $k_2$ with $k_2 = k_1 + 1$. At $k_1$, assume a single agent participates, generating one transition tuple. At $k_2$, assume ten agents participate simultaneously due to multiple concurrent operation completions, generating ten transition tuples. Under step-based decay, the exploration rate changes uniformly:
+\begin{equation}
+\epsilon_{k_2} = \gamma_{\epsilon} \cdot \epsilon_{k_1},
+\end{equation}
+treating both decision points as equivalent units of experience despite the tenfold difference in collected transitions.
+
+These distortions prevent the exploration schedule from adapting to the true learning progress of the agents. In dynamic job shop scheduling with stochastic arrivals and variable agent populations, a meaningful exploration schedule must reflect the actual volume of experience accumulated rather than an arbitrary step counter.
+
+\textbf{Proposed Adaptation: Decision-Point-Based Epsilon Decay}
+
+To address these limitations, the proposed framework abandons step-indexed exploration schedules and instead defines epsilon decay \textit{relative to decision points} as the fundamental unit of learning progression. Since each decision point in the event-driven formulation corresponds to an execution event that induces observable state changes and generates transition tuples, decision points provide a more natural and consistent basis for measuring experience accumulation than arbitrary time steps.
+
+Let $\mathcal{D}$ denote the sequence of decision points occurring throughout training, indexed in chronological order by $d = 1, 2, 3, \ldots$. Each decision point $d$ corresponds to an execution event occurring at continuous time $t_d$ and involves a specific set of participating agents $\mathcal{N}^{\mathrm{DP}}(t_d)$. The exploration rate is defined as a function of the cumulative number of decision points encountered:
+\begin{equation}
+\epsilon_d = f_{\epsilon}(d),
+\label{eq:epsilon_as_function_of_decision_points}
+\end{equation}
+where $f_{\epsilon}(\cdot)$ specifies the decay schedule over decision point indices.
+
+In the proposed implementation, exponential decay is applied directly to the decision point index:
+\begin{equation}
+\epsilon_d = \max\!\left(\epsilon_{\min}, \epsilon_{\mathrm{init}} \cdot \gamma_{\epsilon}^{d}\right),
+\label{eq:decision_point_based_epsilon_decay}
+\end{equation}
+with
+\begin{equation}
+0 < \gamma_{\epsilon} < 1, 
+\qquad
+0 < \epsilon_{\min} < \epsilon_{\mathrm{init}} \le 1.
+\label{eq:epsilon_decay_parameter_constraints}
+\end{equation}
+
+This formulation directly addresses the inconsistencies of step-based schedules. Regardless of arrival rate or agent population size, the exploration rate decreases monotonically with the number of decision-making opportunities encountered. A high-workload episode with frequent decision points will traverse the exploration schedule more rapidly in physical time, reflecting the accelerated accumulation of experience. Conversely, a low-workload episode progresses through the schedule more slowly, consistent with the reduced rate of learning updates.
+
+Importantly, this approach does not require the exploration rate to explicitly account for the number of agents participating at each decision point. While variable participation affects the number of transitions generated per decision point, the QMIX mixing network (Section~\ref{sec:masa_architecture}) aggregates per-agent value estimates into a single joint action-value $Q_{\mathrm{tot}}$ through the monotonic value factorisation in Eq.~\eqref{eq:qtot_zero_padding_invariance_async}. Consequently, each decision point contributes one joint Q-value update to the replay buffer, regardless of participation size. The decision-point-based decay schedule therefore remains aligned with the fundamental unit of policy improvement in the QMIX framework.
+
+\textbf{Adaptive Exploration Across Episodes and Training Phases}
+
+Since the exploration parameter $\epsilon_d$ is indexed globally across all decision points rather than being reset at episode boundaries, exploration decays continuously throughout training. Let $D_{\text{total}}$ denote the cumulative number of decision points encountered across all episodes up to the current point in training. The exploration rate at the current decision point is then given by
+\begin{equation}
+\epsilon_{\text{current}} = \max\!\left(\epsilon_{\min}, \epsilon_{\mathrm{init}} \cdot \gamma_{\epsilon}^{D_{\text{total}}}\right).
+\label{eq:global_epsilon_decay}
+\end{equation}
+
+This global indexing ensures that exploration diminishes consistently with accumulated experience rather than resetting artificially at episode transitions. Early in training, when $D_{\text{total}}$ is small, the exploration rate remains high, encouraging broad discovery of feasible resource allocations and conflict resolution strategies. As training progresses and $D_{\text{total}}$ increases, $\epsilon_{\text{current}}$ approaches $\epsilon_{\min}$, shifting the policy toward exploitation of learned value estimates.
+
+The decay rate $\gamma_{\epsilon}$ controls how rapidly this transition occurs. A value close to 1 results in slow decay, maintaining exploration for a longer duration of training. A smaller value accelerates the shift toward exploitation. The choice of $\gamma_{\epsilon}$ is typically determined empirically based on the complexity of the scheduling environment and the convergence characteristics observed during training.
+
+An illustrative trajectory of epsilon decay under this schedule is shown in Figure~\ref{fig:epsilon_decay_trajectory}, where the exploration rate decreases smoothly with the cumulative number of decision points, independent of episode boundaries or arrival rate fluctuations.
+
+\begin{figure}[htbp]
+\centering
+% Placeholder for epsilon decay visualization
+\includegraphics[width=0.75\textwidth]{figures/epsilon_decay_trajectory.png}
+\caption{Epsilon decay trajectory as a function of cumulative decision points across training episodes.}
+\label{fig:epsilon_decay_trajectory}
+\end{figure}
+
+\textbf{Dual-Level Epsilon-Greedy Selection}
+
+Recall from Section~\ref{sec:aparallel_conflict} that the proposed framework employs $\epsilon$-greedy selection at two distinct levels: \textit{(i)} at the agent level during action selection (Eq.~\eqref{eq:eps_greedy_agent_level}), and \textit{(ii)} at the conflict resolution level when multiple agents compete for the same resource (Eq.~\eqref{eq:eps_greedy_conflict_level}). Both levels share the same exploration parameter $\epsilon_d$ derived from the decision-point-based decay schedule (Eq.~\eqref{eq:decision_point_based_epsilon_decay}).
+
+This unified exploration rate ensures consistent stochasticity across both selection stages. At agent level, $\epsilon_d$ governs the probability of exploring alternative machines instead of exploiting current value estimates. At conflict level, $\epsilon_d$ determines whether the resource is allocated to the agent with the highest Q-value (exploitation) or randomly among competing agents (exploration). By tying both mechanisms to the same decay schedule, exploration diminishes coherently across all decision-making components as training progresses.
+
+\textbf{Compatibility with Event-Driven Learning}
+
+The decision-point-based exploration schedule integrates naturally with the event-driven learning pipeline depicted in Figure~\ref{fig:proposed_event_driven_masaqmix}. At each execution event triggering a decision point, the current exploration rate $\epsilon_d$ is retrieved based on the global decision point counter $D_{\text{total}}$. This value is passed to both the agent-level action selection mechanism (producing masked Q-values $Q'_n{}_{\text{mask}}$ in the figure) and the conflict resolution module. After actions are executed and transitions are stored in the replay buffer, $D_{\text{total}}$ is incremented by one, ensuring that the exploration rate evolves monotonically with accumulated experience.
+
+Importantly, this design does not require any modifications to the QMIX mixing network architecture or the TD-learning update rule. The exploration schedule affects only the \textit{action selection policy during interaction with the environment}, not the \textit{value function approximation or loss computation during training}. Consequently, the decision-point-based epsilon decay adapts seamlessly to the event-driven decision structure without introducing architectural changes to the underlying multi-agent reinforcement learning framework.
+
+\textbf{Summary of Adaptation}
+
+The proposed decision-point-based exploration mechanism resolves the temporal inconsistencies and experience volume mismatches inherent in step-based schedules when applied to dynamic job shop scheduling with stochastic arrivals. By indexing exploration decay directly to the number of event-triggered decision points encountered, the schedule automatically adapts to varying workload intensities, arrival rates, and agent participation patterns. This ensures that exploration diminishes in proportion to actual learning progress rather than arbitrary episode step counts, enabling more robust convergence in dynamic and heterogeneous scheduling environments.

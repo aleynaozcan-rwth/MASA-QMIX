@@ -70,8 +70,8 @@ def get_mutable_args():
     # ============================================================
     # === MASA-QMIX environment parameters =======================
     # ============================================================
-    parser.add_argument('--arrival_lambda', type=float, default=0.4,
-                        help='Average job arrival rate λ (jobs per simulation time unit)')
+    parser.add_argument('--arrival_lambda', type=float, default=0.125,
+                        help='Average job arrival rate λ (jobs per simulation time unit). Default 0.125 → mean interarrival = 8.0s')
     parser.add_argument('--num_operators', type=int, default=4)
     parser.add_argument('--job_min_ops', type=int, default=2,
                         help='Minimum number of operations per job (default 2)')

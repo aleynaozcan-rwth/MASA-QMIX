@@ -578,10 +578,22 @@ class MASAEnv:
         self._generator_shutdown = True
 
         self.env = simpy.Environment()
-        random.seed(self.seed)
-        np.random.seed(self.seed)
-        self._np_rng = np.random.RandomState(self.seed)
-        self._py_rng = random.Random(self.seed)
+        
+        # [STOCHASTIC_ARRIVALS] Increment seed each episode for varied job arrivals
+        # This ensures agents learn from different system states while maintaining
+        # reproducibility across runs with the same global seed
+        if not hasattr(self, '_episode_count'):
+            self._episode_count = 0
+        else:
+            self._episode_count += 1
+        
+        episode_seed = self.seed + self._episode_count if self.seed is not None else None
+        
+        random.seed(episode_seed)
+        np.random.seed(episode_seed)
+        self._np_rng = np.random.RandomState(episode_seed)
+        self._py_rng = random.Random(episode_seed)
+        
         # recreate resources
         self.machine_resources = [simpy.Resource(self.env, capacity=1) for _ in range(len(self.workcenters_meta.machine_list))]
         self.wc_resources = [simpy.Resource(self.env, capacity=1) for _ in range(int(self.num_wcs))]
