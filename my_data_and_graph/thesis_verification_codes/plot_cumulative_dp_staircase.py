@@ -142,10 +142,10 @@ ax.grid(True, alpha=0.2, linestyle=':', linewidth=0.5)
 # Add timestamp annotations on vertical lines (select well-spaced timestamps only)
 # Proposed framework: Choose timestamps with sufficient spacing between them
 well_spaced_timestamps = [
-    2.05, 4.54,           # Interval 0-5 (avoid 3.58/3.62 cluster)
-    6.15, 8.38, 9.93,     # Interval 5-10 (avoid 7.58/7.62 and 9.95)
-    10.97, 12.68, 13.93,  # Interval 10-15
-    15.97, 17.40, 17.93,  # Interval 15-20 (added 17.93)
+    2.05, 3.58, 4.54,     # Interval 0-5 (added 3.58 between 2.05-4.54)
+    6.15, 7.58, 8.38, 9.93,     # Interval 5-10 (added 7.58 between 6.15-8.38)
+    10.97, 11.82, 12.68, 13.93, 15.22, 15.97,  # Interval 10-15 (added 11.82 between 10.97-12.68, 15.22 between 13.93-15.97)
+    17.40, 17.93,  # Interval 15-20
     19.75, 21.80, 23.40, 24.57   # Interval 20-25
 ]
 
@@ -154,10 +154,13 @@ for t in well_spaced_timestamps:
     # Find how many DPs occurred before or at this timestamp
     y_pos = sum(1 for dp_t in dp_timestamps if dp_t <= t)
     
+    # Special offset for 17.93 to shift it right
+    x_offset = 8 if t == 17.93 else 0
+    
     # Add annotation above the vertical line
     ax.annotate(f'{t:.2f}', 
                 xy=(t, y_pos), 
-                xytext=(0, 8),  # 8 points above
+                xytext=(x_offset, 8),  # x_offset points right, 8 points above
                 textcoords='offset points',
                 fontsize=9, 
                 ha='center', 
@@ -185,10 +188,10 @@ for t in standard_annotated:
     # Since DPs are at 0, 1, 2, 3..., at time t=1.0 we have 2 DPs (0 and 1)
     y_pos = int(t) + 1
     
-    # Add annotation above the vertical line
+    # Add annotation above the vertical line (slight right shift, much lower position)
     ax.annotate(f'{t:.1f}', 
                 xy=(t, y_pos), 
-                xytext=(0, 8),  # 8 points above
+                xytext=(2, -3),  # 2 points right, 3 points below
                 textcoords='offset points',
                 fontsize=9, 
                 ha='center', 

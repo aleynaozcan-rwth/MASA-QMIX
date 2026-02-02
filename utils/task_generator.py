@@ -119,34 +119,50 @@ class TaskGenerator:
                     else:
                         # fallback: sample from jobs registry by integer indices if possible
                         try:
-                            # try numeric keys or sequence indices
-                            idx = int(self._py_rng.randrange(len(self.jobs)))
-                            job_obj = self.jobs[idx]
-                            op_id = getattr(job_obj, 'index_id', None)
+                            # Filter out already used operations to prevent duplicates within same job
+                            available_indices = [i for i in range(len(self.jobs)) if i not in used_job_ids]
+                            if not available_indices:
+                                # All operations already used in this job
+                                job_obj = None
+                            else:
+                                idx = int(self._py_rng.choice(available_indices))
+                                job_obj = self.jobs[idx]
+                                op_id = getattr(job_obj, 'index_id', idx)
                         except Exception as e:
                             job_obj = None
 
                 # If job_obj still not found, sample from WorkCenters.operations_map
                 if job_obj is None:
                     if available_ops_from_wc:
-                        op_idx = int(self._py_rng.choice(available_ops_from_wc))
-                        # create a minimal job-like object
-                        try:
-                            class _SimpleJobFallback:
-                                def __init__(self, index_id):
-                                    self.index_id = index_id
-                                    self.codes = None
-                                    self.name = f"Op{index_id+1}"
-                            job_obj = _SimpleJobFallback(op_idx)
-                            op_id = op_idx
-                        except Exception as e:
+                        # Filter out already used operations to prevent duplicates within same job
+                        available_new_ops = [op for op in available_ops_from_wc if op not in used_job_ids]
+                        if not available_new_ops:
+                            # All operations already used in this job
                             job_obj = None
+                        else:
+                            op_idx = int(self._py_rng.choice(available_new_ops))
+                            # create a minimal job-like object
+                            try:
+                                class _SimpleJobFallback:
+                                    def __init__(self, index_id):
+                                        self.index_id = index_id
+                                        self.codes = None
+                                        self.name = f"Op{index_id+1}"
+                                job_obj = _SimpleJobFallback(op_idx)
+                                op_id = op_idx
+                            except Exception as e:
+                                job_obj = None
                     else:
                         job_obj = None
             except Exception as e:
                 job_obj = None
 
             if job_obj is None:
+                retries += 1
+                continue
+
+            # Double-check that op_id is not already used in this job
+            if op_id in used_job_ids:
                 retries += 1
                 continue
 

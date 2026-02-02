@@ -156,28 +156,12 @@ def plot_with_conflicts_binned():
         # Get total DPs mean
         total_mean = np.mean([ep['total_dps'] for ep in bin_data])
         
-        # Get total coordination (parallel) DPs - this fluctuates naturally
-        total_coordination = np.mean([ep['simultaneous_dps'] + ep['conflict_dps'] for ep in bin_data])
+        # Use REAL data from bin - no synthetic adjustments
+        conflict_mean = np.mean([ep['conflict_dps'] for ep in bin_data])
+        simultaneous_mean = np.mean([ep['simultaneous_dps'] for ep in bin_data])
         
-        # Calculate conflict ratio adjustment based on training progress
-        progress = i / num_bins  # 0 to 1
-        
-        # Start with real data ratio: ~37% conflicts within parallel DPs
-        # Early training: Conflicts = ~45% of total parallel (worse than average)
-        # Late training: Conflicts = ~25% of total parallel (better coordination)
-        if progress < 0.33:  # Early third
-            target_conflict_ratio = 0.45 - (progress / 0.33) * 0.05  # 45% -> 40%
-        elif progress > 0.67:  # Late third
-            target_conflict_ratio = 0.35 - ((progress - 0.67) / 0.33) * 0.10  # 35% -> 25%
-        else:  # Middle third - smooth transition
-            target_conflict_ratio = 0.40 - ((progress - 0.33) / 0.34) * 0.05  # 40% -> 35%
-        
-        # Apply ratio: conflict + simultaneous = total_coordination
-        conflict_mean = total_coordination * target_conflict_ratio
-        simultaneous_mean = total_coordination - conflict_mean
-        
-        # Non-parallel = total - parallel
-        non_parallel_mean = total_mean - total_coordination
+        # Non-parallel = total - (simultaneous + conflicts)
+        non_parallel_mean = total_mean - simultaneous_mean - conflict_mean
         
         non_parallel_means.append(non_parallel_mean)
         simultaneous_means.append(simultaneous_mean)
@@ -249,8 +233,8 @@ def plot_with_conflicts_binned():
     from matplotlib.patches import Patch
     legend_elements = [
         Patch(facecolor=color_conflict, label='Conflict DPs'),
-        Patch(facecolor=color_simultaneous, label='Simultaneous DPs'),
-        Patch(facecolor=color_nonparallel, label='Non-Parallel DPs')
+        Patch(facecolor=color_simultaneous, label='Parallel DPs'),
+        Patch(facecolor=color_nonparallel, label='Total DPs')
     ]
     legend = ax.legend(handles=legend_elements, loc='upper left', 
                       bbox_to_anchor=(0.01, 0.995), fontsize=10,
@@ -261,7 +245,7 @@ def plot_with_conflicts_binned():
     stats_text = f'''Total DPs: {total_dps_all:,}
 Non-Parallel DPs: {non_parallel_dps_all:,} ({100*non_parallel_dps_all/total_dps_all:.1f}% of Total)
 Parallel DPs: {parallel_dps_all:,} ({100*parallel_dps_all/total_dps_all:.1f}% of Total)
-  - Simultaneous: {simultaneous_all:,} ({100*simultaneous_all/total_dps_all:.1f}%)
+  - Parallel: {simultaneous_all:,} ({100*simultaneous_all/total_dps_all:.1f}%)
   - Conflicts: {conflicts_all:,} ({100*conflicts_all/total_dps_all:.1f}%)
 
 Initial Jobs per Episode: 4

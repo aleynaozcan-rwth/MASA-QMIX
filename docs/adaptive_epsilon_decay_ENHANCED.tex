@@ -1,0 +1,329 @@
+\subsection{Adaptive Exploration Mechanism}
+\label{sec:adaptive_epsilon_decay}
+
+In the proposed event-driven scheduling framework, agent interactions with the
+environment occur exclusively at \emph{decision points} triggered by execution
+events such as job arrivals and operation completions
+(Section~\ref{sec:discrete_event}). Consequently, the number of decision points
+within an episode is neither fixed nor known a priori and varies stochastically
+across episodes.
+
+This property fundamentally affects how exploration should be scheduled.
+Exploration must be controlled with respect to \emph{decision experience}, not
+elapsed simulation time or episode count.
+
+\subsubsection{Why Standard Decay Mechanisms Fail}
+
+\paragraph{Standard time-based $\epsilon$ decay.}
+In conventional reinforcement learning, the exploration rate $\epsilon$ is often
+decayed as a function of elapsed time or step index. A common linear decay
+formulation is
+\begin{equation}
+\epsilon(t)
+=
+\max\!\left(
+\epsilon_{\min},
+\;
+\epsilon_0 - \frac{t}{T_{\mathrm{anneal}}}
+(\epsilon_0 - \epsilon_{\min})
+\right),
+\label{eq:time_based_epsilon}
+\end{equation}
+where $t$ denotes elapsed simulation time (or episode step), $T_{\mathrm{anneal}}$
+is a fixed annealing horizon, and $\epsilon_0,\epsilon_{\min}$ are the initial and
+minimum exploration rates, respectively.
+
+This formulation implicitly assumes that the number of meaningful agent–environment
+interactions grows \emph{proportionally with} $t$. In discrete-time environments
+with fixed step intervals, this assumption holds: each time step corresponds to
+exactly one decision opportunity. However, in the considered event-driven setting,
+this assumption is violated.
+
+\paragraph{Episode-based $\epsilon$ decay.}
+Alternatively, one might decay exploration as a function of episode count:
+\begin{equation}
+\epsilon(e)
+=
+\max\!\left(
+\epsilon_{\min},
+\;
+\epsilon_0 - \frac{e}{E_{\mathrm{anneal}}}
+(\epsilon_0 - \epsilon_{\min})
+\right),
+\label{eq:episode_based_epsilon}
+\end{equation}
+where $e$ is the current episode index and $E_{\mathrm{anneal}}$ is the number of
+episodes over which exploration should be reduced.
+
+This approach is commonly used in multi-agent reinforcement learning and assumes
+that each episode provides approximately equal learning experience. For example,
+setting $E_{\mathrm{anneal}} = 600$ with $1000$ total episodes implies that
+exploration should dominate the first $60\%$ of training episodes, allowing
+agents to accumulate sufficient experience before transitioning to exploitation.
+
+However, this assumption fails when the number of decision points per episode
+varies stochastically.
+
+\paragraph{Formal problem statement.}
+Let $D_e$ denote the number of decision points in episode $e$. In event-driven
+scheduling with stochastic job arrivals and heterogeneous job structures,
+$D_e$ is a random variable:
+\begin{equation}
+D_e \sim \mathcal{D}(\lambda, \mu, \sigma),
+\label{eq:decision_points_distribution}
+\end{equation}
+where $\lambda$ represents arrival rate, $\mu$ represents mean operations per job,
+and $\sigma$ captures other sources of stochasticity (processing times, machine
+breakdowns, etc.).
+
+Crucially, $D_e$ can vary significantly across episodes. In the considered
+experimental setting (Section~\ref{sec:experiments}), observed decision point
+counts range from $D_{\min}=37$ to $D_{\max}=51$ per episode, with
+$\bar{D}=41.66$ and $\sigma_D=2.70$.
+
+\paragraph{Experience accumulation imbalance.}
+Under episode-based decay (Eq.~\ref{eq:episode_based_epsilon}), the \emph{total
+number of exploratory decisions} accumulated during the annealing phase is:
+\begin{equation}
+N_{\mathrm{explore}}^{\mathrm{total}}
+=
+\sum_{e=1}^{E_{\mathrm{anneal}}} \epsilon(e) \cdot D_e,
+\label{eq:total_explore_episode}
+\end{equation}
+where $\epsilon(e) \cdot D_e$ approximates the expected number of exploratory
+actions in episode $e$ (assuming $\epsilon$-greedy selection).
+
+Because $D_e$ varies stochastically, two training runs with identical
+hyperparameters can accumulate vastly different amounts of exploration experience:
+\begin{align}
+N_{\mathrm{explore}}^{\mathrm{Run~A}}
+&= \sum_{e=1}^{600} \epsilon(e) \cdot D_e^{(A)},
+\label{eq:explore_run_a}
+\\
+N_{\mathrm{explore}}^{\mathrm{Run~B}}
+&= \sum_{e=1}^{600} \epsilon(e) \cdot D_e^{(B)},
+\label{eq:explore_run_b}
+\end{align}
+where $D_e^{(A)}$ and $D_e^{(B)}$ are realizations from the same distribution.
+
+\paragraph{Numerical example.}
+Consider $E_{\mathrm{anneal}}=600$ episodes with linear decay from
+$\epsilon_0=1.0$ to $\epsilon_{\min}=0.05$. Assume two scenarios:
+
+\begin{itemize}
+\item \textbf{Scenario A (low event density):}  
+First $600$ episodes happen to have low decision point counts, with
+$D_e^{(A)} \approx 38$ on average.
+
+\item \textbf{Scenario B (high event density):}  
+First $600$ episodes happen to have high decision point counts, with
+$D_e^{(B)} \approx 45$ on average.
+\end{itemize}
+
+The average exploration rate over the annealing phase is approximately:
+\begin{equation}
+\bar{\epsilon}_{\mathrm{anneal}}
+=
+\frac{1}{E_{\mathrm{anneal}}} \sum_{e=1}^{E_{\mathrm{anneal}}} \epsilon(e)
+\approx
+\frac{\epsilon_0 + \epsilon_{\min}}{2}
+=
+0.525.
+\label{eq:avg_epsilon}
+\end{equation}
+
+Therefore, the expected number of exploratory decisions is:
+\begin{align}
+\mathbb{E}[N_{\mathrm{explore}}^{A}]
+&\approx 0.525 \times 600 \times 38
+= 11{,}970,
+\label{eq:expected_explore_a}
+\\
+\mathbb{E}[N_{\mathrm{explore}}^{B}]
+&\approx 0.525 \times 600 \times 45
+= 14{,}175.
+\label{eq:expected_explore_b}
+\end{align}
+
+This represents a \textbf{18.4\% difference in exploration experience} despite
+identical episode counts and decay parameters. In Scenario~A, agents prematurely
+transition to exploitation after accumulating only $11{,}970$ exploratory
+decisions, whereas Scenario~B agents receive $14{,}175$ decisions.
+
+More critically, the \emph{remaining} $400$ episodes (intended for exploitation)
+may contain more decision points than the first $600$ episodes. If episodes
+$601$–$1000$ happen to have higher event density ($\bar{D}=48$), they contain:
+\begin{equation}
+D_{\mathrm{remaining}}
+=
+400 \times 48
+=
+19{,}200
+\text{ decision points}.
+\label{eq:remaining_decisions}
+\end{equation}
+
+This exceeds the exploration phase in Scenario~A, meaning that more decision
+opportunities are wasted during exploitation than were used during exploration.
+
+\paragraph{Time-based decay fails similarly.}
+Time-based decay (Eq.~\ref{eq:time_based_epsilon}) suffers from the same problem.
+Consider two episodes with identical duration $T=40$ but different decision point
+densities:
+
+\begin{itemize}
+\item \textbf{Episode A:} $D_A=10$ decision points occur at
+$t \in \{2.5, 5.0, 8.3, 12.1, 18.5, 24.0, 28.7, 31.2, 35.6, 38.9\}$.
+
+\item \textbf{Episode B:} $D_B=40$ decision points occur uniformly at
+$t \in \{1, 2, 3, \ldots, 40\}$.
+\end{itemize}
+
+Setting $T_{\mathrm{anneal}}=T=40$ means exploration is fully suppressed at
+$t=40$. With linear decay, $\epsilon(t) \approx 0.4$ at $t=24$ (the $60\%$ point).
+
+At this time:
+\begin{itemize}
+\item Episode~A has encountered only $d_A(24)=6$ decision points.
+\item Episode~B has encountered $d_B(24)=24$ decision points.
+\end{itemize}
+
+Thus, Episode~A agents have explored only $6$ decisions before $\epsilon$ drops
+below $0.4$, while Episode~B agents have explored $24$ decisions. The mapping
+\begin{equation}
+d(t) \neq \alpha t
+\label{eq:decision_time_mismatch}
+\end{equation}
+is \emph{non-linear} and \emph{stochastic}, violating the proportionality
+assumption underlying time-based decay.
+
+\subsubsection{Decision-Point-Based Exploration Decay}
+
+\paragraph{Proposed formulation.}
+The proposed framework defines exploration as a direct function of the
+\emph{cumulative decision point index} $d$:
+\begin{equation}
+\epsilon_d
+=
+\max\!\left(
+\epsilon_{\min},
+\;
+\epsilon_0 - \frac{d}{D_{\mathrm{anneal}}}
+(\epsilon_0 - \epsilon_{\min})
+\right),
+\label{eq:decision_based_epsilon}
+\end{equation}
+where $d$ counts the total number of decision points encountered across all
+episodes so far, and $D_{\mathrm{anneal}}$ specifies the number of decision points
+over which exploration is reduced.
+
+Critically, $d$ is \emph{incremented at each decision point}, not at each time
+step or episode boundary. This ensures that exploration decay is directly coupled
+to the interaction structure of the environment.
+
+\paragraph{Guaranteed exploration coverage.}
+Under decision-based decay, the total number of exploratory decisions during the
+annealing phase is deterministic (up to $\epsilon$-greedy stochasticity):
+\begin{equation}
+N_{\mathrm{explore}}^{\mathrm{total}}
+\approx
+\int_0^{D_{\mathrm{anneal}}} \epsilon_d \, \mathrm{d}d
+=
+\frac{D_{\mathrm{anneal}}(\epsilon_0 + \epsilon_{\min})}{2}.
+\label{eq:guaranteed_explore}
+\end{equation}
+
+For example, setting $D_{\mathrm{anneal}}=25{,}000$ with $\epsilon_0=1.0$ and
+$\epsilon_{\min}=0.05$ guarantees approximately:
+\begin{equation}
+N_{\mathrm{explore}}
+\approx
+\frac{25{,}000 \times (1.0 + 0.05)}{2}
+=
+13{,}125
+\text{ exploratory decisions},
+\label{eq:guaranteed_explore_example}
+\end{equation}
+\emph{regardless of how these decision points are distributed across episodes}.
+
+This property ensures that:
+\begin{enumerate}
+\item Agents accumulate \emph{consistent exploration experience} across different
+training runs, even when episode-level stochasticity varies.
+
+\item Exploration does not terminate prematurely in episodes with low event
+density, nor does it persist excessively in high-density episodes.
+
+\item The fraction of decision points allocated to exploration versus exploitation
+is explicitly controlled via $D_{\mathrm{anneal}}$.
+\end{enumerate}
+
+\paragraph{Episode-level comparison.}
+To compare episode-based and decision-based decay, consider the same $1000$-episode
+training scenario:
+
+\begin{itemize}
+\item \textbf{Episode-based decay:} $E_{\mathrm{anneal}}=600$ episodes.
+\item \textbf{Decision-based decay:} $D_{\mathrm{anneal}}=25{,}000$ decision points.
+\end{itemize}
+
+Assume decision points per episode vary as $D_e \sim \mathcal{N}(41.66, 2.70^2)$
+(observed distribution in experiments). The total decision point count across
+$1000$ episodes is:
+\begin{equation}
+D_{\mathrm{total}}
+=
+1000 \times 41.66
+=
+41{,}660.
+\label{eq:total_decisions}
+\end{equation}
+
+Under episode-based decay, the exploration phase covers approximately:
+\begin{equation}
+D_{\mathrm{explore}}^{\mathrm{episode}}
+=
+600 \times 41.66
+=
+24{,}996
+\text{ decision points (expected)}.
+\label{eq:episode_explore_decisions}
+\end{equation}
+
+However, due to stochasticity, the actual count can range from:
+\begin{equation}
+D_{\mathrm{explore}}^{\mathrm{episode}}
+\in
+[600 \times 37, \; 600 \times 51]
+=
+[22{,}200, \; 30{,}600].
+\label{eq:episode_explore_range}
+\end{equation}
+
+This $38\%$ variation in exploration experience is eliminated under decision-based
+decay, where exactly $D_{\mathrm{anneal}}=25{,}000$ decision points are explored.
+
+\paragraph{Implications for learning.}
+In dynamic job shop scheduling, informative learning signals arise from resource
+conflicts, congestion patterns, and asynchronous interactions
+(Section~\ref{sec:parallel_conflict}). These signals are encountered at decision
+points rather than at uniform time intervals or episode boundaries.
+
+Decision-point-based exploration decay therefore:
+\begin{itemize}
+\item \textbf{Aligns exploration with interaction structure:} Decay proceeds at
+the rate agents actually interact with the environment.
+
+\item \textbf{Prevents premature convergence:} Low-density episodes do not cause
+premature exploitation.
+
+\item \textbf{Ensures robust learning:} Consistent exploration experience across
+runs with different stochastic realizations.
+
+\item \textbf{Enables principled hyperparameter tuning:} $D_{\mathrm{anneal}}$ has
+a clear semantic meaning (number of exploratory decisions), unlike
+$E_{\mathrm{anneal}}$ (number of episodes, whose decision content varies).
+\end{itemize}
+
+This mechanism is essential for achieving stable and reproducible learning in
+stochastic, event-driven multi-agent scheduling environments.

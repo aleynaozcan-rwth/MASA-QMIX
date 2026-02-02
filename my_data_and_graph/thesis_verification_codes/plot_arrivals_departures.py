@@ -17,7 +17,7 @@ matplotlib.use('Agg')
 OUTPUT_DIR = Path('/home/cc253232/MASA-QMIX/my_data_and_graph/historydata/plots')
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-DATA_FILE = Path('/home/cc253232/MASA-QMIX/my_data_and_graph/historydata/arrivals_departures_per_episode.txt')
+DATA_FILE = Path('/home/cc253232/MASA-QMIX/my_data_and_graph/thesis_verification_data/arrivals_departures_per_episode.txt')
 
 print("Loading arrival/departure data...")
 
@@ -180,12 +180,14 @@ ax1.set_ylim(0, max(max(arrivals), max(departures)) + 2)
 ax2 = ax1.twinx()
 color3 = '#27AE60'
 
-# Calculate current jobs (cumulative arrivals - cumulative departures per episode)
+# Calculate current jobs per episode (arrivals - departures for each episode)
 current_jobs = [arr - dep for arr, dep in zip(arrivals, departures)]
+
+# Apply moving window to current jobs as well
 current_jobs_ma = np.convolve(current_jobs, np.ones(window_size)/window_size, mode='valid')
 
 ax2.plot(ma_episodes, current_jobs_ma, linewidth=3.0, color=color3, alpha=0.9, linestyle='--',
-         label=f'Current Jobs in System (Avg: {np.mean(current_jobs):.2f})', marker='D', markersize=3, markevery=50)
+         label=f'Current Jobs Remaining per Episode Moving Avg (window={window_size})', marker='D', markersize=3, markevery=50)
 
 ax2.set_ylabel('Current Jobs in System', fontsize=18, fontweight='bold', color=color3)
 ax2.tick_params(axis='y', labelsize=14, labelcolor=color3)

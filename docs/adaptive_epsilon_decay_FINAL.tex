@@ -1,0 +1,286 @@
+\subsection{Adaptive Exploration Mechanism}
+\label{sec:adaptive_epsilon_decay}
+
+In standard time-driven MASA-QMIX style formulations, decision making is aligned
+with a fixed decision-time grid (Key Property~1; Section~\ref{sec:standart_masaproblem_formulation}).
+As a consequence, \emph{each episode contains a fixed number of decision steps},
+and each reinforcement learning step corresponds to exactly one decision point.
+Under this assumption, a time-/step-based $\epsilon$-decay schedule provides a
+\emph{predictable fraction of exploratory decisions}.
+
+\paragraph{Step-based $\epsilon$ decay under fixed-length episodes (baseline case).}
+Let an episode contain exactly $K$ decision steps (e.g., $K=50$), and let training
+span $E$ episodes (e.g., $E=100$). Then the total number of decision points is
+deterministic:
+\begin{equation}
+D_{\text{tot}} = E \cdot K.
+\label{eq:baseline_total_decisions}
+\end{equation}
+A standard linear step-based decay is
+\begin{equation}
+\epsilon(k)
+=
+\max\!\left(
+\epsilon_{\min},
+\;
+\epsilon_0 - \frac{k}{K_{\mathrm{anneal}}}
+(\epsilon_0 - \epsilon_{\min})
+\right),
+\qquad k=0,1,\dots
+\label{eq:step_based_epsilon}
+\end{equation}
+where $k$ is the RL step index and $K_{\mathrm{anneal}}$ is chosen as a fixed
+fraction of the total steps. For example, setting
+\begin{equation}
+K_{\mathrm{anneal}} = \rho \, D_{\text{tot}}, \qquad \rho=0.6,
+\label{eq:anneal_fraction_baseline}
+\end{equation}
+means that exploration is gradually reduced until approximately $60\%$ of all
+decision points have been processed.
+
+Because the mapping "one RL step = one decision point" holds and $D_{\text{tot}}$
+is fixed, this schedule is meaningful: after $\rho D_{\text{tot}}$ decisions,
+the policy has indeed experienced $\rho D_{\text{tot}}$ interaction opportunities.
+
+\paragraph{Why this breaks in the proposed event-driven setting.}
+In the dynamic setting studied in this thesis, the environment is \emph{event-driven}
+and decision points occur only when an execution event happens (Section~\ref{sec:discrete_event}),
+i.e., after job arrivals and operation completions. Therefore, the number of
+decision points per episode is not fixed.
+
+Let $D_e$ denote the number of decision points in episode $e$.
+Then the total number of decision points across $E$ episodes is random:
+\begin{equation}
+D_{\text{tot}} = \sum_{e=1}^{E} D_e,
+\qquad
+D_e \ \text{varies across episodes}.
+\label{eq:dynamic_total_decisions}
+\end{equation}
+This variability is caused by (i) stochastic job arrivals, (ii) heterogeneous
+operation lengths and sequences, and (iii) asynchronous execution dynamics
+(Sections~\ref{sec:stochastic_hetero_job_arrivals},
+\ref{sec:asynchron_decision_variable},
+\ref{sec:discrete_event}).
+
+Crucially, in this event-driven setting there is no guaranteed proportionality
+between the episode index (or elapsed time) and the number of collected decisions:
+\begin{equation}
+\sum_{e=1}^{\lfloor \rho E \rfloor} D_e
+\not\approx
+\rho \sum_{e=1}^{E} D_e
+\quad \text{in general.}
+\label{eq:no_fraction_guarantee}
+\end{equation}
+Hence, an "anneal over the first $\rho E$ episodes" or "anneal over the first
+$\rho$ fraction of elapsed time" does \emph{not} guarantee that $\rho$ fraction
+of decision experience has been explored.
+
+\subsubsection{Formal Analysis of Episode-Based Decay Failure}
+
+\paragraph{Theorem 1 (Exploration Coverage Failure under Episode-Based Decay).}
+\label{thm:episode_decay_failure}
+Under episode-based $\epsilon$-decay with annealing parameter $\rho \in (0,1)$
+over the first $\lfloor \rho E \rfloor$ episodes, the explored decision fraction
+$f_{\text{explore}} = D_{\text{early}}/D_{\text{tot}}$ is bounded by:
+\begin{equation}
+\frac{\rho D_{\min}}{\rho D_{\min} + (1-\rho) D_{\max}}
+\leq f_{\text{explore}} \leq
+\frac{\rho D_{\max}}{\rho D_{\max} + (1-\rho) D_{\min}},
+\label{eq:exploration_bounds}
+\end{equation}
+where $D_{\min} = \min_{e \in [1,E]} D_e$ and $D_{\max} = \max_{e \in [1,E]} D_e$.
+In general, $f_{\text{explore}} \neq \rho$, and the deviation can be arbitrarily
+large when $D_{\max}/D_{\min}$ is large.
+
+\paragraph{Proof.}
+The worst-case lower bound occurs when the first $\lfloor \rho E \rfloor$ episodes
+all have minimum decision count $D_{\min}$, and the remaining episodes have maximum
+count $D_{\max}$:
+\begin{equation}
+f_{\text{explore}}^{\text{worst}}
+=
+\frac{\rho E D_{\min}}{\rho E D_{\min} + (1-\rho)E D_{\max}}
+=
+\frac{\rho D_{\min}}{\rho D_{\min} + (1-\rho) D_{\max}}.
+\end{equation}
+The upper bound occurs in the opposite case (early episodes with $D_{\max}$,
+later with $D_{\min}$). The inequality $f_{\text{explore}} \neq \rho$ follows
+whenever $D_{\min} \neq D_{\max}$. $\square$
+
+\paragraph{Concrete illustrations.}
+To demonstrate the severity of this problem, consider $E=100$ episodes with 
+target exploration fraction $\rho=0.6$ (i.e., decay completes after episode 60):
+
+\textbf{Extreme Scenario A (low decision density early, high later):}
+If episodes 1--60 each have $D_e=10$ decision points while episodes 61--100 have
+$D_e=40$, then Theorem~\ref{thm:episode_decay_failure} yields:
+\begin{equation}
+f_{\text{explore}}^{A}
+=
+\frac{0.6 \cdot 10}{0.6 \cdot 10 + 0.4 \cdot 40}
+=
+\frac{6}{22}
+\approx 0.27.
+\label{eq:scenario_A_fraction}
+\end{equation}
+Despite intending $60\%$ exploration, the policy explores only $27\%$ of decision
+opportunities, severely underexploring the state space.
+
+\textbf{Extreme Scenario B (high decision density early, low later):}
+If episodes 1--60 each have $D_e=40$ while episodes 61--100 have $D_e=10$:
+\begin{equation}
+f_{\text{explore}}^{B}
+=
+\frac{0.6 \cdot 40}{0.6 \cdot 40 + 0.4 \cdot 10}
+=
+\frac{24}{28}
+\approx 0.86.
+\label{eq:scenario_B_fraction}
+\end{equation}
+Here, exploration persists through $86\%$ of decisions, wasting exploitation
+potential after the policy has likely converged.
+
+Therefore, the \emph{same} episode-based decay rule produces coverage ranging
+from $27\%$ to $86\%$ -- a $59$ percentage point difference -- depending purely
+on when decision-intensive episodes occur.
+
+This demonstrates the core problem: in an event-driven environment, annealing as
+a function of time or episode index cannot guarantee a predictable amount of
+exploratory decision experience. The plan "explore for the first $60\%$ of
+training" is not well-defined in terms of actual interaction data.
+
+\subsubsection{Decision-Point-Based Exploration Decay with Guaranteed Coverage}
+
+\paragraph{Proposed formulation.}
+To ensure that exploration decreases only after a controlled amount of decision
+experience has been collected, the proposed framework defines $\epsilon$ as a
+function of the cumulative decision point index $d$:
+\begin{equation}
+\epsilon_d
+=
+\max\!\left(
+\epsilon_{\min},
+\;
+\epsilon_0 - \frac{d}{D_{\mathrm{anneal}}}
+(\epsilon_0 - \epsilon_{\min})
+\right),
+\qquad d=0,1,\dots
+\label{eq:decision_based_epsilon_final}
+\end{equation}
+where $d$ counts actual decision points encountered across episodes.
+By choosing $D_{\mathrm{anneal}}$ directly (e.g., "anneal over the first
+$D_{\mathrm{anneal}}=25{,}000$ decision points"), the schedule guarantees that the
+policy explores over a controlled number of interaction opportunities
+independent of how decision points are distributed across episodes.
+
+\paragraph{Theorem 2 (Guaranteed Exploration Coverage under Decision-Based Decay).}
+\label{thm:decision_based_guarantee}
+Under decision-point-based $\epsilon$-decay with annealing horizon
+$D_{\mathrm{anneal}}$, the number of exploratory decisions satisfies:
+\begin{equation}
+N_{\text{explore}}
+= \int_0^{D_{\mathrm{anneal}}} \epsilon_d \, \mathrm{d}d
+= \frac{D_{\mathrm{anneal}}(\epsilon_0 + \epsilon_{\min})}{2},
+\label{eq:guaranteed_exploration}
+\end{equation}
+independent of the episode-level distribution of decision points. Furthermore,
+the explored decision fraction is:
+\begin{equation}
+f_{\text{explore}}
+= \frac{N_{\text{explore}}}{D_{\text{tot}}}
+= \frac{D_{\mathrm{anneal}}}{D_{\text{tot}}} \cdot
+\frac{\epsilon_0 + \epsilon_{\min}}{2},
+\label{eq:guaranteed_fraction}
+\end{equation}
+which is deterministic given $D_{\mathrm{anneal}}$ and $D_{\text{tot}}$.
+
+\paragraph{Proof.}
+Under linear decay (Eq.~\ref{eq:decision_based_epsilon_final}), the exploration
+rate decreases linearly from $\epsilon_0$ to $\epsilon_{\min}$ over
+$D_{\mathrm{anneal}}$ decision points. Assuming $\epsilon$-greedy action selection,
+the expected number of exploratory actions per decision is $\epsilon_d$. Integrating:
+\begin{align}
+N_{\text{explore}}
+&= \int_0^{D_{\mathrm{anneal}}} \epsilon_d \, \mathrm{d}d
+= \int_0^{D_{\mathrm{anneal}}}
+\left(
+\epsilon_0 - \frac{d}{D_{\mathrm{anneal}}}(\epsilon_0 - \epsilon_{\min})
+\right) \mathrm{d}d
+\\
+&= \epsilon_0 D_{\mathrm{anneal}}
+- \frac{\epsilon_0 - \epsilon_{\min}}{D_{\mathrm{anneal}}}
+\cdot \frac{D_{\mathrm{anneal}}^2}{2}
+= D_{\mathrm{anneal}}
+\left(
+\epsilon_0 - \frac{\epsilon_0 - \epsilon_{\min}}{2}
+\right)
+\\
+&= \frac{D_{\mathrm{anneal}}(\epsilon_0 + \epsilon_{\min})}{2}.
+\end{align}
+This quantity depends only on $D_{\mathrm{anneal}}$, $\epsilon_0$, and
+$\epsilon_{\min}$, not on how decision points are distributed across episodes. $\square$
+
+\paragraph{Proposition 1 (Exploration Variance Elimination).}
+\label{prop:variance_elimination}
+Let $D_e \sim \mathcal{N}(\mu_D, \sigma_D^2)$ be i.i.d.\ episode decision counts.
+Under episode-based decay with target fraction $\rho$, the variance of the number
+of exploratory decisions is:
+\begin{equation}
+\mathrm{Var}\!\left[N_{\text{explore}}^{\text{episode}}\right]
+= \bar{\epsilon}^2 \cdot \lfloor \rho E \rfloor \cdot \sigma_D^2,
+\label{eq:variance_episode}
+\end{equation}
+where $\bar{\epsilon} = (\epsilon_0 + \epsilon_{\min})/2$ is the average
+exploration rate. Under decision-based decay:
+\begin{equation}
+\mathrm{Var}\!\left[N_{\text{explore}}^{\text{decision}}\right] = 0.
+\label{eq:variance_decision}
+\end{equation}
+
+\paragraph{Proof.}
+Under episode-based decay, the number of exploratory decisions is approximately
+$N_{\text{explore}}^{\text{episode}} \approx \bar{\epsilon} \sum_{e=1}^{\lfloor \rho E \rfloor} D_e$.
+Since $D_e$ are i.i.d.\ with variance $\sigma_D^2$:
+\begin{equation}
+\mathrm{Var}\!\left[\sum_{e=1}^{\lfloor \rho E \rfloor} D_e\right]
+= \lfloor \rho E \rfloor \sigma_D^2,
+\end{equation}
+and thus
+$\mathrm{Var}[N_{\text{explore}}^{\text{episode}}]
+= \bar{\epsilon}^2 \lfloor \rho E \rfloor \sigma_D^2$.
+Under decision-based decay, $N_{\text{explore}}^{\text{decision}}$ is deterministic
+(Theorem~\ref{thm:decision_based_guarantee}), so its variance is zero. $\square$
+
+\paragraph{Practical implications.}
+In the experimental setting (Section~\ref{sec:experiments}), observed episode
+decision counts range from $D_e \in [37, 51]$ with $\bar{D}=41.66$ and
+$\sigma_D=2.70$, confirming such variability is not hypothetical but occurs in
+practice. Setting $D_{\mathrm{anneal}}=25{,}000$ with $\epsilon_0=1.0$ and
+$\epsilon_{\min}=0.05$ guarantees:
+\begin{equation}
+N_{\text{explore}}
+= \frac{25{,}000 \times (1.0 + 0.05)}{2}
+= 13{,}125
+\text{ exploratory decisions},
+\label{eq:practical_example}
+\end{equation}
+regardless of how these decision points are distributed across episodes.
+
+Consequently, the proposed adaptive exploration mechanism:
+\begin{itemize}
+\item \textbf{Aligns exploration with interaction structure:} Decay proceeds at
+the rate agents actually interact with the environment.
+
+\item \textbf{Prevents premature convergence:} Low-density episodes do not cause
+premature exploitation.
+
+\item \textbf{Ensures robust learning:} Consistent exploration experience across
+runs with different stochastic realizations.
+
+\item \textbf{Enables principled hyperparameter tuning:} $D_{\mathrm{anneal}}$ has
+a clear semantic meaning (number of exploratory decisions), unlike
+$E_{\mathrm{anneal}}$ (number of episodes, whose decision content varies).
+\end{itemize}
+
+This mechanism is essential for achieving stable and reproducible learning in
+stochastic, event-driven multi-agent scheduling environments.

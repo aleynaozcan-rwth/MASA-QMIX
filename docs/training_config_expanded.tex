@@ -1,0 +1,117 @@
+\subsection{Training Configuration Rationale}
+
+The training configuration for MASA-QMIX was determined through extensive empirical evaluation on the RWTH Aachen HPC cluster, where computational constraints and infrastructure variability significantly influenced hyperparameter selection. This section documents the design rationale and experimental calibration process for key training components.
+
+\subsubsection{Experience Replay Design}
+
+The replay buffer provides two critical functions: (1) breaking temporal correlations in sequential data to enable stable gradient estimates, and (2) enabling off-policy learning where the behavior policy (ε-greedy) differs from the target policy (greedy). 
+
+\textbf{Buffer Size Determination:} The replay buffer capacity was calibrated through a series of computational experiments comparing buffer sizes ranging from 1000 to 10000 transitions. Smaller buffers (≤2000) exhibited high variance in training curves due to insufficient experience diversity—the agent repeatedly sampled similar scheduling scenarios, leading to overfitting to recent episodes. Larger buffers (≥8000) improved stability but increased memory overhead and reduced training throughput on CPU-constrained nodes. The selected buffer size represents a compromise between sample diversity and computational efficiency under the available infrastructure constraints (see Appendix for exact specification).
+
+\textbf{Warmup Period Calibration:} The warmup period ensures sufficient experience diversity before training begins. Initial experiments without warmup produced highly noisy gradients and unstable learning curves, as the agent attempted to learn from a handful of initial episodes that poorly represented the full state-action space. The warmup threshold was determined empirically by monitoring gradient norm distributions during early training—insufficient warmup resulted in gradient explosion events (norm $>10^3$), while excessive warmup unnecessarily delayed learning onset. The selected warmup size ensures the buffer contains experiences spanning diverse job arrival patterns and scheduling conflicts before gradient updates commence (see Appendix for exact value).
+
+\textbf{Training Steps per Update Cycle:} The number of gradient updates performed per episode collection directly affects learning speed and sample efficiency. Through systematic evaluation (Figure~\ref{fig:train_steps_fullpage} in Appendix), we tested configurations ranging from 15 to 50 training steps per update cycle. Lower step counts (15-25) underutilized collected experience, requiring more episodes to converge. Higher step counts (≥50) improved sample efficiency but increased risk of overfitting to the replay buffer's current contents. The selected configuration balances convergence speed with gradient stability (exact value in Appendix Table~\ref{tab:training-config}).
+
+\subsubsection{Target Network Stabilization}
+
+Periodic target network updates (rather than continuous synchronization) provide fixed Q-value targets during temporal difference learning, preventing the moving target problem that destabilizes Q-learning. Update frequency balances target stability against policy improvement speed.
+
+\textbf{Update Frequency Impact:} The target network update frequency proved to be one of the most influential hyperparameters affecting training stability and final performance. Through extensive grid search experiments (testing update intervals of 10, 25, 50, 100, 200, and 500 training steps), we observed that:
+\begin{itemize}
+    \item \textbf{Too frequent updates} (≤25 steps) reintroduced the moving target problem, causing Q-value oscillations and preventing convergence. The agent exhibited high variance in episode returns across epochs.
+    \item \textbf{Too infrequent updates} (≥200 steps) caused policy staleness, where the evaluation network improved significantly while the target network lagged, resulting in overestimated Q-values and degraded sample efficiency.
+    \item The optimal frequency exhibited strong coupling with learning rate—higher learning rates required more frequent synchronization to track policy changes, while lower learning rates benefited from longer target stability windows.
+\end{itemize}
+
+Figure~\ref{fig:target_update_cycle_fullpage} (Appendix) presents comparative learning dynamics across different update frequencies (20, 30, 50, and 200 steps). The sensitivity analysis reveals that intermediate update frequencies (30-50 steps) achieve superior convergence—cycle 30 shows the fastest initial learning but higher variance, while cycle 50 demonstrates more stable convergence with reduced TD error oscillations. Excessively long cycles (200 steps) exhibit significantly degraded performance, with lower final rewards and persistent high TD errors throughout training.
+
+\textbf{Cross-Parameter Dependencies:} The target update frequency selection could not be decoupled from other training hyperparameters. Through systematic ablation studies, we identified critical interactions between multiple training components:
+
+\textbf{Target Network Update Cycle} controls how frequently the frozen target network synchronizes with the evaluation network. Longer cycles ($>$100 steps) provide stable Q-value targets but cause policy staleness—the target lags behind the evaluation network, creating overestimation bias, premature reward plateaus, and persistent TD errors (Appendix Figure~\ref{fig:target_update_cycle_fullpage}). Shorter cycles ($<$30 steps) reintroduce the moving target problem, causing Q-value oscillations and training instability. The chosen update frequency (50 steps) balances target stability with policy tracking, providing consistent TD learning while incorporating recent improvements. This value emerged from joint optimization with learning rate and training steps per update (Appendix Table~\ref{tab:training-config}).
+
+\textbf{Training Steps per Update Cycle} determines the number of gradient updates performed on each collected experience batch. More training steps ($>$40) improve sample efficiency but risk overfitting to current replay buffer contents, reducing generalization to new job arrival patterns (Appendix Figure~\ref{fig:train_steps_fullpage}). Fewer steps ($<$20) underutilize collected experience, requiring more environment interactions and increasing wall-clock training time. The chosen configuration (30 steps) maximizes learning from each batch while avoiding overfitting, jointly tuned with target update frequency to prevent evaluation-target divergence (Appendix Table~\ref{tab:training-config}).
+
+\textbf{Discount Factor ($\gamma$)} controls the agent's time horizon for future rewards. Higher values ($\gamma > 0.99$) encourage long-term planning but amplify TD error propagation—in episodic environments (50 time units), excessive $\gamma$ causes agents to overvalue unreachable distant states, destabilizing Q-estimates. Lower values ($\gamma < 0.95$) promote myopic behavior, prioritizing immediate rewards over throughput optimization. This is detrimental in job-shop scheduling where early decisions critically affect downstream bottlenecks and makespan. The chosen $\gamma = 0.99$ provides a 50-step planning horizon matching episode length, enabling full job completion consideration while maintaining numerical stability.
+
+\textbf{Replay Buffer Size} defines maximum experience transitions stored for training. Larger buffers ($>$8000) improve diversity but increase memory consumption (critical on 32GB CPU nodes), reduce sampling speed, and retain outdated early-exploration experiences that bias learning. Smaller buffers ($<$3000) suffer from high sample correlation—consecutive batches overlap excessively, violating i.i.d. assumptions and causing high training variance. The chosen size (5000 transitions, ~100-125 episodes) balances diversity with efficiency, fitting RAM constraints while breaking temporal correlations. Buffer size was calibrated with batch size to minimize sample reuse (Appendix Table~\ref{tab:training-config}).
+
+\textbf{Warmup Size} specifies minimum buffer occupancy before training begins. Larger thresholds ($>$1500) ensure diverse initial gradients but waste computation—random policy experiences become outdated once the agent improves. Insufficient warmup ($<$500) causes early instability through noisy gradients, triggering gradient explosions (norm $>10^3$) and biasing toward suboptimal local minima. The chosen threshold (800 transitions, ~16-20 episodes) ensures sufficient initial diversity while avoiding excessive delay. This value was determined by monitoring gradient norm distributions—below 800 exhibited frequent spikes, while higher values provided diminishing benefits. The 16\% buffer occupancy ratio ensures consistency across different buffer sizes (Appendix Table~\ref{tab:training-config}).
+
+\textbf{Learning Rate ($\alpha$)} determines policy update magnitude per gradient step. Higher rates ($>10^{-3}$) accelerate initial learning but create Q-value oscillations preventing convergence—in multi-agent settings, aggressive rates amplify non-stationarity as agents simultaneously update, destabilizing joint policies. Lower rates ($<10^{-4}$) improve stability but drastically slow convergence; given finite HPC wall-time (8-12 hours), conservative rates prevent reaching high-performance policies. The chosen rate ($5 \times 10^{-4}$) balances speed with stability, jointly optimized with target update frequency (faster learning requires synchronization every ~50 steps). It interacts with gradient clipping (max norm 10.0) to bound extreme updates while preserving effective learning (Appendix Table~\ref{tab:training-config}).
+
+\textbf{Batch Size} controls transitions sampled per gradient update. Larger batches ($>$64) provide stable low-variance gradients, permitting higher learning rates and less frequent target updates, but increase memory/compute costs and reduce CPU throughput. Smaller batches ($<$16) amplify gradient noise, requiring conservative learning and frequent target synchronization without corresponding efficiency gains. The chosen size (32 transitions) balances gradient stability with computational efficiency, maintaining fast updates (~2-3 seconds per batch on CPU nodes). Tuned alongside buffer size, it represents ~0.6\% of total capacity, ensuring minimal consecutive batch overlap (Appendix Table~\ref{tab:training-config}).
+
+The final configuration (exact values in Appendix Table~\ref{tab:training-config}) was determined through multi-objective optimization considering: (1) training stability (measured by coefficient of variation in episode returns), (2) sample efficiency (area under learning curve), and (3) final policy quality (evaluation performance after convergence). This calibration required over 200 individual training runs on the HPC cluster. Comprehensive sensitivity analyses for both training steps per update and target network synchronization frequency are presented in Appendix Figures~\ref{fig:train_steps_fullpage} and~\ref{fig:target_update_cycle_fullpage}.
+
+\subsubsection{Infrastructure-Specific Reproducibility Challenges}
+
+Training MASA-QMIX on the RWTH Aachen HPC cluster revealed critical reproducibility issues stemming from execution environment variability:
+
+\textbf{Node-Specific Non-Determinism:} Identical training configurations submitted via SLURM workload manager to different compute nodes produced inconsistent results. We identified multiple sources of variation:
+
+\begin{itemize}
+    \item \textbf{CPU vs GPU execution:} Training runs on CPU-only nodes (partition \texttt{c23ms}) vs GPU-enabled nodes (partition \texttt{c23g}) yielded statistically significant differences in final performance (up to 15\% variation in mean episode return). This GPU non-determinism stems from several architectural factors:
+    \begin{itemize}
+        \item \textbf{CUDA/cuDNN kernel selection:} CUDA and cuDNN libraries select kernels optimized for execution speed rather than reproducibility. Even with identical seeds, these kernels may execute floating-point operations in different orders (e.g., parallel reductions in the mixer network), causing small numerical differences that compound through backpropagation.
+        \item \textbf{TF32 precision mode:} On Ampere-generation GPUs and later, PyTorch defaults to TensorFloat-32 (TF32) for matrix multiplications to accelerate training. TF32 uses reduced mantissa precision (10 bits vs 23 bits in FP32), introducing numerical drift that accumulates across training iterations.
+        \item \textbf{Atomic operations:} GPU atomic operations (used in gradient accumulation) are non-deterministic by design, as the order of parallel thread execution is unpredictable.
+    \end{itemize}
+    
+    \item \textbf{CPU threading and BLAS non-determinism:} CPU-only training exhibited variability across nodes despite identical PyTorch versions, traced to low-level numerical library differences:
+    \begin{itemize}
+        \item \textbf{Thread count variations:} Environment variables \texttt{OMP\_NUM\_THREADS} and \texttt{MKL\_NUM\_THREADS} differed across node configurations, affecting parallel reduction order in matrix operations.
+        \item \textbf{BLAS implementation differences:} Some nodes used Intel MKL while others used OpenBLAS. These libraries implement matrix operations (GEMM, GEMV) with different summation orders, causing floating-point rounding differences that accumulate in deep network forward/backward passes.
+        \item \textbf{Floating-point associativity:} Parallel BLAS operations violate floating-point associativity—$(a + b) + c \neq a + (b + c)$ due to rounding. Different thread schedules produce numerically distinct results even for identical inputs.
+    \end{itemize}
+    
+    \item \textbf{Library dependency variations:} Different nodes had micro-version differences in NumPy (2.3.2 vs 2.3.3) and PyTorch (2.8.0+cu128 vs 2.8.0+cpu), which affected numerical precision in normalization operations and gradient computations. These changes are often undocumented but can alter low-level kernel implementations.
+    
+    \item \textbf{Incomplete random seeding:} RL training involves multiple stochastic processes, each requiring independent seeding. Initial experiments set only Python's \texttt{random} and NumPy's seed, missing:
+    \begin{itemize}
+        \item \textbf{PyTorch CPU RNG:} \texttt{torch.manual\_seed()} for weight initialization and dropout
+        \item \textbf{PyTorch GPU RNG:} \texttt{torch.cuda.manual\_seed\_all()} for CUDA operations
+        \item \textbf{Environment RNG:} SimPy's discrete-event scheduler and job arrival process maintain separate RNG states
+        \item \textbf{Job generator RNG:} The task generator's operation sequence sampling uses its own RNG instance
+    \end{itemize}
+    Missing even one of these seeds caused CPU/GPU training divergence—the networks received identical observations but sampled different actions during exploration, leading to entirely different trajectories and policy evolution.
+\end{itemize}
+
+\textbf{Reproducibility Protocol:} To achieve consistent results for thesis validation experiments, we implemented a strict seeding and execution protocol:
+\begin{enumerate}
+    \item \textbf{Comprehensive seed initialization:} All stochastic components are explicitly seeded at training initialization:
+    \begin{verbatim}
+    random.seed(seed)                      # Python stdlib
+    np.random.seed(seed)                   # NumPy
+    torch.manual_seed(seed)                # PyTorch CPU
+    torch.cuda.manual_seed_all(seed)       # PyTorch GPU
+    env.seed(seed)                         # SimPy environment
+    task_generator.seed(seed)              # Job arrival RNG
+    \end{verbatim}
+    
+    \item \textbf{GPU deterministic enforcement:} For GPU-enabled runs, PyTorch's deterministic mode is strictly enforced with numerical precision controls:
+    \begin{verbatim}
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    \end{verbatim}
+    These settings disable non-deterministic CUDA kernels, force cuDNN to use reproducible convolution algorithms, disable TF32 precision mode (maintaining full FP32), and configure CUBLAS workspace for deterministic operations. The performance cost is approximately 20-30\% slower training, which is acceptable for validation experiments requiring exact reproducibility.
+    
+    \item \textbf{CPU threading standardization:} To eliminate BLAS-induced non-determinism on CPU nodes, thread counts are fixed:
+    \begin{verbatim}
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    \end{verbatim}
+    Single-threaded execution ensures deterministic reduction order in matrix operations. While this sacrifices parallel speedup, it guarantees reproducible results critical for ablation studies and performance comparisons.
+    
+    \item \textbf{Explicit global seed specification:} All SLURM job submissions include a \texttt{--seed} argument passed to the training script, ensuring experiments can be exactly replicated by re-running with the same seed on the same node type.
+    
+    \item \textbf{Node type isolation:} Validation experiments are restricted to a single partition (CPU-only \texttt{c23ms}) to eliminate GPU-induced non-determinism, accepting longer wall-clock time (8-12 hours per run) in exchange for reproducibility.
+    
+    \item \textbf{Seeding hierarchy:} The code implements a hierarchical seeding strategy: (1) a global seed set at process launch, (2) per-episode seeds derived from the global seed using a fixed offset, and (3) per-decision-point seeds for stochastic job arrivals. This ensures both reproducibility (same global seed → identical trajectory) and diversity (different episodes within a run exhibit natural variability).
+\end{enumerate}
+
+This infrastructure-aware reproducibility strategy ensures that all performance claims in Chapter 5 (Results) are based on statistically rigorous experiments with controlled variability. Full training hyperparameters and hardware specifications are provided in the Appendix (Tables~\ref{tab:training-config},~\ref{tab:computing-infrastructure}, and~\ref{tab:software-environment}), along with hyperparameter sensitivity analyses (Figures~\ref{fig:train_steps_fullpage} and~\ref{fig:target_update_cycle_fullpage}) and seed values used for validation experiments.
