@@ -224,10 +224,11 @@ def plot_with_conflicts_binned():
     ax.set_xlabel('Episode Range (15-Episode Windows)', fontsize=13, fontweight='bold')
     ax.set_xticks(x_pos[::3])
     ax.set_xticklabels([bin_labels[i] for i in range(0, len(bin_labels), 3)], 
-                       rotation=45, ha='right', fontsize=9)
+                       rotation=45, ha='right', fontsize=11)
     
     # Y-axis
     ax.set_ylabel('Total Decision Points per Episode (Mean)', fontsize=13, fontweight='bold')
+    ax.tick_params(axis='y', labelsize=11)
     ax.set_xlim(-0.5, len(bin_labels) - 0.5)
     ax.set_ylim(0, 50)
     ax.margins(0)
@@ -239,7 +240,7 @@ def plot_with_conflicts_binned():
     parallel_dps_all = simultaneous_all + conflicts_all  # 8859
     non_parallel_dps_all = total_dps_all - parallel_dps_all  # 31032
     
-    title = 'Decision Points Distribution with Conflict Breakdown'
+    title = 'Decision Points Distribution'
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
     
     # Grid
@@ -248,14 +249,39 @@ def plot_with_conflicts_binned():
     # Add legend in top-left corner
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor=color_conflict, label='Conflict DPs'),
-        Patch(facecolor=color_simultaneous, label='Simultaneous DPs'),
+        Patch(facecolor=color_conflict, label='Conflict-Involving Parallel DPs'),
+        Patch(facecolor=color_simultaneous, label='Simultaneous (Conflict-Free) Parallel DPs'),
         Patch(facecolor=color_nonparallel, label='Non-Parallel DPs')
     ]
     legend = ax.legend(handles=legend_elements, loc='upper left', 
-                      bbox_to_anchor=(0.01, 0.995), fontsize=10,
+                      bbox_to_anchor=(0.01, 0.995), fontsize=12,
                       frameon=True, fancybox=True, shadow=True,
                       facecolor='white', edgecolor='black', framealpha=0.95)
+    
+    # Add equation text in the center between left legend and right stats (without boxes)
+    # First equation: Total DPs breakdown with colored text
+    ax.text(0.382, 0.955, 'Total DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='black')
+    ax.text(0.438, 0.955, '=', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='black')
+    ax.text(0.450, 0.955, 'Non-Parallel DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color=color_nonparallel)
+    ax.text(0.547, 0.955, '+', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='black')
+    ax.text(0.559, 0.955, 'Parallel DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='#FF6B1A')
+    
+    # Second equation: Parallel DPs breakdown with colored text (same spacing)
+    ax.text(0.382, 0.915, 'Parallel DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='#FF6B1A')
+    ax.text(0.448, 0.915, '=', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='black')
+    ax.text(0.460, 0.915, 'Simultaneous DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color=color_simultaneous)
+    ax.text(0.565, 0.915, '+', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color='black')
+    ax.text(0.577, 0.915, 'Conflict DPs', transform=ax.transAxes, fontsize=11, 
+            verticalalignment='top', horizontalalignment='left', fontweight='bold', color=color_conflict)
     
     # Add statistics box in top-right corner
     stats_text = f'''Total DPs: {total_dps_all:,}
@@ -269,7 +295,7 @@ Job Arrival Rate: λ=0.125'''
     
     props = dict(boxstyle='round', facecolor='white', alpha=0.95, 
                 edgecolor='black', linewidth=1.5, pad=0.7)
-    ax.text(0.78, 0.97, stats_text, transform=ax.transAxes, fontsize=9, 
+    ax.text(0.79, 0.97, stats_text, transform=ax.transAxes, fontsize=9, 
             verticalalignment='top', horizontalalignment='left',
             bbox=props, family='monospace', fontweight='normal')
     
