@@ -115,7 +115,7 @@ def marl_agent_wrapper(args):
 
 def random_agent_wrapper(args):
     episodes = 10
-    # For the random baseline use a pure environment (no YAML/config auto-load)
+    # For the random baseline use a pure environment 
     auto_arrivals = getattr(args, 'arrival_lambda', 0.0) > 0.0
     try:
         if auto_arrivals:

@@ -73,3 +73,4 @@ class BasicCritic(nn.Module):
 # Compatibility aliases
 RNN = RNNAgent
 Critic = BasicCritic
+#--------------------------------------------------------------

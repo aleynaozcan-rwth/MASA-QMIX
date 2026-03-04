@@ -58,3 +58,4 @@ def set_allow_history_writes(val: bool) -> None:
     """Programmatically enable or disable history writes for this process."""
     global _ALLOW
     _ALLOW = bool(val)
+#--------------------------------------------------------------

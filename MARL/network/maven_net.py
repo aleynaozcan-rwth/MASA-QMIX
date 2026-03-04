@@ -91,3 +91,4 @@ class VarDistribution(nn.Module):
             output.append(x)
         output = torch.cat(output, dim=0)
         return output
+#--------------------------------------------------------------

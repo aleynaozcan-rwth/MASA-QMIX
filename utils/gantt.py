@@ -1093,3 +1093,4 @@ def plot_gantt_image(records: Iterable[Record], path: str, by: str = 'machine', 
         except Exception as e:
             logging.getLogger(__name__).warning(f"[C1] Exception: {e}")
         return False
+#--------------------------------------------------------------

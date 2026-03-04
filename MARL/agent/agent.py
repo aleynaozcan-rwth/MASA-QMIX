@@ -184,3 +184,4 @@ class CommAgents:
                 allowed = [i for i, v in enumerate(avail) if int(v)]
                 actions.append(int(allowed[0]) if allowed else 0)
         return actions
+        #--------------------------------------------------------------

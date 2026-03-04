@@ -94,3 +94,4 @@ class Job:
         self.index_id = index_id
         self.codes = codes
         self.name = name
+#--------------------------------------------------------------

@@ -283,3 +283,4 @@ class JobAgent :
         f"last_machine={last_m }, left_jobs={len (self .left_job )}, "
         f"current_op_idx={getattr (self ,'current_op_idx',0 )}, "
         f"arrival={self .arrival_time }, completed_at={self .completed_at }>")
+#--------------------------------------------------------------

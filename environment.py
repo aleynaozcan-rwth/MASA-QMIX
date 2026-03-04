@@ -2614,3 +2614,4 @@ class MASAEnv:
                 f"[C1] Failed to compute utilization summary: {e}. "
                 f"Check gantt_records, machine_list, and operator availability."
             ) from e
+#--------------------------------------------------------------

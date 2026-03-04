@@ -430,3 +430,4 @@ def _infer_agents_obs(episodes: List[Episode]) -> Tuple[int, int]:
                     max_agents = max(max_agents, int(u.shape[0]))
 
     return int(max_agents), int(obs_dim)
+    #--------------------------------------------------------------

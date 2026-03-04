@@ -148,3 +148,4 @@ def build_machine_major_mask(env, job_or_job_id) -> List[int]:
         )
     
     return [int(bool(x)) for x in list(row)]
+    #--------------------------------------------------------------
