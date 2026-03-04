@@ -13,16 +13,16 @@ class CentralV:
         self.n_agents = self.args.n_agents
         self.state_shape = self.args.state_shape
         self.obs_shape = self.args.obs_shape
-        actor_input_shape = self.obs_shape  # actor网络输入的维度，和vdn、qmix的rnn输入维度一样，使用同一个网络结构
-        critic_input_shape = self.state_shape  # critic网络输入的维度
-        # 根据参数决定RNN的输入维度
+        actor_input_shape = self.obs_shape  # Actor network input dimension, same as VDN/QMIX RNN input, using the same network structure
+        critic_input_shape = self.state_shape  # Critic network input dimension
+        # Determine RNN input dimension based on parameters
         if self.args.last_action:
             actor_input_shape += self.n_actions
         if self.args.reuse_network:
             actor_input_shape += self.n_agents
 
-        # 神经网络
-        # 每个agent选动作的网络,输出当前agent所有动作对应的概率，用该概率选动作的时候还需要用softmax再运算一次。
+        # Neural networks
+        # Network for each agent to select actions; outputs probabilities for all actions of current agent; requires softmax operation again when selecting actions using these probabilities.
         if self.args.alg == 'central_v':
             self.eval_rnn = RNN(actor_input_shape, args)
             print('Init alg central_v')
@@ -44,7 +44,7 @@ class CentralV:
             self.target_critic.cuda()
 
         self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
-        # 如果存在模型则加载模型
+        # Load model if it exists
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_params.pkl'):
                 path_rnn = self.model_dir + '/rnn_params.pkl'
@@ -56,7 +56,7 @@ class CentralV:
             else:
                 raise Exception("No model!")
 
-        # 让target_net和eval_net的网络参数相同
+        # Make target_net and eval_net network parameters the same
         self.target_critic.load_state_dict(self.eval_critic.state_dict())
 
         self.rnn_parameters = list(self.eval_rnn.parameters())
@@ -66,37 +66,37 @@ class CentralV:
             self.critic_optimizer = torch.optim.RMSprop(self.critic_parameters, lr=self.args.lr_critic)
             self.rnn_optimizer = torch.optim.RMSprop(self.rnn_parameters, lr=self.args.lr_actor)
 
-        # 执行过程中，要为每个agent都维护一个eval_hidden
-        # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden
+        # During execution, maintain an eval_hidden for each agent
+        # During learning, maintain an eval_hidden for each agent in each episode
         self.eval_hidden = None
 
-    def learn(self, batch, max_episode_len, train_step, epsilon):  # train_step表示是第几次学习，用来控制更新target_net网络的参数
+    def learn(self, batch, max_episode_len, train_step, epsilon):  # train_step represents the learning step number, used to control updating target_net network parameters
         episode_num = batch['o'].shape[0]
         self.init_hidden(episode_num)
-        for key in batch.keys():  # 把batch里的数据转化成tensor
+        for key in batch.keys():  # Convert batch data to tensor
             if key == 'u':
                 batch[key] = torch.tensor(batch[key], dtype=torch.long)
             else:
                 batch[key] = torch.tensor(batch[key], dtype=torch.float32)
         u, r, avail_u, terminated = batch['u'], batch['r'],  batch['avail_u'], batch['terminated']
-        mask = (1 - batch["padded"].float()).repeat(1, 1, self.n_agents)  # 用来把那些填充的经验的TD-error置0，从而不让它们影响到学习
+        mask = (1 - batch["padded"].float()).repeat(1, 1, self.n_agents)  # Used to set TD-error to 0 for padded experiences, preventing them from affecting learning
         if self.args.cuda:
             u = u.cuda()
             mask = mask.cuda()
 
-        # 训练critic网络，并且得到每条经验的td_error, (episode_num, max_episode_len, 1)
+        # Train critic network and get td_error for each experience, (episode_num, max_episode_len, 1)
         td_error = self._train_critic(batch, max_episode_len, train_step)
         td_error = td_error.repeat(1, 1, self.n_agents)
 
-        # 每个agent的所有动作的概率 (episode_num, max_episode_len， n_agents，n_actions)
+        # Probabilities of all actions for each agent (episode_num, max_episode_len, n_agents, n_actions)
         action_prob = self._get_action_prob(batch, max_episode_len, epsilon)
 
-        # 每个agent的选择的动作对应的概率 (episode_num, max_episode_len， n_agents)
+        # Probability corresponding to the selected action of each agent (episode_num, max_episode_len, n_agents)
         pi_taken = torch.gather(action_prob, dim=3, index=u).squeeze(3)
-        pi_taken[mask == 0] = 1.0  # 因为要取对数，对于那些填充的经验，所有概率都为0，取了log就是负无穷了，所以让它们变成1
+        pi_taken[mask == 0] = 1.0  # Because we need to take log, for padded experiences all probabilities are 0, taking log would be negative infinity, so set them to 1
         log_pi_taken = torch.log(pi_taken)
 
-        # loss函数，(episode_num, max_episode_len, n_agents)
+        # Loss function, (episode_num, max_episode_len, n_agents)
         loss = - ((td_error.detach() * log_pi_taken) * mask).sum() / mask.sum()
         self.rnn_optimizer.zero_grad()
         loss.backward()
@@ -111,7 +111,7 @@ class CentralV:
             if self.args.cuda:
                 inputs = inputs.cuda()
                 inputs_next = inputs_next.cuda()
-            # 神经网络输入的是(episode_num , state_shape)二维数据，得到的是(episode_num ， 1)二维数据
+            # Neural network input is (episode_num, state_shape) 2D data, output is (episode_num, 1) 2D data
             v_eval = self.eval_critic(inputs)
             v_target = self.target_critic(inputs_next)
 
@@ -122,66 +122,66 @@ class CentralV:
         return v_evals, v_targets
 
     def _get_actor_inputs(self, batch, transition_idx):
-        # 取出所有episode上该transition_idx的经验，u_onehot要取出所有，因为要用到上一条
+        # Extract experiences at transition_idx from all episodes; u_onehot extracts all because we need the previous one
         obs, u_onehot = batch['o'][:, transition_idx], batch['u_onehot'][:]
         episode_num = obs.shape[0]
         inputs = []
         inputs.append(obs)
-        # 给inputs添加上一个动作、agent编号
+        # Add last action and agent ID to inputs
 
         if self.args.last_action:
-            if transition_idx == 0:  # 如果是第一条经验，就让前一个动作为0向量
+            if transition_idx == 0:  # If it's the first experience, set previous action to zero vector
                 inputs.append(torch.zeros_like(u_onehot[:, transition_idx]))
             else:
                 inputs.append(u_onehot[:, transition_idx - 1])
         if self.args.reuse_network:
-            # 因为当前的inputs三维的数据，每一维分别代表(episode编号，agent编号，inputs维度)，直接在dim_1上添加对应的向量
-            # 即可，比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
-            # agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+            # Since current inputs is 3D data where each dimension represents (episode ID, agent ID, inputs dimension), we can directly add the corresponding vector on dim_1
+            # For example, add (1, 0, 0, 0, 0) after agent_0, representing agent 0 out of 5 agents. Since agent_0 data is exactly in row 0, the agent ID to add
+            # is exactly an identity matrix, i.e., diagonal is 1, rest is 0
             inputs.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
-        # 要把inputs中的三个拼起来，并且要把episode_num个episode、self.args.n_agents个agent的数据拼成40条(40,96)的数据，
-        # 因为这里所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
+        # Concatenate the three parts in inputs, and combine episode_num episodes and self.args.n_agents agents data into 40 rows of (40, 96) data,
+        # Since all agents share one neural network here, each data row contains its own ID, so it's still its own data
         inputs = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs], dim=1)
         return inputs
 
     def _get_action_prob(self, batch, max_episode_len, epsilon):
         episode_num = batch['o'].shape[0]
-        avail_actions = batch['avail_u']  # coma不用target_actor，所以不需要最后一个obs的下一个可执行动作
+        avail_actions = batch['avail_u']  # COMA doesn't use target_actor, so no need for next available actions of the last obs
         action_prob = []
         for transition_idx in range(max_episode_len):
-            inputs = self._get_actor_inputs(batch, transition_idx)  # 给obs加last_action、agent_id
+            inputs = self._get_actor_inputs(batch, transition_idx)  # Add last_action and agent_id to obs
             if self.args.cuda:
                 inputs = inputs.cuda()
                 self.eval_hidden = self.eval_hidden.cuda()
-            outputs, self.eval_hidden = self.eval_rnn(inputs, self.eval_hidden)  # inputs维度为(40,96)，得到的q_eval维度为(40,n_actions)
-            # 把q_eval维度重新变回(8, 5,n_actions)
+            outputs, self.eval_hidden = self.eval_rnn(inputs, self.eval_hidden)  # inputs dimension is (40, 96), resulting q_eval dimension is (40, n_actions)
+            # Reshape q_eval dimension back to (8, 5, n_actions)
             outputs = outputs.view(episode_num, self.n_agents, -1)
             prob = torch.nn.functional.softmax(outputs, dim=-1)
             action_prob.append(prob)
-        # 得的action_prob是一个列表，列表里装着max_episode_len个数组，数组的的维度是(episode个数, n_agents，n_actions)
-        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        # The resulting action_prob is a list containing max_episode_len arrays, each array has dimension (episode count, n_agents, n_actions)
+        # Convert this list to (episode count, max_episode_len, n_agents, n_actions) array
         action_prob = torch.stack(action_prob, dim=1).cpu()
 
-        action_num = avail_actions.sum(dim=-1, keepdim=True).float().repeat(1, 1, 1, avail_actions.shape[-1])   # 可以选择的动作的个数
+        action_num = avail_actions.sum(dim=-1, keepdim=True).float().repeat(1, 1, 1, avail_actions.shape[-1])   # Number of actions that can be selected
         action_prob = ((1 - epsilon) * action_prob + torch.ones_like(action_prob) * epsilon / action_num)
-        action_prob[avail_actions == 0] = 0.0  # 不能执行的动作概率为0
+        action_prob[avail_actions == 0] = 0.0  # Probability of actions that cannot be executed is 0
 
-        # 因为上面把不能执行的动作概率置为0，所以概率和不为1了，这里要重新正则化一下。执行过程中Categorical会自己正则化。
+        # Because we set probabilities of unavailable actions to 0 above, the probability sum is no longer 1, so we need to renormalize here. During execution Categorical normalizes automatically.
         action_prob = action_prob / action_prob.sum(dim=-1, keepdim=True)
-        # 因为有许多经验是填充的，它们的avail_actions都填充的是0，所以该经验上所有动作的概率都为0，在正则化的时候会得到nan。
-        # 因此需要再一次将该经验对应的概率置为0
+        # Because many experiences are padded, their avail_actions are all filled with 0, so all action probabilities for those experiences are 0, which becomes nan during normalization.
+        # Therefore we need to set the probabilities for those experiences to 0 again
         action_prob[avail_actions == 0] = 0.0
         if self.args.cuda:
             action_prob = action_prob.cuda()
         return action_prob
 
     def init_hidden(self, episode_num):
-        # 为每个episode中的每个agent都初始化一个eval_hidden
+        # Initialize an eval_hidden for each agent in each episode
         self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim))
 
     def _train_critic(self, batch, max_episode_len, train_step):
         r, terminated = batch['r'], batch['terminated']
-        mask = (1 - batch["padded"].float()).repeat(1, 1, self.n_agents)  # 用来把那些填充的经验的TD-error置0，从而不让它们影响到学习
+        mask = (1 - batch["padded"].float()).repeat(1, 1, self.n_agents)  # Used to set TD-error to 0 for padded experiences, preventing them from affecting learning
         if self.args.cuda:
             mask = mask.cuda()
             r = r.cuda()
@@ -190,9 +190,9 @@ class CentralV:
 
         targets = r + self.args.gamma * v_next_target * (1 - terminated)
         td_error = targets.detach() - v_evals
-        masked_td_error = mask * td_error  # 抹掉填充的经验的td_error
+        masked_td_error = mask * td_error  # Erase td_error for padded experiences
 
-        # 不能直接用mean，因为还有许多经验是没用的，所以要求和再比真实的经验数，才是真正的均值
+        # Cannot use mean directly because many experiences are useless; need to sum and divide by actual experience count to get true mean
         loss = (masked_td_error ** 2).sum() / mask.sum()
         # print('Critic Loss is ', loss)
         self.critic_optimizer.zero_grad()

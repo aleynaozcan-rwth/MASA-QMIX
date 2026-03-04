@@ -15,12 +15,12 @@ class QtranAlt:
         self.obs_shape = self.args.obs_shape
         rnn_input_shape = self.obs_shape
 
-        # 根据参数决定RNN的输入维度
+        # Determine RNN input dimension based on parameters
         if self.args.last_action:
-            rnn_input_shape += self.n_actions  # 当前agent的上一个动作的one_hot向量
+            rnn_input_shape += self.n_actions  # One-hot vector of current agent's last action
         if self.args.reuse_network:
             rnn_input_shape += self.n_agents
-        # 神经网络
+        # Neural networks
         self.eval_rnn = RNN(rnn_input_shape, args)  # individual networks
         self.target_rnn = RNN(rnn_input_shape, args)
 
@@ -36,7 +36,7 @@ class QtranAlt:
             self.v.cuda()
 
         self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
-        # 如果存在模型则加载模型
+        # Load model if it exists
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_net_params.pkl'):
                 path_rnn = self.model_dir + '/rnn_net_params.pkl'
@@ -50,7 +50,7 @@ class QtranAlt:
             else:
                 raise Exception("No model!")
 
-        # 让target_net和eval_net的网络参数相同
+        # Make target_net and eval_net network parameters the same
         self.target_rnn.load_state_dict(self.eval_rnn.state_dict())
         self.target_joint_q.load_state_dict(self.eval_joint_q.state_dict())
 
@@ -60,22 +60,23 @@ class QtranAlt:
         if self.args.optimizer == "RMS":
             self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=self.args.lr)
 
-        # 执行过程中，要为每个agent都维护一个eval_hidden
-        # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden、target_hidden
+        # During execution, maintain an eval_hidden for each agent
+        # During learning, maintain eval_hidden and target_hidden for each agent in each episode
         self.eval_hidden = None
         self.target_hidden = None
         print('Init alg QTRAN-alt')
 
-    def learn(self, batch, max_episode_len, train_step, epsilon=None):  # train_step表示是第几次学习，用来控制更新target_net网络的参数
+    def learn(self, batch, max_episode_len, train_step, epsilon=None):  # train_step indicates which learning iteration, used to control target_net parameter updates
         '''
-        在learn的时候，抽取到的数据是四维的，四个维度分别为 1——第几个episode 2——episode中第几个transition
-        3——第几个agent的数据 4——具体obs维度。因为在选动作时不仅需要输入当前的inputs，还要给神经网络输入hidden_state，
-        hidden_state和之前的经验相关，因此就不能随机抽取经验进行学习。所以这里一次抽取多个episode，然后一次给神经网络
-        传入每个episode的同一个位置的transition
+        During learning, the extracted data is 4D with dimensions: 1-which episode, 2-which transition in episode,
+        3-which agent's data, 4-specific obs dimension. Because action selection requires not only current inputs but also
+        hidden_state from the neural network, and hidden_state is related to previous experiences, we cannot randomly sample
+        experiences for learning. Therefore, multiple episodes are extracted at once, and transitions at the same position
+        from each episode are fed to the neural network together.
         '''
         episode_num = batch['o'].shape[0]
         self.init_hidden(episode_num)
-        for key in batch.keys():  # 把batch里的数据转化成tensor
+        for key in batch.keys():  # Convert batch data to tensors
             if key == 'u':
                 batch[key] = torch.tensor(batch[key], dtype=torch.long)
             else:
@@ -83,7 +84,7 @@ class QtranAlt:
         s, s_next, u, r, avail_u, avail_u_next, terminated = batch['s'], batch['s_next'], batch['u'], \
                                                              batch['r'],  batch['avail_u'], batch['avail_u_next'],\
                                                              batch['terminated']
-        mask = 1 - batch["padded"].float().repeat(1, 1, self.n_agents)  # 用来把那些填充的经验的TD-error置0，从而不让它们影响到学习
+        mask = 1 - batch["padded"].float().repeat(1, 1, self.n_agents)  # Used to set TD-error to 0 for padded experiences to prevent them from affecting learning
         if self.args.cuda:
             u = u.cuda()
             r = r.cuda()
@@ -91,10 +92,10 @@ class QtranAlt:
             avail_u_next = avail_u_next.cuda()
             terminated = terminated.cuda()
             mask = mask.cuda()
-        # 得到每个agent对应的Q和hidden_states，维度为(episode个数, max_episode_len， n_agents， n_actions/hidden_dim)
+        # Get Q values and hidden_states for each agent, dimensions: (episode_num, max_episode_len, n_agents, n_actions/hidden_dim)
         individual_q_evals, individual_q_targets, hidden_evals, hidden_targets = self._get_individual_q(batch, max_episode_len)
 
-        # 得到当前时刻和下一时刻每个agent的局部最优动作及其one_hot表示
+        # Get local optimal actions and their one-hot representations for each agent at current and next time steps
         individual_q_clone = individual_q_evals.clone()
         individual_q_clone[avail_u == 0.0] = - 999999
         individual_q_targets[avail_u_next == 0.0] = - 999999
@@ -109,13 +110,13 @@ class QtranAlt:
 
         # ---------------------------------------------L_td-------------------------------------------------------------
 
-        # 计算joint_q和v，要注意joint_q是每个agent都有，v只有一个
-        # joint_q的维度为(episode个数, max_episode_len， n_agents， n_actions), 而且joint_q在后面的l_nopt还要用到
-        # v的维度为(episode个数, max_episode_len)
+        # Calculate joint_q and v, note that each agent has joint_q but there is only one v
+        # joint_q dimensions: (episode_num, max_episode_len, n_agents, n_actions), and joint_q will be used in l_nopt later
+        # v dimensions: (episode_num, max_episode_len)
         joint_q_evals, joint_q_targets, v = self.get_qtran(batch, opt_onehot_target, hidden_evals, hidden_targets)
 
-        # 取出当前agent动作对应的joint_q_chosen以及它的局部最优动作对应的joint_q
-        joint_q_chosen = torch.gather(joint_q_evals, dim=-1, index=u).squeeze(-1)  # (episode个数, max_episode_len, n_agents)
+        # Extract joint_q_chosen for current agent action and joint_q for its local optimal action
+        joint_q_chosen = torch.gather(joint_q_evals, dim=-1, index=u).squeeze(-1)  # (episode_num, max_episode_len, n_agents)
         joint_q_opt = torch.gather(joint_q_targets, dim=-1, index=opt_action_target).squeeze(-1)
 
         # loss
@@ -126,44 +127,44 @@ class QtranAlt:
 
         # ---------------------------------------------L_opt------------------------------------------------------------
 
-        # 将局部最优动作的Q值相加  (episode个数,max_episode_len)
-        # 这里要使用individual_q_clone，它把不能执行的动作Q值改变了，使用individual_q_evals可能会使用不能执行的动作的Q值
+        # Sum the Q values of local optimal actions  (episode_num, max_episode_len)
+        # Use individual_q_clone here as it modifies Q values for unavailable actions; using individual_q_evals might use Q values of unavailable actions
         q_sum_opt = individual_q_clone.max(dim=-1)[0].sum(dim=-1)
 
-        # 重新得到joint_q_opt_eval，它和joint_q_evals的区别是前者输入的动作是当前局部最优动作，后者输入的动作是当前执行的动作
+        # Recompute joint_q_opt_eval; difference from joint_q_evals is that the former uses current local optimal actions while the latter uses current executed actions
         joint_q_opt_evals, _, _ = self.get_qtran(batch, opt_onehot_eval, hidden_evals, hidden_targets, hat=True)
-        joint_q_opt_evals = torch.gather(joint_q_opt_evals, dim=-1, index=opt_action_eval).squeeze(-1)  # (episode个数, max_episode_len， n_agents)
+        joint_q_opt_evals = torch.gather(joint_q_opt_evals, dim=-1, index=opt_action_eval).squeeze(-1)  # (episode_num, max_episode_len, n_agents)
 
-        # 因为QTRAN-alt要对每个agent都计算l_opt，所以要把q_sum_opt和v再增加一个agent维
+        # Because QTRAN-alt computes l_opt for each agent, need to add an agent dimension to q_sum_opt and v
         q_sum_opt = q_sum_opt.unsqueeze(-1).expand(-1, -1, self.n_agents)
         v = v.unsqueeze(-1).expand(-1, -1, self.n_agents)
-        opt_error = q_sum_opt - joint_q_opt_evals.detach() + v  # 计算l_opt时需要将joint_q_opt_evals固定
+        opt_error = q_sum_opt - joint_q_opt_evals.detach() + v  # Need to fix joint_q_opt_evals when computing l_opt
         l_opt = ((opt_error * mask) ** 2).sum() / mask.sum()
 
         # ---------------------------------------------L_opt------------------------------------------------------------
 
         # ---------------------------------------------L_nopt-----------------------------------------------------------
-        # 因为L_nopt约束的是当前agent所有可执行的动作中，对应的最小的d，为了让不能执行的动作不影响d的计算，将不能执行的动作对应的q变大
+        # Because L_nopt constrains the minimum d among all executable actions of the current agent, to prevent unavailable actions from affecting d calculation, increase q values for unavailable actions
         individual_q_evals[avail_u == 0.0] = 999999
 
-        # 得到agent_i之外的其他agent的执行动作的Q值之和q_other_sum
-        #   1. 先得到每个agent的执行动作的Q值q_all,(episode个数, max_episode_len, n_agents， 1)
+        # Get the sum of Q values q_other_sum for executed actions of agents other than agent_i
+        #   1. First get Q values q_all for each agent's executed action, (episode_num, max_episode_len, n_agents, 1)
         q_all_chosen = torch.gather(individual_q_evals, dim=-1, index=u)
-        #   2. 把q_all最后一个维度上当前agent的Q值变成所有agent的Q值，(episode个数, max_episode_len, n_agents, n_agents)
+        #   2. Transform q_all on the last dimension from current agent's Q value to all agents' Q values, (episode_num, max_episode_len, n_agents, n_agents)
         q_all_chosen = q_all_chosen.view((episode_num, max_episode_len, 1, -1)).repeat(1, 1, self.n_agents, 1)
         q_mask = (1 - torch.eye(self.n_agents)).unsqueeze(0).unsqueeze(0)
         if self.args.cuda:
             q_mask = q_mask.cuda()
-        q_other_chosen = q_all_chosen * q_mask  # 把每个agent自己的Q值置为0，从而才能相加得到其他agent的Q值之和
-        #   3. 求和，同时由于对于当前agent的每个动作，都要和q_other_sum相加，所以把q_other_sum扩展出n_actions维度
+        q_other_chosen = q_all_chosen * q_mask  # Set each agent's own Q value to 0, so that summing gives the sum of other agents' Q values
+        #   3. Sum, and because for each action of the current agent we need to add q_other_sum, expand q_other_sum to n_actions dimension
         q_other_sum = q_other_chosen.sum(dim=-1, keepdim=True).repeat(1, 1, 1, self.n_actions)
 
-        # 当前agent的每个动作的Q和其他agent执行动作的Q相加，得到D中的第一项
+        # Add Q value for each action of current agent with Q values of other agents' executed actions, obtaining the first term in D
         q_sum_nopt = individual_q_evals + q_other_sum
 
-        # 因为joint_q_evals的维度是(episode个数,max_episode_len,n_agents,n_actions)，所以要对v扩展出一个n_actions维度
+        # Because joint_q_evals dimensions are (episode_num, max_episode_len, n_agents, n_actions), need to expand v to include n_actions dimension
         v = v.unsqueeze(-1).expand(-1, -1, -1, self.n_actions)
-        d = q_sum_nopt - joint_q_evals.detach() + v  # 计算l_nopt时需要将qtran_q_evals固定
+        d = q_sum_nopt - joint_q_evals.detach() + v  # Need to fix qtran_q_evals when computing l_nopt
         d = d.min(dim=-1)[0]
         l_nopt = ((d * mask) ** 2).sum() / mask.sum()
         # ---------------------------------------------L_nopt-----------------------------------------------------------
@@ -184,7 +185,7 @@ class QtranAlt:
         episode_num = batch['o'].shape[0]
         q_evals, q_targets, hidden_evals, hidden_targets = [], [], [], []
         for transition_idx in range(max_episode_len):
-            inputs, inputs_next = self._get_individual_inputs(batch, transition_idx)  # 给obs加last_action、agent_id
+            inputs, inputs_next = self._get_individual_inputs(batch, transition_idx)  # Add last_action and agent_id to obs
             if self.args.cuda:
                 inputs = inputs.cuda()
                 self.eval_hidden = self.eval_hidden.cuda()
@@ -194,7 +195,7 @@ class QtranAlt:
             q_target, self.target_hidden = self.target_rnn(inputs_next, self.target_hidden)
             hidden_eval, hidden_target = self.eval_hidden.clone(), self.target_hidden.clone()
 
-            # 把q_eval维度重新变回(8, 5,n_actions)
+            # Reshape q_eval dimensions back to (8, 5, n_actions)
             q_eval = q_eval.view(episode_num, self.n_agents, -1)
             q_target = q_target.view(episode_num, self.n_agents, -1)
             hidden_eval = hidden_eval.view(episode_num, self.n_agents, -1)
@@ -203,8 +204,8 @@ class QtranAlt:
             q_targets.append(q_target)
             hidden_evals.append(hidden_eval)
             hidden_targets.append(hidden_target)
-        # 得的q_eval和q_target是一个列表，列表里装着max_episode_len个数组，数组的的维度是(episode个数, n_agents，n_actions)
-        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        # Obtained q_eval and q_target are lists containing max_episode_len arrays, each array has dimensions (episode_num, n_agents, n_actions)
+        # Convert this list to an array with dimensions (episode_num, max_episode_len, n_agents, n_actions)
         q_evals = torch.stack(q_evals, dim=1)
         q_targets = torch.stack(q_targets, dim=1)
         hidden_evals = torch.stack(hidden_evals, dim=1)
@@ -212,28 +213,28 @@ class QtranAlt:
         return q_evals, q_targets, hidden_evals, hidden_targets
 
     def _get_individual_inputs(self, batch, transition_idx):
-        # 取出所有episode上该transition_idx的经验，u_onehot要取出所有，因为要用到上一条
+        # Extract experiences at transition_idx from all episodes, u_onehot extracts all because previous action is needed
         obs, obs_next, u_onehot = batch['o'][:, transition_idx], \
                                   batch['o_next'][:, transition_idx], batch['u_onehot'][:]
         episode_num = obs.shape[0]
         inputs, inputs_next = [], []
         inputs.append(obs)
         inputs_next.append(obs_next)
-        # 给obs添加上一个动作、agent编号
+        # Add last action and agent ID to obs
         if self.args.last_action:
-            if transition_idx == 0:  # 如果是第一条经验，就让前一个动作为0向量
+            if transition_idx == 0:  # If it's the first experience, set the previous action to a zero vector
                 inputs.append(torch.zeros_like(u_onehot[:, transition_idx]))
             else:
                 inputs.append(u_onehot[:, transition_idx - 1])
             inputs_next.append(u_onehot[:, transition_idx])
         if self.args.reuse_network:
-            # 因为当前的obs三维的数据，每一维分别代表(episode编号，agent编号，obs维度)，直接在dim_1上添加对应的向量
-            # 即可，比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
-            # agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+            # Because current obs is 3D data where each dimension represents (episode_id, agent_id, obs_dim), we can directly add
+            # corresponding vectors on dim_1. For example, add (1, 0, 0, 0, 0) after agent_0, representing agent 0 among 5 agents.
+            # Since agent_0's data is exactly in row 0, the agent ID to be added is exactly an identity matrix, i.e., diagonal is 1, rest is 0
             inputs.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
             inputs_next.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
-        # 要把obs中的三个拼起来，并且要把episode_num个episode、self.args.n_agents个agent的数据拼成40条(40,96)的数据，
-        # 因为这里所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
+        # Concatenate the three parts in obs, and combine data from episode_num episodes and self.args.n_agents agents into 40 pieces of (40,96) data,
+        # because all agents share one neural network here, each data piece carries its own ID, so it's still its own data
         inputs = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs], dim=1)
         inputs_next = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs_next], dim=1)
         return inputs, inputs_next
@@ -245,14 +246,14 @@ class QtranAlt:
         u_onehot = batch['u_onehot'][:, :max_episode_len]
         v_state = s.clone()
 
-        # s和s_next没有n_agents维度，每个agent的joint_q网络都需要, 所以要把s转化成四维
+        # s and s_next don't have n_agents dimension, but each agent's joint_q network needs it, so convert s to 4D
         s = s.unsqueeze(-2).expand(-1, -1, self.n_agents, -1)
         s_next = s_next.unsqueeze(-2).expand(-1, -1, self.n_agents, -1)
-        # 添加agent编号对应的one-hot向量
+        # Add one-hot vector corresponding to agent ID
         '''
-        因为当前的inputs三维的数据，每一维分别代表(episode编号，agent编号，inputs维度)，直接在后面添加对应的向量
-        即可，比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
-        agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+        Because current inputs is 3D data where each dimension represents (episode_id, agent_id, inputs_dim), we can directly add
+        corresponding vectors at the end. For example, add (1, 0, 0, 0, 0) after agent_0, representing agent 0 among 5 agents.
+        Since agent_0's data is exactly in row 0, the agent ID to be added is exactly an identity matrix, i.e., diagonal is 1, rest is 0
         '''
         action_onehot = torch.eye(self.n_agents).unsqueeze(0).unsqueeze(0).expand(episode_num, max_episode_len, -1, -1)
         s_eval = torch.cat([s, action_onehot], dim=-1)
@@ -266,27 +267,27 @@ class QtranAlt:
             hidden_targets = hidden_targets.cuda()
             local_opt_actions = local_opt_actions.cuda()
         if hat:
-            # 神经网络输出的q_eval、q_target的维度为(episode_num * max_episode_len * n_agents, n_actions)
+            # Neural network output q_eval and q_target have dimensions (episode_num * max_episode_len * n_agents, n_actions)
             q_evals = self.eval_joint_q(s_eval, hidden_evals, local_opt_actions)
             q_targets = None
             v = None
 
-            # 把q_eval维度变回(episode_num, max_episode_len, n_agents, n_actions)
+            # Reshape q_eval dimensions back to (episode_num, max_episode_len, n_agents, n_actions)
             q_evals = q_evals.view(episode_num, max_episode_len, -1, self.n_actions)
         else:
             q_evals = self.eval_joint_q(s_eval, hidden_evals, u_onehot)
             q_targets = self.target_joint_q(s_target, hidden_targets, local_opt_actions)
             v = self.v(v_state, hidden_evals)
-            # 把q_eval、q_target维度变回(episode_num, max_episode_len, n_agents, n_actions)
+            # Reshape q_eval and q_target dimensions back to (episode_num, max_episode_len, n_agents, n_actions)
             q_evals = q_evals.view(episode_num, max_episode_len, -1, self.n_actions)
             q_targets = q_targets.view(episode_num, max_episode_len, -1, self.n_actions)
-            # 把v维度变回(episode_num, max_episode_len)
+            # Reshape v dimensions back to (episode_num, max_episode_len)
             v = v.view(episode_num, -1)
 
         return q_evals, q_targets, v
 
     def init_hidden(self, episode_num):
-        # 为每个episode中的每个agent都初始化一个eval_hidden、target_hidden
+        # Initialize eval_hidden and target_hidden for each agent in each episode
         self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim))
         self.target_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim))
 

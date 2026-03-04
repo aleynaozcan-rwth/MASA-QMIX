@@ -41,7 +41,7 @@ class MAVEN:
             self.mi_net.cuda()
 
         self.model_dir = self.args.model_dir + '/' + self.args.alg + '/' + self.args.map
-        # 如果存在模型则加载模型
+        # Load model if it exists
         if self.args.load_model:
             if os.path.exists(self.model_dir + '/rnn_net_params.pkl'):
                 path_z_policy = self.model_dir + '/z_policy_params.pkl'
@@ -57,7 +57,7 @@ class MAVEN:
             else:
                 raise Exception("No model!")
 
-        # 让target_net和eval_net的网络参数相同
+        # Make target_net and eval_net network parameters the same
         self.target_rnn.load_state_dict(self.eval_rnn.state_dict())
         self.target_qmix_net.load_state_dict(self.eval_qmix_net.state_dict())
 
@@ -66,22 +66,22 @@ class MAVEN:
         if self.args.optimizer == "RMS":
             self.optimizer = torch.optim.RMSprop(self.eval_parameters, lr=self.args.lr)
 
-        # 执行过程中，要为每个agent都维护一个eval_hidden
-        # 学习过程中，要为每个episode的每个agent都维护一个eval_hidden、target_hidden
+        # During execution, maintain an eval_hidden for each agent
+        # During learning, maintain eval_hidden and target_hidden for each agent in each episode
         self.eval_hidden = None
         self.target_hidden = None
         print('Init alg MAVEN')
 
-    def learn(self, batch, max_episode_len, train_step, epsilon=None):  # train_step表示是第几次学习，用来控制更新target_net网络的参数
+    def learn(self, batch, max_episode_len, train_step, epsilon=None):  # train_step represents the learning step number, used to control updating target_net network parameters
         '''
-        在learn的时候，抽取到的数据是四维的，四个维度分别为 1——第几个episode 2——episode中第几个transition
-        3——第几个agent的数据 4——具体obs维度。因为在选动作时不仅需要输入当前的inputs，还要给神经网络输入hidden_state，
-        hidden_state和之前的经验相关，因此就不能随机抽取经验进行学习。所以这里一次抽取多个episode，然后一次给神经网络
-        传入每个episode的同一个位置的transition
+        During learning, extracted data is 4D, the four dimensions are: 1-which episode 2-which transition in episode
+        3-which agent's data 4-specific obs dimension. Because action selection requires not only current inputs but also hidden_state from neural network,
+        hidden_state is related to previous experiences, so we cannot randomly sample experiences for learning. Therefore we sample multiple episodes at once, then pass
+        same position transitions from each episode to the neural network at once
         '''
         episode_num = batch['o'].shape[0]
         self.init_hidden(episode_num)
-        for key in batch.keys():  # 把batch里的数据转化成tensor
+        for key in batch.keys():  # Convert batch data to tensor
             if key == 'u':
                 batch[key] = torch.tensor(batch[key], dtype=torch.long)
             else:
@@ -89,9 +89,9 @@ class MAVEN:
         s, s_next, u, r, avail_u, avail_u_next, terminated, z = batch['s'], batch['s_next'], batch['u'], batch['r'],  \
                                                                 batch['avail_u'], batch['avail_u_next'],\
                                                                 batch['terminated'],   batch['z']
-        mask = 1 - batch["padded"].float()  # 用来把那些填充的经验的TD-error置0，从而不让它们影响到学习
+        mask = 1 - batch["padded"].float()  # Used to set TD-error to 0 for padded experiences, preventing them from affecting learning
 
-        # 得到每个agent对应的Q值，维度为(episode个数, max_episode_len， n_agents， n_actions)
+        # Get Q values for each agent, dimensions (episode count, max_episode_len, n_agents, n_actions)
         q_evals, q_targets = self.get_q_values(batch, max_episode_len)
 
         if self.args.cuda:
@@ -129,10 +129,10 @@ class MAVEN:
         # -------------------------------------------------MI Loss------------------------------------------------------
 
         # -------------------------------------------------QL Loss------------------------------------------------------
-        # 取每个agent动作对应的Q值，并且把最后不需要的一维去掉，因为最后一维只有一个值了
+        # Get Q value for each agent's action, and remove the last unnecessary dimension since it only has one value
         q_evals = torch.gather(q_evals, dim=3, index=u).squeeze(3)
 
-        # 得到target_q
+        # Get target_q
         q_targets[avail_u_next == 0.0] = - 9999999
         q_targets = q_targets.max(dim=3)[0]
 
@@ -142,7 +142,7 @@ class MAVEN:
         targets = r + self.args.gamma * q_total_target * (1 - terminated)
 
         td_error = (q_total_eval - targets.detach())
-        masked_td_error = mask * td_error  # 抹掉填充的经验的td_error
+        masked_td_error = mask * td_error  # Erase td_error for padded experiences
 
         ql_loss = (masked_td_error ** 2).sum() / mask.sum()
         # -------------------------------------------------QL Loss------------------------------------------------------
@@ -162,29 +162,29 @@ class MAVEN:
             self.target_qmix_net.load_state_dict(self.eval_qmix_net.state_dict())
 
     def _get_inputs(self, batch, transition_idx):
-        # 取出所有episode上该transition_idx的经验，u_onehot要取出所有，因为要用到上一条
+        # Extract experiences at transition_idx from all episodes, u_onehot extracts all because previous action is needed
         obs, obs_next, u_onehot = batch['o'][:, transition_idx], \
                                   batch['o_next'][:, transition_idx], batch['u_onehot'][:]
         episode_num = obs.shape[0]
         inputs, inputs_next = [], []
         inputs.append(obs)
         inputs_next.append(obs_next)
-        # 给obs添加上一个动作、agent编号
+        # Add last action and agent ID to obs
 
         if self.args.last_action:
-            if transition_idx == 0:  # 如果是第一条经验，就让前一个动作为0向量
+            if transition_idx == 0:  # If it's the first experience, set previous action to zero vector
                 inputs.append(torch.zeros_like(u_onehot[:, transition_idx]))
             else:
                 inputs.append(u_onehot[:, transition_idx - 1])
             inputs_next.append(u_onehot[:, transition_idx])
         if self.args.reuse_network:
-            # 因为当前的obs三维的数据，每一维分别代表(episode编号，agent编号，obs维度)，直接在dim_1上添加对应的向量
-            # 即可，比如给agent_0后面加(1, 0, 0, 0, 0)，表示5个agent中的0号。而agent_0的数据正好在第0行，那么需要加的
-            # agent编号恰好就是一个单位矩阵，即对角线为1，其余为0
+            # Since current obs is 3D data where each dimension represents (episode ID, agent ID, obs dimension), we can directly add the corresponding vector on dim_1
+            # For example, add (1, 0, 0, 0, 0) after agent_0, representing agent 0 out of 5 agents. Since agent_0 data is exactly in row 0, the agent ID to add
+            # is exactly an identity matrix, i.e., diagonal is 1, rest is 0
             inputs.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
             inputs_next.append(torch.eye(self.args.n_agents).unsqueeze(0).expand(episode_num, -1, -1))
-        # 要把obs中的三个拼起来，并且要把episode_num个episode、self.args.n_agents个agent的数据拼成40条(40,96)的数据，
-        # 因为这里所有agent共享一个神经网络，每条数据中带上了自己的编号，所以还是自己的数据
+        # Concatenate the three parts in obs, and combine episode_num episodes and self.args.n_agents agents data into 40 rows of (40, 96) data,
+        # Since all agents share one neural network here, each data row contains its own ID, so it's still its own data
         inputs = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs], dim=1)
         inputs_next = torch.cat([x.reshape(episode_num * self.args.n_agents, -1) for x in inputs_next], dim=1)
         return inputs, inputs_next
@@ -204,19 +204,19 @@ class MAVEN:
             q_eval, self.eval_hidden = self.eval_rnn(inputs, self.eval_hidden, z)
             q_target, self.target_hidden = self.target_rnn(inputs_next, self.target_hidden, z)
 
-            # 把q_eval维度重新变回(8, 5,n_actions)
+            # Reshape q_eval dimension back to (8, 5, n_actions)
             q_eval = q_eval.view(episode_num, self.n_agents, -1)
             q_target = q_target.view(episode_num, self.n_agents, -1)
             q_evals.append(q_eval)
             q_targets.append(q_target)
-        # 得的q_eval和q_target是一个列表，列表里装着max_episode_len个数组，数组的的维度是(episode个数, n_agents，n_actions)
-        # 把该列表转化成(episode个数, max_episode_len， n_agents，n_actions)的数组
+        # The resulting q_eval and q_target are lists containing max_episode_len arrays, each array has dimension (episode count, n_agents, n_actions)
+        # Convert this list to (episode count, max_episode_len, n_agents, n_actions) array
         q_evals = torch.stack(q_evals, dim=1)
         q_targets = torch.stack(q_targets, dim=1)
         return q_evals, q_targets
 
     def init_hidden(self, episode_num):
-        # 为每个episode中的每个agent都初始化一个eval_hidden、target_hidden
+        # Initialize eval_hidden and target_hidden for each agent in each episode
         self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim))
         self.target_hidden = torch.zeros((episode_num, self.n_agents, self.args.rnn_hidden_dim))
 

@@ -2,9 +2,8 @@
 import numpy as np
 # =============================================================
 # MARL/policy/qmix.py
-# Step 8A.7.6 – MASA-QMIX Replay-Aware Learning + Safe AutoSave
 # -------------------------------------------------------------
-# - Compatible with MASAEnv (6D obs, 64D state)
+# - Compatible with MASAEnv 
 # - Double-Q with target sync
 # - Guaranteed checkpoint save to ./MARL/model/qmix/masa_schedule/
 # ------------------------------------------------------------
@@ -195,8 +194,7 @@ class QMIX:
         # ======================================================
         # === Safe Auto-Save Checkpoint (every 100 steps) ======
         # ======================================================
-        # [C1] Checkpoint saves are CRITICAL - fail-fast if save fails
-        # [PHASE6-FIX] Task 6.5: Atomic checkpoint save with validation
+
         if (train_step + 1) % 100 == 0 or train_step == (self.args.train_steps - 1):
             rnn_path = os.path.join(self.model_dir, "rnn_net_params.pkl")
             mix_path = os.path.join(self.model_dir, "qmix_net_params.pkl")
@@ -234,7 +232,7 @@ class QMIX:
                 raise RuntimeError(f"[PHASE6] Checkpoint save failed at step {train_step + 1}: {e}") from e
 
         # --- Logging ---
-        # [C1] Loss/TD logging - best effort (Rule 3), diagnostics are informational only
+
         # Compute avg_q and avg_reward for return value
         avg_q = float(q_total_eval.mean().detach().cpu().item())
         # Compute average reward from this batch (for training metrics)
