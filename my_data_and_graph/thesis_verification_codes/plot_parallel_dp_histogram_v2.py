@@ -215,7 +215,7 @@ def plot_parallel_histogram():
     print(f"  Number of bins: {len(bin_data)}")
     
     # Create figure
-    fig, ax = plt.subplots(figsize=(24, 10))
+    fig, ax = plt.subplots(figsize=(24, 8))
     
     # Prepare bin data for stacked bars
     bin_indices = sorted(bin_data.keys())
@@ -258,7 +258,7 @@ def plot_parallel_histogram():
     # Styling
     ax.set_xlabel('Episode Range', fontsize=14, fontweight='bold')
     ax.set_ylabel('Number of Parallel Decision Points', fontsize=14, fontweight='bold')
-    ax.set_title('Parallel Decision Points - Agent Count Distribution\n(Grouped by 10-Episode Bins)', 
+    ax.set_title('Parallel Decision Points - Agent Count Distribution (Grouped by 10-Episode Bins)', 
                  fontsize=16, fontweight='bold', pad=20)
     
     ax.set_xticks(x_pos[::5])  # Show every 5th label

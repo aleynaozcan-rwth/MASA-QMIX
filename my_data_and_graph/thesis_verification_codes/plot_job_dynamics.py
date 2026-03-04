@@ -94,8 +94,7 @@ line3 = ax.plot(time_points, current_count, linewidth=3.5,
 # Labels and title
 ax.set_xlabel('Time', fontsize=20, fontweight='heavy')
 ax.set_ylabel('Number of Jobs', fontsize=20, fontweight='heavy')
-ax.set_title('Agent Lifecycle\n(Episode 10)', 
-             fontsize=24, fontweight='bold', pad=20)
+ax.set_title('', fontsize=24, fontweight='bold', pad=20)
 
 # Grid
 ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
@@ -122,19 +121,19 @@ for idx, arrival in enumerate(arrivals):
         # Horizontal annotation below the line for first arrival (4 jobs)
         ax.annotate(job_text, 
                     xy=(arrival_time, arrived_count),
-                    xytext=(5, -8), textcoords='offset points',
-                    ha='left', va='top', fontsize=10,
+                    xytext=(10, -8), textcoords='offset points',
+                    ha='left', va='top', fontsize=13,
                     rotation=0, color='#7B1FA2', fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                    bbox=dict(boxstyle='round,pad=0.6', facecolor='white', 
                              edgecolor='#7B1FA2', alpha=0.8, linewidth=0.5))
     else:
         # Horizontal annotation for other arrivals
         ax.annotate(job_text, 
                     xy=(arrival_time, arrived_count),
                     xytext=(0, 8), textcoords='offset points',
-                    ha='center', va='bottom', fontsize=10,
+                    ha='center', va='bottom', fontsize=13,
                     rotation=0, color='#7B1FA2', fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                    bbox=dict(boxstyle='round,pad=0.6', facecolor='white', 
                              edgecolor='#7B1FA2', alpha=0.8, linewidth=0.5))
 
 # Add vertical lines for departure times with job annotations
@@ -155,9 +154,9 @@ for completion in completions:
     ax.annotate(job, 
                 xy=(departure_time, departed_count),
                 xytext=(0, -8), textcoords='offset points',
-                ha='center', va='top', fontsize=10,
+                ha='center', va='top', fontsize=13,
                 rotation=0, color='#E65100', fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                bbox=dict(boxstyle='round,pad=0.6', facecolor='white', 
                          edgecolor='#E65100', alpha=0.8, linewidth=0.5))
 
 # Add horizontal lines for current job count levels

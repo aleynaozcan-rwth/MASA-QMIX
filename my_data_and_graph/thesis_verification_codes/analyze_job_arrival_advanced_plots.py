@@ -93,7 +93,7 @@ kde_values = kde(all_inter_arrival_times, x_kde, bandwidth)
 # Theoretical exponential PDF
 theoretical_pdf = lambda_rate * np.exp(-lambda_rate * x_kde)
 
-fig, ax = plt.subplots(figsize=(16, 10))
+fig, ax = plt.subplots(figsize=(16, 7))
 
 # Calculate CV values
 empirical_cv = np.std(all_inter_arrival_times) / np.mean(all_inter_arrival_times)

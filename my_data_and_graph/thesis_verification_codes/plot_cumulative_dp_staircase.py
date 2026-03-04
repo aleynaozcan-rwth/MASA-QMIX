@@ -131,8 +131,8 @@ for t in standard_times[1:]:
 
 ax.set_xlabel('Continuous Time', fontsize=16, fontweight='heavy')
 ax.set_ylabel('Cumulative Decision Points', fontsize=16, fontweight='heavy')
-ax.set_title(f'Cumulative Decision Points: Event-Driven vs Fixed Intervals\n(Episode {episode_to_plot})', 
-             fontsize=16, fontweight='bold', pad=20)
+ax.set_title(f'Cumulative Decision Points: Event-Driven vs Fixed Intervals (Episode {episode_to_plot})', 
+             fontsize=18, fontweight='bold', pad=20)
 
 ax.set_xlim(0, 25)
 ax.set_ylim(0, max(len(dp_timestamps), standard_dp_count) + 2)
@@ -155,11 +155,12 @@ for t in well_spaced_timestamps:
     y_pos = sum(1 for dp_t in dp_timestamps if dp_t <= t)
     
     # Add annotation above the vertical line
+    x_offset = 22 if abs(t - 17.93) < 1e-9 else 0
     ax.annotate(f'{t:.2f}', 
                 xy=(t, y_pos), 
-                xytext=(0, 8),  # 8 points above
+                xytext=(x_offset, 8),  # Slight right shift for 17.93
                 textcoords='offset points',
-                fontsize=9, 
+                fontsize=11, 
                 ha='center', 
                 va='bottom',
                 color='#2E86C1', 
@@ -188,9 +189,9 @@ for t in standard_annotated:
     # Add annotation above the vertical line
     ax.annotate(f'{t:.1f}', 
                 xy=(t, y_pos), 
-                xytext=(0, 8),  # 8 points above
+                xytext=(8, 0),  # Slightly right and lower
                 textcoords='offset points',
-                fontsize=9, 
+                fontsize=11, 
                 ha='center', 
                 va='bottom',
                 color='#E74C3C', 
@@ -209,7 +210,7 @@ info_lines = [
 
 handles, labels = ax.get_legend_handles_labels()
 handles.extend(info_lines)
-ax.legend(handles=handles, loc='upper left', fontsize=12, framealpha=0.95)
+ax.legend(handles=handles, loc='upper left', fontsize=14, framealpha=0.95)
 
 plt.tight_layout()
 

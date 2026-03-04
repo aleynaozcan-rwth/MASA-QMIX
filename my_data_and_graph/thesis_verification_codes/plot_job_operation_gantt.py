@@ -200,7 +200,7 @@ op_colors = {
 }
 
 # Create Gantt chart
-fig, ax = plt.subplots(figsize=(24, 12))
+fig, ax = plt.subplots(figsize=(24, 8))
 
 # Each job gets a horizontal row
 # X-axis: continuous time (arrival time + operation sequence)
@@ -280,7 +280,7 @@ for arrival_time in unique_arrival_times:
 # Set axis properties
 ax.set_xlabel('Continuous Time (Job Arrival)', fontsize=22, fontweight='heavy')
 ax.set_ylabel('Job Index', fontsize=22, fontweight='heavy')
-ax.set_title('Job Operation Sequences in Continuous Time\n(Episode 10)', 
+ax.set_title('Job Operation Sequences in Continuous Time (Episode 10)', 
              fontsize=28, fontweight='bold', pad=20)
 
 # X-axis: show arrival times
