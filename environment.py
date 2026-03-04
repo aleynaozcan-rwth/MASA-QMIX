@@ -1027,7 +1027,11 @@ class MASAEnv:
                         obs_vec = self._build_agent_obs(job)
                         allowed_machine_indices_log = []
                         avail_actions_log = []
-                        print(f"[DEBUG] Job {job.id} completed, logging status: {job_status} to decision_observation_metrics.csv")
+                        LOG.debug(
+                            "[DEBUG] Job %s completed, logging status=%s to decision_observation_metrics.csv",
+                            job.id,
+                            job_status,
+                        )
                         self._write_observation_log(
                             now_t,
                             job.id,
@@ -1105,10 +1109,11 @@ class MASAEnv:
                 self.decisions_ready.succeed()
 
             chosen_idx = (yield resume_evt)
-            # Eğer iş tamamlandıysa, karar noktasına gelmesin ve log yazılmasın
+            # If the job is already complete, skip decision handling and logging.
             if job.finished:
                 continue
-            # Eğer agent aksiyon seçemedi (chosen_idx == -1), job beklesin ve bir sonraki decision pointte tekrar denesin
+            # If the agent cannot choose an action (chosen_idx == -1),
+            # keep the job waiting and retry at the next decision point.
             if chosen_idx is None or int(chosen_idx) == -1:
                 # Log: No valid action, job waits
                 decision_time = float(self.env.now)
@@ -1122,7 +1127,7 @@ class MASAEnv:
                 obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
                 state_vec = self._build_global_state()
                 job_status = "Completed" if job.finished else "WIP"
-                action_idx = -1  # Güvenli default
+                action_idx = -1  # Safe default
                 if not job.finished:
                     self._write_observation_log(
                         decision_time,
@@ -1142,8 +1147,8 @@ class MASAEnv:
                     job.current_op_idx,
                     state_vec
                 )
-                # Loglama fonksiyonuna reason ekle
-                # scheduling_trace.csv için reason: no_valid_action_job_waits
+                # Include reason in scheduling trace logging.
+                # scheduling_trace.csv reason: no_valid_action_job_waits
                 if hasattr(self, '_write_scheduling_trace_log'):
                     self._write_scheduling_trace_log(
                         decision_time,
@@ -1154,10 +1159,10 @@ class MASAEnv:
                         None,
                         'no_valid_action_job_waits'
                     )
-                # Job beklesin (ör: 1 simpy time unit)
+                # Keep the job waiting (example: 1 SimPy time unit)
                 wait_duration = 1.0
                 yield self.env.timeout(wait_duration)
-                # Wait time biriktir: her bekletilen adımda wait_time ve total_wait_time'a ekle
+                # Accumulate wait time on every waiting step.
                 job.wait_time += wait_duration
                 self.total_wait_time += wait_duration
                 # Track per-job wait time
@@ -1167,10 +1172,14 @@ class MASAEnv:
                 continue
             
             # ===================== DECISION LOGGING =====================
-            # Fail-safe: Eğer agent maskte 0 olan bir aksiyonu seçtiyse, job beklesin ve tekrar denesin
+            # Fail-safe: if the agent chooses an action masked as unavailable,
+            # keep the job waiting and retry.
             if 'action_idx' in locals() and action_idx >= 0 and action_idx < len(avail_actions_log):
                 if avail_actions_log[action_idx] == 0:
-                    print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={action_idx}) according to mask. Job will wait and retry.")
+                    LOG.warning(
+                        "[FAIL-SAFE] Agent selected unavailable machine index=%s according to mask. Job will wait and retry.",
+                        action_idx,
+                    )
                     job_status = "Completed" if job.finished else "WIP"
                     self._write_observation_log(
                         decision_time,
@@ -1230,20 +1239,20 @@ class MASAEnv:
 
                 # Action chosen by agent
                 action_idx = int(chosen_idx)
-                # Seçilen aksiyonun gerçekten uygulanabilirliğini kontrol et
+                # Verify that the selected action is actually feasible.
                 action_failed = False
                 fail_reason = ''
                 chosen_machine_name = None
                 if action_idx >= 0 and action_idx < len(avail_actions_log):
-                    # Makine ve operatör uygun mu?
+                    # Check machine and operator feasibility.
                     mlist = self.workcenters_meta.machine_list if hasattr(self.workcenters_meta, 'machine_list') else list(range(len(avail_actions_log)))
                     mname = mlist[action_idx] if action_idx < len(mlist) else str(action_idx)
-                    # Makine busy mi?
+                    # Is the machine busy?
                     m_busy = False
                     if self.machine_resources and 0 <= action_idx < len(self.machine_resources):
                         res = self.machine_resources[action_idx]
                         m_busy = len(res.users) > 0
-                    # Operatör uygun mu?
+                    # Is a qualified operator available?
                     op_ok = False
                     if self.operators is not None:
                         registry = self.workcenters_meta.machine_registry or {}
@@ -1260,17 +1269,17 @@ class MASAEnv:
                     if action_idx == -1:
                         fail_reason = 'machine_not_available'
                         chosen_machine_name = None
-                # Loglama fonksiyonuna reason ve bekleme süresi ekle
-                # ...existing code...
-                # DEBUG: action_idx ve maski yan yana yazdır
-                print(f"[DEBUG] action_idx: {action_idx}, avail_actions_log: {avail_actions_log}")
+                # Log action/mask diagnostics at debug level.
+                LOG.debug("[Decision] action_idx=%s, avail_actions=%s", action_idx, avail_actions_log)
                 if action_idx < len(avail_actions_log):
-                    print(f"[DEBUG] Selected machine mask value: {avail_actions_log[action_idx]}")
+                    LOG.debug("[Decision] selected_machine_mask=%s", avail_actions_log[action_idx])
                     if avail_actions_log[action_idx] == 0:
-                        print(f"[WARNING] Agent selected a machine (idx={action_idx}) that is not available according to mask!")
-                # DEBUG: allowed_machine_indices_log ve avail_actions_log'u yan yana yazdır
-                print(f"[DEBUG] allowed_machine_indices_log: {allowed_machine_indices_log}")
-                print(f"[DEBUG] avail_actions_log: {avail_actions_log}")
+                        LOG.warning(
+                            "[Decision] Agent selected an unavailable machine index=%s according to mask.",
+                            action_idx,
+                        )
+                LOG.debug("[Decision] allowed_machine_indices=%s", allowed_machine_indices_log)
+                LOG.debug("[Decision] avail_actions=%s", avail_actions_log)
 
                 # Observation for this job
                 obs_vec = self._build_agent_obs(job, allowed_machine_indices=allowed_machine_indices_log)
@@ -1301,7 +1310,11 @@ class MASAEnv:
                 )
 
             except Exception as e:
-                print(f"[LOGGING ERROR] Could not write decision logs for job {getattr(job, 'id', '?')}: {e}")
+                LOG.exception(
+                    "[LOGGING ERROR] Could not write decision logs for job %s: %s",
+                    getattr(job, 'id', '?'),
+                    e,
+                )
             # ================== END DECISION LOGGING =====================
                 
             # C13 FIX: Strict machine index validation
@@ -1316,10 +1329,14 @@ class MASAEnv:
                     f"[0, {n_machines}). Job={job.id}, op_idx={job.current_op_idx}, "
                     f"t={float(self.env.now):.2f}"
                 )
-            # MASK ELIGIBILITY FAIL-SAFE: Eğer agent maskte 0 olan bir aksiyonu seçtiyse, job beklesin ve tekrar denesin
+            # Mask-eligibility fail-safe: if the agent chooses an unavailable
+            # action (mask value 0), keep the job waiting and retry.
             if chosen_idx_int >= 0 and chosen_idx_int < len(avail_actions_log):
                 if avail_actions_log[chosen_idx_int] == 0:
-                    print(f"[FAIL-SAFE] Agent selected unavailable machine (idx={chosen_idx_int}) according to mask. Job will wait and retry.")
+                    LOG.warning(
+                        "[FAIL-SAFE] Agent selected unavailable machine index=%s according to mask. Job will wait and retry.",
+                        chosen_idx_int,
+                    )
                     job_status = "Completed" if job.finished else "WIP"
                     if not job.finished:
                         self._write_observation_log(
@@ -1786,7 +1803,7 @@ class MASAEnv:
                         self.active_jobs.remove(job)
                     if job in self.active_agents:
                         self.active_agents.remove(job)
-                    # Completed status observation logu
+                    # Completed-status observation log
                     obs = self._build_agent_obs(job)
                     allowed_machine_indices = []
                     idx = job.current_op_idx - 1
@@ -1840,7 +1857,7 @@ class MASAEnv:
         avail_actions, action_idx, obs, job_status
     ):
         """Append to decision_observation_metrics.csv (observation + job_status)."""
-        # Kesin koruma: Eğer iş tamamlandıysa logu atla
+        # Strict guard: skip logging for completed jobs.
         if job_status == "Completed":
             return
         log_dir = os.path.join("my_data_and_graph", "historydata")
@@ -1864,7 +1881,7 @@ class MASAEnv:
             "job_status",
         ]
 
-        # Maskı her zaman string olarak yaz ve free_machine_count'u masktan hesapla
+        # Always write mask as a string and derive free_machine_count from it.
         if isinstance(avail_actions, (np.ndarray, list)):
             mask_list = list(avail_actions)
         else:
@@ -1877,7 +1894,7 @@ class MASAEnv:
         mask_str = str(mask_list)
         free_machine_count = float(sum([1 for x in mask_list if x == 1]))
 
-        # Finished flag: 1 (bitmiş iş, action_idx=-1 ve job_status=Completed), 0 (diğer tüm durumlar)
+        # Finished flag: 1 for completed jobs (action_idx=-1 and status Completed), else 0.
         finished_flag = 1 if (action_idx == -1 and job_status == "Completed") else 0
         def to_native(val):
             # Convert numpy types to native Python types
@@ -2249,7 +2266,7 @@ class MASAEnv:
 
         # Console-friendly lifecycle debug print
         jname = getattr(job, 'name', None) if hasattr(job, 'name') else f"Job_{job.id}"
-        print(f"[Lifecycle] New job added: {jname} | total_jobs={len(self.jobs)}")
+        LOG.info("[Lifecycle] New job added: %s | total_jobs=%s", jname, len(self.jobs))
 
         # Capacity enforcement
         capacity = self.max_active_agents or self.num_jobs or self.args.n_agents
@@ -2282,7 +2299,11 @@ class MASAEnv:
                     tf.write(f"[Lifecycle] t={self.env.now:.2f} | Active={len(active_jobs)} Pending={len(pending_jobs)} Completed={len(completed_jobs)} / Total={len(self.jobs)}\n")
                     
                     if len(active_jobs) > self.max_active_agents:
-                        print(f"[WARN] Max active agents exceeded: {len(active_jobs)} > {self.max_active_agents}")
+                        LOG.warning(
+                            "[WARN] Max active agents exceeded: %s > %s",
+                            len(active_jobs),
+                            self.max_active_agents,
+                        )
             else:
                 # queue for later start
                 self.pending_jobs.append(job)
@@ -2372,7 +2393,7 @@ class MASAEnv:
             self.add_job(ops, start_immediately=True, set_arrival_zero=True)
             # Track arrived jobs for global state
             self.total_jobs_arrived += 1
-            # self.total_ops_arrived += len(ops)  # Fazla sayımı engellemek için kaldırıldı
+            # self.total_ops_arrived += len(ops)  # Removed to prevent double counting
 
     # NOTE: dynamic arrivals and internal job generator loops removed.
     # Dynamic job arrival behavior should be provided by an external

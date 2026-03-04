@@ -1,4 +1,4 @@
-# Python cache ve IDE dosyaları
+# Python cache and IDE files
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
@@ -6,14 +6,14 @@ __pycache__/
 .idea/
 .DS_Store
 
-# Model checkpoint ve ağırlıkları commit etme
+# Model checkpoint and weights commit
 MARL/model/**/*.pkl
 
-# Sadece gereksiz temp/ara dosyaları ignore et
+# Ignore only unnecessary temp/intermediate files
 *.log
 my_data_and_graph/historydata/scheduleresults.txt
 
-# Ignore büyük CSV dosyaları (100MB+ GitHub limiti)
+# Ignore big CSV files (100MB+ GitHub limit)
 my_data_and_graph/historydata/decision_observation_metrics.csv
 my_data_and_graph/historydata/decision_state_metrics.csv
 
